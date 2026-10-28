@@ -42,6 +42,32 @@ OPENROUTER_API_KEY=your-openrouter-key
 
 The server must support the native `state`/`questions` → `answers` decision protocol. llama.cpp provides this at [`/v1/systemone`](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md#post-v1systemone-typesafe-compatible-system-one-api) for native decision models. An OpenAI-compatible `/v1/chat/completions` endpoint alone does not implement this protocol.
 
+## Spoken answers
+
+Optionally generate a short reply for TTS after state lookup or command execution. This uses a separate chat model; it does not synthesize audio. Leave `ANSWER_URL` and `ANSWER_MODEL` blank to keep the existing behavior.
+
+For a local llama.cpp server running a text/chat model:
+
+```dotenv
+ANSWER_URL=http://localhost:8322/v1/chat/completions
+ANSWER_MODEL=your-local-chat-model-id
+ANSWER_API_KEY=
+```
+
+Use your answer server's port. This can be independent of the decider server on port 8321. For OpenRouter:
+
+```dotenv
+ANSWER_URL=https://openrouter.ai/api/v1/chat/completions
+ANSWER_MODEL=your-provider/model-id
+ANSWER_API_KEY=your-openrouter-key
+```
+
+These full endpoint URLs use the chat-completions format supported by [llama.cpp](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md) and [OpenRouter](https://openrouter.ai/docs/api/api-reference/chat/create-a-chat-completion). `ANSWER_API_KEY` is optional for unauthenticated servers; `OPENROUTER_API_KEY` is a fallback only for the `openrouter.ai` host. The decider's model and key are independent.
+
+Run `prototype.py` as usual. Output adds `answer: …`; `--json` adds `answer`, `usage.answer`, and `timings_ms.answer`. The model receives the original request, final service/domain/area/target, and selected state data or execution status/arguments/errors. It receives no entity/tool catalog or classifier scores. Instructions request one or two sentences in the user's language and distinguish completed, skipped, and failed commands.
+
+Configuration is validated before contacting HA. Generation failures produce `answer_error` and a nonzero exit code while preserving the device execution result. No action or answer request is automatically retried; do not rerun a relative action just to regenerate its reply.
+
 ## Select a service and target
 
 ```bash

@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 from dotenv import load_dotenv
 
 from numeric_values import INSTRUCTIONS as NUMERIC_INSTRUCTIONS, decode_numeric, finite_number, numeric_request
+from tts_answer import answer_config, generate_answer
 
 CONTEXT_URI = "homeassistant://assist/context-snapshot"
 CONTEXT_TOOLS = ("assist__GetLiveContext", "homeassistant__GetLiveContext", "GetLiveContext")
@@ -534,6 +535,10 @@ def print_result(result):
             print(f"arguments: {json.dumps(execution['arguments'], ensure_ascii=False)}")
         if "reason" in execution or "error" in execution:
             print(f"result: {execution.get('reason') or execution['error']}")
+    if "answer" in result:
+        print(f"answer: {result['answer']}")
+    if "answer_error" in result:
+        print(f"answer error: {result['answer_error']}")
     if "state_info" not in result:
         return
     if not result["state_info"]:
@@ -579,13 +584,14 @@ async def run():
         parser.error("Provide a nonempty prompt or use --inspect.")
     load_dotenv(Path(__file__).with_name(".env"))
     api_key = decider_api_key() if not args.inspect else None
+    answer_settings = answer_config() if not args.inspect else None
     started = perf_counter()
     url, token = setting("HA_MCP_URL"), setting("HA_TOKEN")
     async with mcp_session(url, token) as session:
-        return await process_request(args, api_key, session, started)
+        return await process_request(args, api_key, session, started, answer_settings)
 
 
-async def process_request(args, api_key, session, started):
+async def process_request(args, api_key, session, started, answer_settings=None):
     inspection = await inspect_mcp(session)
     fetched = perf_counter()
     if args.inspect:
@@ -686,12 +692,19 @@ async def process_request(args, api_key, session, started):
                     "error": f"MCP call failed; device outcome unconfirmed: {error_message(error)}",
                 }
             result["timings_ms"]["execution"] = round((perf_counter() - execution_started) * 1000)
+    if answer_settings:
+        answer_started = perf_counter()
+        try:
+            result["answer"], result["usage"]["answer"] = await generate_answer(result, answer_settings)
+        except Exception as error:
+            result["answer_error"] = error_message(error)
+        result["timings_ms"]["answer"] = round((perf_counter() - answer_started) * 1000)
     result["timings_ms"]["total"] = round((perf_counter() - started) * 1000)
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:
         print_result(result)
-    return 1 if result.get("execution", {}).get("status") == "error" else 0
+    return 1 if result.get("execution", {}).get("status") == "error" or "answer_error" in result else 0
 
 
 if __name__ == "__main__":

@@ -123,7 +123,8 @@ def numeric_case(parameter="temperature", currents=(20.5,), mode="relative", sco
 
 class PrototypeTests(unittest.TestCase):
     def run_cli(self, responses, inspection=INSPECTION, json_output=True,
-                prompt="turn off the lights in the office", executor=None, exit_code=0, area_choice="no_area"):
+                prompt="turn off the lights in the office", executor=None, exit_code=0, area_choice="no_area",
+                answer_settings=None):
         inspector = AsyncMock(return_value=inspection)
         responses = list(responses)
         if len(responses) > 1:
@@ -144,6 +145,7 @@ class PrototypeTests(unittest.TestCase):
         with (
             patch.object(sys, "argv", argv),
             patch("prototype.load_dotenv"),
+            patch("prototype.answer_config", return_value=answer_settings),
             patch("prototype.setting", return_value="test-credential"),
             patch("prototype.mcp_session", new=connection),
             patch("prototype.inspect_mcp", new=inspector),
@@ -153,6 +155,54 @@ class PrototypeTests(unittest.TestCase):
         ):
             self.assertEqual(asyncio.run(run()), exit_code)
         return output.getvalue(), inspector, decider
+
+    def test_answer_generation_is_disabled_without_configuration(self):
+        with patch("prototype.generate_answer", new_callable=AsyncMock) as generator:
+            output, _, _ = self.run_cli([service_response(), response()])
+        generator.assert_not_awaited()
+        self.assertNotIn("answer", json.loads(output))
+
+    def test_query_answer_receives_selected_cached_state(self):
+        with patch("prototype.generate_answer", new_callable=AsyncMock,
+                   return_value=("The desk lamp is off.", {"completion_tokens": 7})) as generator:
+            output, _, _ = self.run_cli(
+                [service_response("query_state"), response()], answer_settings={"model": "small"},
+                prompt="Is the desk lamp off?",
+            )
+        result = json.loads(output)
+        self.assertEqual(result["answer"], "The desk lamp is off.")
+        self.assertEqual(result["usage"]["answer"], {"completion_tokens": 7})
+        self.assertIn("answer", result["timings_ms"])
+        self.assertEqual(generator.await_args.args[0]["state_info"][0]["state"], "off")
+        self.assertNotIn("execution", result)
+
+    def test_answer_generation_runs_after_execution(self):
+        executor = AsyncMock(return_value={"status": "completed", "arguments": {"name": "Desk lamp"}})
+        async def reply(result, config):
+            executor.assert_awaited_once()
+            self.assertEqual(result["execution"]["status"], "completed")
+            return "The lamp has been turned off.", {}
+        with patch("prototype.generate_answer", new=reply):
+            output, _, _ = self.run_cli(
+                [service_response(), response()], answer_settings={"model": "small"},
+                executor=executor, json_output=False,
+            )
+        self.assertIn("answer: The lamp has been turned off.", output)
+
+    def test_answer_failure_preserves_execution_and_does_not_repeat_action(self):
+        executor = AsyncMock(return_value={"status": "completed", "arguments": {"name": "Desk lamp"}})
+        with patch("prototype.generate_answer", new_callable=AsyncMock,
+                   side_effect=ValueError("Answer endpoint HTTP 503")) as generator:
+            output, _, _ = self.run_cli(
+                [service_response(), response()], answer_settings={"model": "small"},
+                executor=executor, exit_code=1,
+            )
+        result = json.loads(output)
+        executor.assert_awaited_once()
+        generator.assert_awaited_once()
+        self.assertEqual(result["execution"]["status"], "completed")
+        self.assertEqual(result["answer_error"], "Answer endpoint HTTP 503")
+        self.assertNotIn("answer", result)
 
     def test_tool_and_resource_context_preserve_aliases_and_state(self):
         entities = parse_entities(INSPECTION)

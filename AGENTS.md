@@ -23,6 +23,7 @@
 - State questions can select `query_state`, using cached states/attributes with no service. Domain and target selection still run; `other` remains separate.
 - State-query output displays cached values/attributes; area queries list matching entities in the selected domain. JSON includes `state_info`.
 - Default output is a short summary including the area filter; `--json` includes all stages' scores, alternatives, usage and timings.
+- Optional `tts_answer.py` generates spoken text after state lookup/execution via independent `ANSWER_URL`, `ANSWER_MODEL`, `ANSWER_API_KEY` chat-completions settings. Blank URL/model disables it. Send only final selections and selected state/execution facts, not the entity/tool catalog or classifier scores. Answer failures preserve the execution outcome and never retry the action.
 - Run offline checks: `python -m unittest -v`.
 - Isolated numeric experiment: `python numeric_probe.py "Set brightness to 55%" --expected 55`. See `numeric_probe.md`; keep probe CLI/debugging behavior separate from normal execution.
 - Classifier choices use snapshot-local IDs for entities and areas, not HA registry IDs. Room-wide requests select areas; specific device requests select entities.
