@@ -7,7 +7,7 @@ import unittest
 from contextlib import redirect_stdout
 from unittest.mock import AsyncMock, patch
 
-from prototype import decision_request, parse_entities, run, selection_result
+from prototype import decision_request, parse_entities, run, selection_result, service_request
 
 
 CONTEXT = """Live Context: An overview of the areas and the devices in this smart home:
@@ -20,7 +20,13 @@ CONTEXT = """Live Context: An overview of the areas and the devices in this smar
   state: 'on'
   areas: Bedroom
 """
-INSPECTION = {"context": json.dumps({"success": True, "result": CONTEXT})}
+INSPECTION = {
+    "context": json.dumps({"success": True, "result": CONTEXT}),
+    "tools": [
+        {"name": "assist__HassTurnOn", "description": "Turn on a device", "inputSchema": {}},
+        {"name": "assist__HassTurnOff", "description": "Turn off a device", "inputSchema": {}},
+    ],
+}
 
 
 def response(choice="entity_001"):
@@ -40,7 +46,40 @@ def response(choice="entity_001"):
     }
 
 
+def service_response(tool="assist__HassTurnOff", domain="light"):
+    tool_scores = dict.fromkeys(("assist__HassTurnOn", "assist__HassTurnOff", "query_state", "other"), 0.1)
+    tool_scores[tool] = 0.7
+    domain_scores = {"light": 0.1, "other": 0.1}
+    domain_scores[domain] = 0.9
+    return {
+        "answers": {
+            "service": {"type": "choice", "choice": tool, "confidence": 0.65, "probabilities": tool_scores},
+            "domain": {"type": "choice", "choice": domain, "confidence": 0.75, "probabilities": domain_scores},
+        },
+        "usage": {"cost": 0.00003},
+    }
+
+
 class PrototypeTests(unittest.TestCase):
+    def run_cli(self, responses, inspection=INSPECTION, json_output=True,
+                prompt="turn off the lights in the office"):
+        inspector = AsyncMock(return_value=inspection)
+        decider = AsyncMock(side_effect=responses)
+        output = io.StringIO()
+        argv = ["prototype.py", prompt]
+        if json_output:
+            argv.append("--json")
+        with (
+            patch.object(sys, "argv", argv),
+            patch("prototype.load_dotenv"),
+            patch("prototype.setting", return_value="test-credential"),
+            patch("prototype.inspect_mcp", new=inspector),
+            patch("prototype.call_decider", new=decider),
+            redirect_stdout(output),
+        ):
+            self.assertEqual(asyncio.run(run()), 0)
+        return output.getvalue(), inspector, decider
+
     def test_tool_and_resource_context_preserve_aliases_and_state(self):
         entities = parse_entities(INSPECTION)
         self.assertEqual(entities, parse_entities({"context": CONTEXT}))
@@ -96,7 +135,31 @@ class PrototypeTests(unittest.TestCase):
         self.assertEqual(result["target"], {**entities[0], "type": "entity"})
         self.assertEqual(result["probability"], 0.8)
         self.assertEqual(result["confidence"], 0.65)
-        self.assertEqual(result["usage"]["cost"], 0.00002)
+
+    def test_service_choices_come_from_advertised_tools_and_context_domains(self):
+        entities = parse_entities(INSPECTION)
+        tools, domains, payload = service_request("turn off the lights", INSPECTION, entities)
+        self.assertEqual(set(tools), {"assist__HassTurnOn", "assist__HassTurnOff", "query_state"})
+        self.assertEqual(domains, {"light": "light"})
+        self.assertEqual(payload["state"]["entities"], entities)
+        self.assertEqual(set(payload["questions"]["service"]["criteria"]), set(tools) | {"other"})
+        services, _, _ = service_request("is the lamp on?", {"tools": []}, entities)
+        self.assertEqual(set(services), {"query_state"})
+
+    def test_selected_domain_filters_entities_and_areas(self):
+        entities = parse_entities(INSPECTION) + [
+            {"names": "Outlet", "domain": "switch", "areas": "Office, Study"},
+            {"names": "Garage outlet", "domain": "switch", "areas": "Garage"},
+        ]
+        service = {"tool": "assist__HassTurnOff", "domain": "light"}
+        options, payload = decision_request("turn off the office lights", entities, service)
+        self.assertEqual(set(options), {"entity_001", "entity_002", "area_001", "area_002"})
+        self.assertTrue(all(target.get("domain") == "light" for target in options.values()
+                            if target["type"] == "entity"))
+        areas = [target for target in options.values() if target["type"] == "area"]
+        self.assertEqual([area["name"] for area in areas], ["Office", "Bedroom"])
+        self.assertTrue(all(area["domains"] == ["light"] for area in areas))
+        self.assertEqual(payload["state"]["service"], service)
 
     def test_other_returns_no_target(self):
         options, _ = decision_request("open a nonexistent garage", parse_entities(INSPECTION))
@@ -126,26 +189,108 @@ class PrototypeTests(unittest.TestCase):
             with self.subTest(data=data), self.assertRaises(ValueError):
                 selection_result(data, options)
 
-    def test_cli_connects_context_to_one_decision_request(self):
-        decider = AsyncMock(return_value=response())
-        output = io.StringIO()
-        with (
-            patch.object(sys, "argv", ["prototype.py", "turn on the office desk lamp"]),
-            patch("prototype.load_dotenv"),
-            patch("prototype.setting", return_value="test-credential"),
-            patch("prototype.inspect_mcp", new=AsyncMock(return_value=INSPECTION)),
-            patch("prototype.call_decider", new=decider),
-            redirect_stdout(output),
-        ):
-            self.assertEqual(asyncio.run(run()), 0)
-        result = json.loads(output.getvalue())
+    def test_cli_reuses_one_mcp_snapshot_for_two_sequential_requests(self):
+        output, inspector, decider = self.run_cli([service_response(), response()])
+        result = json.loads(output)
+        self.assertEqual(result["service"], "assist__HassTurnOff")
+        self.assertEqual(result["domain"], "light")
         self.assertEqual(result["target"]["type"], "entity")
         self.assertEqual(result["target"]["areas"], "Office, Study")
-        self.assertEqual(result["candidate_count"], 4)
-        decider.assert_awaited_once()
-        payload, _ = decider.await_args.args
+        self.assertEqual(result["decisions"]["target"]["candidate_count"], 4)
+        self.assertEqual(result["usage"], {"service": {"cost": 0.00003}, "target": {"cost": 0.00002}})
+        inspector.assert_awaited_once()
+        self.assertEqual(decider.await_count, 2)
+        service_payload, _ = decider.await_args_list[0].args
+        self.assertEqual(set(service_payload["questions"]), {"service", "domain"})
+        payload, _ = decider.await_args_list[1].args
+        self.assertEqual(payload["state"]["service"], {"tool": "assist__HassTurnOff", "domain": "light"})
         self.assertEqual(set(payload["questions"]["target"]["criteria"]),
                          {"entity_001", "entity_002", "area_001", "area_002", "other"})
+
+    def test_cli_summary_displays_tool_domain_and_area(self):
+        output, _, _ = self.run_cli([service_response(), response("area_001")], json_output=False)
+        self.assertEqual(output, "service: assist__HassTurnOff\ndomain: light\ntarget type: area\ntarget: Office\n")
+
+    def test_uncertain_service_or_domain_skips_target_request(self):
+        for tool, domain in (("other", "light"), ("assist__HassTurnOff", "other")):
+            with self.subTest(tool=tool, domain=domain):
+                output, inspector, decider = self.run_cli([service_response(tool, domain)])
+                result = json.loads(output)
+                self.assertIsNone(result["target"])
+                self.assertIsNone(result["decisions"]["target"])
+                self.assertIsNone(result["usage"]["target"])
+                inspector.assert_awaited_once()
+                decider.assert_awaited_once()
+
+    def test_state_query_selects_target_without_a_service_or_extra_mcp_fetch(self):
+        output, inspector, decider = self.run_cli(
+            [service_response("query_state"), response()], prompt="is the office desk lamp on?",
+        )
+        result = json.loads(output)
+        self.assertIsNone(result["service"])
+        self.assertEqual(result["decisions"]["service"]["choice"], "query_state")
+        self.assertEqual(result["domain"], "light")
+        self.assertEqual(result["target"]["state"], "off")
+        self.assertEqual(result["target"]["type"], "entity")
+        inspector.assert_awaited_once()
+        self.assertEqual(decider.await_count, 2)
+        payload, _ = decider.await_args_list[1].args
+        self.assertEqual(payload["state"]["service"], {
+            "tool": None, "domain": "light", "operation": "query_state",
+        })
+
+    def test_temperature_query_preserves_measurement_and_unit(self):
+        inspection = copy.deepcopy(INSPECTION)
+        inspection["context"] = """- names: Temperature
+  domain: sensor
+  state: '21.5'
+  areas: Office
+  attributes:
+    device_class: temperature
+    unit_of_measurement: °C
+"""
+        service = service_response("query_state")
+        service["answers"]["domain"].update(choice="sensor", probabilities={"sensor": 0.9, "other": 0.1})
+        target = response()
+        target["answers"]["target"]["probabilities"] = {
+            "entity_001": 0.8, "area_001": 0.1, "other": 0.1,
+        }
+        output, inspector, _ = self.run_cli(
+            [service, target], inspection=inspection, prompt="how warm is the office?",
+        )
+        result = json.loads(output)
+        self.assertIsNone(result["service"])
+        self.assertEqual(result["domain"], "sensor")
+        self.assertEqual(result["target"]["state"], "21.5")
+        self.assertEqual(result["target"]["attributes"]["unit_of_measurement"], "°C")
+        inspector.assert_awaited_once()
+
+    def test_state_query_summary_shows_no_service_and_still_selects_an_area(self):
+        output, _, _ = self.run_cli(
+            [service_response("query_state"), response("area_001")], json_output=False,
+            prompt="are all the office lights off?",
+        )
+        self.assertEqual(output, "service: none (query state)\ndomain: light\ntarget type: area\ntarget: Office\n")
+
+    def test_state_query_with_unknown_domain_does_not_guess_a_target(self):
+        output, inspector, decider = self.run_cli([service_response("query_state", "other")])
+        result = json.loads(output)
+        self.assertIsNone(result["service"])
+        self.assertIsNone(result["target"])
+        decider.assert_awaited_once()
+        inspector.assert_awaited_once()
+
+    def test_tool_domain_restriction_rejects_incompatible_decision(self):
+        inspection = copy.deepcopy(INSPECTION)
+        inspection["tools"][1]["inputSchema"] = {
+            "properties": {"domain": {"type": "array", "items": {"enum": ["switch"]}}},
+        }
+        with self.assertRaisesRegex(ValueError, "light is not allowed"):
+            self.run_cli([service_response()], inspection=inspection)
+
+    def test_unmatched_target_is_visible_in_summary(self):
+        output, _, _ = self.run_cli([service_response(), response("other")], json_output=False)
+        self.assertIn("target type: other\ntarget: other\n", output)
 
     def test_inspection_does_not_require_or_call_openrouter(self):
         decider = AsyncMock()

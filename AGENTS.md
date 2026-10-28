@@ -12,6 +12,9 @@
 - Install dependencies: `python -m pip install -r requirements.txt` in a virtual environment.
 - Inspect built-in HA MCP: `python prototype.py --inspect`.
 - Classify a prompt: `python prototype.py "your request"`.
+- Classification fetches MCP tools/context once per run, then selects a tool/domain before a compatible target. No disk cache or device execution.
+- State questions can select `query_state`, using cached states/attributes with no service. Domain and target selection still run; `other` remains separate.
+- Default output is a short summary; `--json` includes both stages' scores, alternatives, usage and timings.
 - Run offline checks: `python -m unittest -v`.
 - Classifier choices use snapshot-local IDs for entities and areas, not HA registry IDs. Room-wide requests select areas; specific device requests select entities.
 - `.env` contains credentials. Never print its values or commit it.
