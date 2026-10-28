@@ -52,13 +52,23 @@ python prototype.py "Mach es etwas wärmer im Wohnzimmer"
 python prototype.py "Stell die Stehlampe im Wohnzimmer auf 60 Prozent"
 ```
 
-Fetches MCP tools and Assist context once per script run and keeps that snapshot in memory. The first decider request selects an advertised MCP tool or `query_state`, plus an entity domain. The second selects an entity or area from that domain, using the same snapshot. Temperature and brightness setters add a third numeric extraction request before MCP execution. No cache is written to disk.
+Fetches MCP tools and Assist context once per script run and keeps that snapshot in memory. The decider calls run in this order:
+
+1. Select an advertised MCP tool or `query_state`, plus an entity domain.
+2. Select an area from names/aliases extracted from the cached context.
+3. Select an entity or area target from candidates filtered by both domain and selected area.
+4. For temperature/brightness setters, extract a numeric value before MCP execution.
+
+The area call receives the prompt and area names/aliases only. `no_area` keeps all candidates from the selected domain when the request identifies no specific room. `other` represents unknown, ambiguous, or multiple requested areas and stops target selection. A known area with no entities in the selected domain also stops selection. No cache is written to disk.
+
+The service/domain request sends only the user prompt, advertised tool definitions, and available domain choices. The entity catalog is kept locally for the subsequent target and numeric stages.
 
 Example summary:
 
 ```text
 service: assist__HassTurnOff
 domain: light
+area: Wohnzimmer
 target type: area
 target: Wohnzimmer
 execution: completed
@@ -73,7 +83,7 @@ Missing/ambiguous targets, unsupported target schemas, and other additional para
 
 ## Numeric settings
 
-Supported setters are `HassClimateSetTemperature` for room temperature and `HassLightSet` for brightness. The third request uses the same Score prompt/scaling as the standalone probe and checks whether the request is absolute, relative, or unsupported. Its mapped value is passed to MCP and printed in the summary; `--json` includes numeric scores, baseline, usage, and timing.
+Supported setters are `HassClimateSetTemperature` for room temperature and `HassLightSet` for brightness. The fourth request uses the same Score prompt/scaling as the standalone probe and checks whether the request is absolute, relative, or unsupported. Its mapped value is passed to MCP and printed in the summary; `--json` includes numeric scores, baseline, usage, and timing.
 
 Constants in `prototype.py`:
 
@@ -95,6 +105,7 @@ State questions such as "is the lamp on?" or "how warm is the living room?" can 
 ```text
 service: none (query state)
 domain: sensor
+area: Wohnzimmer
 target type: entity
 target: Temperatur
 state: 21.5 °C
@@ -112,7 +123,7 @@ python prototype.py "Mach alle Lichter im Wohnzimmer aus" --json
 
 Set `DECIDER_MODEL` to try another compatible decision model. The fallback is `MODEL` in `prototype.py`, currently `typesafe/jev-1.14`.
 
-Target choices get temporary IDs such as `entity_001` and `area_001`. These IDs belong to that classification request; they are not HA registry IDs. Area aliases are grouped with their canonical name. Entities outside the selected domain and areas without that domain are excluded.
+Target choices get temporary IDs such as `entity_001` and `area_001`. These IDs belong to that classification request; they are not HA registry IDs. Area aliases are grouped with their canonical name. Entities outside the selected domain or selected area are excluded; requests with `no_area` retain the full domain scope. The final target choice still distinguishes a specific device from a room-wide target.
 
 Specific device requests select an entity. Room-wide requests such as "turn off the lights in the living room" select an area. `other` covers no match, unresolved ambiguity, or multiple targets that cannot be represented by one area. Identical entity entries remain separate candidates; the classifier is instructed to choose `other` when it cannot distinguish the target.
 

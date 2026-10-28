@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager, redirect_stdout
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
-from prototype import current_numeric_values, decision_request, execute_mcp, parse_entities, print_result, query_state_info, run, selection_result, service_request, target_arguments
+from prototype import area_request, current_numeric_values, decision_request, execute_mcp, parse_entities, print_result, query_state_info, run, selection_result, service_request, target_arguments
 
 
 CONTEXT = """Live Context: An overview of the areas and the devices in this smart home:
@@ -65,6 +65,15 @@ def service_response(tool="assist__HassTurnOff", domain="light"):
     }
 
 
+def area_response(inspection, choice):
+    options, _ = area_request("test", parse_entities(inspection))
+    scores = dict.fromkeys([*options, "other"], 0)
+    scores[choice] = 1
+    return {"answers": {"area": {
+        "type": "choice", "choice": choice, "confidence": 1, "probabilities": scores,
+    }}, "usage": {"cost": 0.000005}}
+
+
 def numeric_case(parameter="temperature", currents=(20.5,), mode="relative", score=4):
     climate = parameter == "temperature"
     domain = "climate" if climate else "light"
@@ -114,8 +123,11 @@ def numeric_case(parameter="temperature", currents=(20.5,), mode="relative", sco
 
 class PrototypeTests(unittest.TestCase):
     def run_cli(self, responses, inspection=INSPECTION, json_output=True,
-                prompt="turn off the lights in the office", executor=None, exit_code=0):
+                prompt="turn off the lights in the office", executor=None, exit_code=0, area_choice="no_area"):
         inspector = AsyncMock(return_value=inspection)
+        responses = list(responses)
+        if len(responses) > 1:
+            responses.insert(1, area_response(inspection, area_choice))
         decider = AsyncMock(side_effect=responses)
         async def completed(session, name, arguments):
             return {"status": "completed", "arguments": arguments, "response": {"isError": False}}
@@ -203,10 +215,107 @@ class PrototypeTests(unittest.TestCase):
         tools, domains, payload = service_request("turn off the lights", INSPECTION, entities)
         self.assertEqual(set(tools), {"assist__HassTurnOn", "assist__HassTurnOff", "query_state"})
         self.assertEqual(domains, {"light": "light"})
-        self.assertEqual(payload["state"]["entities"], entities)
+        self.assertEqual(payload["state"], {"prompt": "turn off the lights"})
         self.assertEqual(set(payload["questions"]["service"]["criteria"]), set(tools) | {"other"})
         services, _, _ = service_request("is the lamp on?", {"tools": []}, entities)
         self.assertEqual(set(services), {"query_state"})
+
+    def test_area_request_contains_all_names_and_aliases_without_entity_metadata(self):
+        entities = parse_entities(INSPECTION) + [
+            {"names": "Outlet", "domain": "switch", "areas": "Garage", "state": "on"},
+            {"names": "Temperature", "domain": "sensor", "areas": " Office, Study, Workroom "},
+            {"names": "Unassigned", "domain": "light"},
+        ]
+        options, payload = area_request("turn off lights in the study", entities)
+        areas = [value for key, value in options.items() if key != "no_area"]
+        self.assertEqual(areas, [
+            {"name": "Office", "aliases": ["Study", "Workroom"]},
+            {"name": "Bedroom", "aliases": []},
+            {"name": "Garage", "aliases": []},
+        ])
+        self.assertEqual(payload["state"], {"prompt": "turn off lights in the study"})
+        self.assertEqual(set(payload["questions"]["area"]["criteria"]),
+                         {"area_001", "area_002", "area_003", "no_area", "other"})
+
+    def test_target_request_filters_both_domain_and_canonical_area(self):
+        entities = parse_entities(INSPECTION) + [
+            {"names": "Outlet", "domain": "switch", "areas": "Office, Study"},
+            {"names": "Unassigned light", "domain": "light"},
+        ]
+        options, payload = decision_request("turn off lights in the study", entities,
+                                            {"tool": "assist__HassTurnOff", "domain": "light"}, "Office")
+        self.assertEqual(set(options), {"entity_001", "area_001"})
+        self.assertEqual(options["entity_001"]["names"], "Desk lamp, Work light")
+        self.assertEqual(options["area_001"]["name"], "Office")
+        self.assertEqual(payload["state"]["area"], "Office")
+
+    def test_area_selection_filters_next_call_and_preserves_canonical_execution_target(self):
+        target = response("area_001")
+        target["answers"]["target"]["probabilities"] = {"entity_001": 0.1, "area_001": 0.8, "other": 0.1}
+        executor = AsyncMock(return_value={"status": "completed"})
+        output, inspector, decider = self.run_cli(
+            [service_response(), target], executor=executor, area_choice="area_001",
+            prompt="turn off all lights in the study",
+        )
+        result = json.loads(output)
+        self.assertEqual(result["area"], "Office")
+        self.assertEqual(result["decisions"]["area"]["area"]["aliases"], ["Study"])
+        self.assertEqual(result["decisions"]["target"]["candidate_count"], 2)
+        self.assertEqual(decider.await_count, 3)
+        target_payload, _ = decider.await_args_list[2].args
+        self.assertEqual(set(target_payload["questions"]["target"]["criteria"]),
+                         {"entity_001", "area_001", "other"})
+        executor.assert_awaited_once_with(inspector.await_args.args[0], "assist__HassTurnOff", {
+            "domain": ["light"], "area": "Office",
+        })
+        inspector.assert_awaited_once()
+
+    def test_no_area_selection_keeps_all_domain_candidates(self):
+        output, _, decider = self.run_cli([service_response(), response()],
+                                         area_choice="no_area", prompt="turn off the work light")
+        result = json.loads(output)
+        self.assertIsNone(result["area"])
+        self.assertEqual(result["decisions"]["area"]["choice"], "no_area")
+        self.assertEqual(result["decisions"]["target"]["candidate_count"], 4)
+        self.assertEqual(decider.await_count, 3)
+
+    def test_unknown_or_multiple_area_selection_stops_before_target_or_execution(self):
+        for service in ("assist__HassTurnOff", "query_state"):
+            for prompt in ("turn off lights in an unknown room", "lights in office and bedroom"):
+                with self.subTest(service=service, prompt=prompt):
+                    executor = AsyncMock()
+                    output, inspector, decider = self.run_cli(
+                        [service_response(service), response()], area_choice="other", prompt=prompt, executor=executor,
+                    )
+                    result = json.loads(output)
+                    self.assertIsNone(result["target"])
+                    self.assertIsNone(result["decisions"]["target"])
+                    self.assertEqual(result["decisions"]["area"]["choice"], "other")
+                    self.assertEqual(decider.await_count, 2)
+                    executor.assert_not_awaited()
+                    inspector.assert_awaited_once()
+
+    def test_known_area_without_selected_domain_does_not_fall_back_to_other_rooms(self):
+        inspection = copy.deepcopy(INSPECTION)
+        entities = parse_entities(inspection) + [
+            {"names": "Garage outlet", "domain": "switch", "areas": "Garage"},
+        ]
+        inspection["context"] = json.dumps(entities)
+        first = service_response()
+        first["answers"]["domain"]["probabilities"]["switch"] = 0
+        executor = AsyncMock()
+        output, _, decider = self.run_cli([first, response()], inspection=inspection,
+                                         area_choice="area_003", executor=executor)
+        result = json.loads(output)
+        self.assertEqual(result["area"], "Garage")
+        self.assertIn("No light entities in selected area Garage", result["execution"]["reason"])
+        self.assertEqual(decider.await_count, 2)
+        executor.assert_not_awaited()
+
+    def test_area_selection_handles_context_with_no_area_metadata(self):
+        options, payload = area_request("turn on the lamp", [{"names": "Lamp", "domain": "light"}])
+        self.assertEqual(set(options), {"no_area"})
+        self.assertEqual(set(payload["questions"]["area"]["criteria"]), {"no_area", "other"})
 
     def test_selected_domain_filters_entities_and_areas(self):
         entities = parse_entities(INSPECTION) + [
@@ -251,7 +360,7 @@ class PrototypeTests(unittest.TestCase):
             with self.subTest(data=data), self.assertRaises(ValueError):
                 selection_result(data, options)
 
-    def test_cli_reuses_one_mcp_snapshot_for_two_sequential_requests(self):
+    def test_cli_reuses_one_mcp_snapshot_for_three_sequential_requests(self):
         output, inspector, decider = self.run_cli([service_response(), response()])
         result = json.loads(output)
         self.assertEqual(result["service"], "assist__HassTurnOff")
@@ -260,19 +369,21 @@ class PrototypeTests(unittest.TestCase):
         self.assertEqual(result["target"]["type"], "entity")
         self.assertEqual(result["target"]["areas"], "Office, Study")
         self.assertEqual(result["decisions"]["target"]["candidate_count"], 4)
-        self.assertEqual(result["usage"], {"service": {"cost": 0.00003}, "target": {"cost": 0.00002}})
+        self.assertEqual(result["usage"], {"service": {"cost": 0.00003}, "area": {"cost": 0.000005}, "target": {"cost": 0.00002}})
         inspector.assert_awaited_once()
-        self.assertEqual(decider.await_count, 2)
+        self.assertEqual(decider.await_count, 3)
         service_payload, _ = decider.await_args_list[0].args
         self.assertEqual(set(service_payload["questions"]), {"service", "domain"})
-        payload, _ = decider.await_args_list[1].args
+        area_payload, _ = decider.await_args_list[1].args
+        self.assertEqual(set(area_payload["questions"]), {"area"})
+        payload, _ = decider.await_args_list[2].args
         self.assertEqual(payload["state"]["service"], {"tool": "assist__HassTurnOff", "domain": "light"})
         self.assertEqual(set(payload["questions"]["target"]["criteria"]),
                          {"entity_001", "entity_002", "area_001", "area_002", "other"})
 
     def test_cli_summary_displays_tool_domain_and_area(self):
         output, _, _ = self.run_cli([service_response(), response("area_001")], json_output=False)
-        self.assertEqual(output, 'service: assist__HassTurnOff\ndomain: light\ntarget type: area\ntarget: Office\nexecution: completed\narguments: {"domain": ["light"], "area": "Office"}\n')
+        self.assertEqual(output, 'service: assist__HassTurnOff\ndomain: light\narea: not specified\ntarget type: area\ntarget: Office\nexecution: completed\narguments: {"domain": ["light"], "area": "Office"}\n')
 
     def test_entity_execution_uses_alias_area_and_domain_once(self):
         executor = AsyncMock(return_value={"status": "completed"})
@@ -319,8 +430,8 @@ class PrototypeTests(unittest.TestCase):
             responses, inspection=inspection, executor=executor, prompt="make the office warmer",
         )
         result = json.loads(output)
-        self.assertEqual(decider.await_count, 3)
-        payload, _ = decider.await_args_list[2].args
+        self.assertEqual(decider.await_count, 4)
+        payload, _ = decider.await_args_list[3].args
         self.assertEqual(payload["state"]["current"], 20.5)
         self.assertEqual((payload["state"]["minimum"], payload["state"]["maximum"]), (16, 26))
         self.assertEqual(len(payload["questions"]["numeric_score"]["criteria"]), 9)
@@ -369,7 +480,7 @@ class PrototypeTests(unittest.TestCase):
         inspection, responses = numeric_case("brightness", currents=(51,), mode="absolute", score=3.13)
         executor = AsyncMock(return_value={"status": "completed"})
         output, _, decider = self.run_cli(responses, inspection=inspection, executor=executor, prompt="set brightness to 63 percent")
-        payload, _ = decider.await_args_list[2].args
+        payload, _ = decider.await_args_list[3].args
         self.assertEqual(payload["state"]["current"], 20)
         arguments = executor.await_args.args[2]
         self.assertEqual(arguments["brightness"], 63)
@@ -487,8 +598,8 @@ class PrototypeTests(unittest.TestCase):
         self.assertEqual(result["target"]["type"], "entity")
         self.assertEqual(result["state_info"][0]["state"], "off")
         inspector.assert_awaited_once()
-        self.assertEqual(decider.await_count, 2)
-        payload, _ = decider.await_args_list[1].args
+        self.assertEqual(decider.await_count, 3)
+        payload, _ = decider.await_args_list[2].args
         self.assertEqual(payload["state"]["service"], {
             "tool": None, "domain": "light", "operation": "query_state",
         })
@@ -529,7 +640,7 @@ class PrototypeTests(unittest.TestCase):
             [service_response("query_state"), response("area_001")], json_output=False,
             prompt="are all the office lights off?",
         )
-        self.assertEqual(output, "service: none (query state)\ndomain: light\ntarget type: area\ntarget: Office\nDesk lamp, Work light:\n  state: off\n")
+        self.assertEqual(output, "service: none (query state)\ndomain: light\narea: not specified\ntarget type: area\ntarget: Office\nDesk lamp, Work light:\n  state: off\n")
 
     def test_area_state_info_includes_only_matching_room_and_domain(self):
         entities = parse_entities(INSPECTION) + [

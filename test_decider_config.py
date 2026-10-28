@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 from prototype import (
     DECISIONS_URL, MODEL, call_decider, decider_api_key, decider_model,
-    decider_url, decision_request, service_request,
+    decider_url, decision_request, service_request, area_request,
 )
 from numeric_values import numeric_request
 
@@ -38,13 +38,14 @@ class DeciderConfigTests(unittest.TestCase):
         }, clear=True):
             self.assertEqual(decider_api_key(), "provider-key")
 
-    def test_model_override_reaches_service_target_and_numeric_payloads(self):
+    def test_model_override_reaches_service_area_target_and_numeric_payloads(self):
         entity = {"names": "Lamp", "domain": "light"}
         with patch.dict(os.environ, {"DECIDER_MODEL": "local-decider"}, clear=True):
             _, _, service = service_request("turn on the lamp", {"tools": []}, [entity])
+            _, area = area_request("turn on the lamp", [entity])
             _, target = decision_request("turn on the lamp", [entity])
             _, numeric = numeric_request("set brightness to 50", "brightness", 20, 0, 100, 6, "%", model=decider_model())
-            self.assertEqual([payload["model"] for payload in (service, target, numeric)], ["local-decider"] * 3)
+            self.assertEqual([payload["model"] for payload in (service, area, target, numeric)], ["local-decider"] * 4)
 
     def test_invalid_url_is_reported(self):
         for url in ("localhost:8321", "file:///tmp/model", "https://"):

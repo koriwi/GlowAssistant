@@ -20,11 +20,12 @@ The prototype selects a tool or state query, domain, and target. State queries d
 - Endpoint: `https://assistant.gosewis.ch/api/mcp`.
 - Authenticate with a **long-lived HA token**.
 - Default to **Jev through OpenRouter**. Configure the full native decision endpoint, model ID, and optional key through `DECIDER_URL`, `DECIDER_MODEL`, and `DECIDER_API_KEY`; local llama.cpp can use `http://localhost:8321/v1/systemone`.
-- Fetch MCP tools/context once per run and reuse that in-memory snapshot for both classification stages. No disk cache.
-- First select an advertised MCP tool and entity domain in one OpenRouter request. Then select a compatible entity or area in a second request.
+- Fetch MCP tools/context once per run and reuse that in-memory snapshot for all classification stages. No disk cache.
+- Select service/domain in request 1, an area from names/aliases in request 2, then a target filtered by domain and area in request 3.
+- Area selection has `no_area` for requests without a specific room and `other` for unknown/ambiguous/multiple rooms. `no_area` preserves domain-wide target selection; `other` stops selection.
 - Include `query_state` for current-state/measurement questions. It needs no service and reuses cached states/attributes, while still selecting a domain and target.
 - Display selected entity states/attributes with available units for `query_state`; area queries list matching entities in the selected domain.
-- Execute target-only tools and supported temperature/brightness setters. Numeric setters use a third Jev Score request. Other extra values are skipped; no automatic retries.
+- Execute target-only tools and supported temperature/brightness setters. Numeric setters use a fourth Jev Score request. Other extra values are skipped; no automatic retries.
 - Temperature range/levels are constants: 16–26 °C, 9 levels. Relative changes use the existing thermostat target setting.
 - Temperature execution uses a 1 °C step constant based on the user's device metadata; raw fractional estimates are rounded before MCP execution.
 - Report the actual MCP tool name, such as `assist__HassTurnOff`, plus domain, rather than mapping it to an underlying HA service name.
@@ -72,16 +73,21 @@ For this baseline, `other` includes no match, unresolved ambiguity, and multiple
 ### 3. Classify the service and domain
 
 - [x] Build tool choices from the cached MCP discovery response and domain choices from entity context.
+- [x] Send the prompt, tool definitions and domain choices to service/domain selection, omitting the entity catalog.
 - [x] Add a distinct `query_state` choice for information available in cached states/attributes.
 - [x] Ask Jev for the MCP tool and domain in the first request.
 - [x] Validate both selections, including explicit tool domain restrictions where provided.
 - [x] Skip target selection when tool or domain is `other`.
 - [x] Continue domain/target selection for `query_state` and report no service.
 
-### 4. Classify the target
+### 4. Select an area and classify the target
 
+- [x] Extract all areas and aliases from cached entity context without another MCP fetch.
+- [x] Send only the prompt and area names/aliases to a dedicated area decider call.
+- [x] Distinguish `no_area` from unsupported/ambiguous area references (`other`).
 - [x] Implement a Decisions API request using Jev's `Choice` primitive.
-- [x] Filter entity and area choices to the selected domain and pass the selected tool/domain as context.
+- [x] Filter entity and area choices to the selected domain and area, then pass selected tool/domain/area as context.
+- [x] Skip the target call for unknown/ambiguous areas or known areas without matching domain entities.
 - [x] Read the selected option, per-option probabilities, and confidence.
 - [x] Validate that the selection belongs to the supplied choices.
 - [ ] Verify a real OpenRouter request.
@@ -91,7 +97,7 @@ API failures and invalid responses are errors, not `other` selections.
 ### 5. Extract supported numeric values and execute tools
 
 - [x] Share numeric request/decoding logic with the standalone probe.
-- [x] Extract temperature and brightness using a third Score request and distinguish absolute/relative/unsupported requests.
+- [x] Extract temperature and brightness using a fourth Score request and distinguish absolute/relative/unsupported requests.
 - [x] Use cached thermostat target settings and brightness percentages as baselines.
 - [x] Quantize temperature to the configured device step and preserve the direction of substep relative changes.
 - [x] Require a common baseline for relative area changes; allow absolute area settings with differing baselines.
@@ -107,7 +113,7 @@ API failures and invalid responses are errors, not `other` selections.
 - [x] Print a short service/domain/target summary.
 - [x] Display cached values for state queries, including matching area members, measurements and available units.
 - [x] Show unknown/unavailable states explicitly and suppress stale attributes in the summary.
-- [x] Provide `--json` for both stages' selections, alternatives, scores, usage/cost, and timings.
+- [x] Provide `--json` for every stage's selections, alternatives, scores, usage/cost, and timings.
 - [x] Document setup and the CLI command.
 - [ ] Try representative prompts: clear names, room-wide device groups, area aliases, STT mistakes, ambiguous targets, absent targets, and requests spanning multiple areas.
 - [ ] Check live state-query routing for on/off questions and temperature measurements.
