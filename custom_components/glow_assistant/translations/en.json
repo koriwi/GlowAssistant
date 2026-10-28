@@ -1,0 +1,357 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configure conversation agent",
+        "description": "Choose models and edit their prompts and limits in the same block. {error}",
+        "data": {
+          "name": "Agent name",
+          "excluded_entities": "Excluded entities",
+          "unsure_reply": "Unsure reply",
+          "error_reply": "Error reply",
+          "answer_error_reply": "Reply when the action completed but answer generation failed"
+        },
+        "data_description": {
+          "excluded_entities": "Home Assistant exposed-entity settings are always respected. These entities are additionally excluded.",
+          "answer_error_reply": "Used only after an action completed; it must not imply the action failed."
+        },
+        "sections": {
+          "decider": {
+            "name": "Decider",
+            "data": {
+              "url": "Endpoint URL",
+              "model": "Model ID",
+              "api_key": "API key",
+              "timeout": "Request timeout (seconds)",
+              "max_input_chars": "Maximum input characters",
+              "service_prompt": "Action selection prompt",
+              "domain_prompt": "State-query domain prompt",
+              "area_prompt": "Area selection prompt",
+              "target_prompt": "Target selection prompt",
+              "numeric_prompt": "Numeric value prompt",
+              "numeric_mode_prompt": "Absolute/relative selection prompt",
+              "service_confidence": "Minimum action confidence",
+              "domain_confidence": "Minimum state-query domain confidence",
+              "area_confidence": "Minimum area confidence",
+              "target_confidence": "Minimum target confidence",
+              "numeric_confidence": "Minimum numeric confidence",
+              "temperature_min": "Minimum temperature",
+              "temperature_max": "Maximum temperature",
+              "temperature_levels": "Temperature anchor levels",
+              "temperature_step": "Temperature rounding step",
+              "temperature_default_change": "Default warmer/colder change",
+              "temperature_baseline": "Relative temperature baseline",
+              "brightness_min": "Minimum brightness (%)",
+              "brightness_max": "Maximum brightness (%)",
+              "brightness_levels": "Brightness anchor levels",
+              "brightness_step": "Brightness rounding step (%)",
+              "brightness_default_change": "Default brighter/dimmer change (percentage points)",
+              "test_connection": "Test connection when saving"
+            },
+            "data_description": {
+              "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
+              "api_key": "Optional for local servers without authentication. This model uses only this key.",
+              "max_input_chars": "Reject larger requests without truncating candidates or state data. This counts characters, not tokens.",
+              "test_connection": "Sends a model-only test request. It never executes a Home Assistant action.",
+              "temperature_min": "Uses your Home Assistant temperature unit; defaults assume Celsius. Device limits also apply.",
+              "temperature_step": "Whole degrees by default. A device may require a larger step.",
+              "temperature_default_change": "Interprets vague warmer/colder requests; execution still uses the rounding step.",
+              "brightness_default_change": "Interprets vague brighter/dimmer requests.",
+              "service_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
+              "domain_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
+              "area_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
+              "target_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
+              "numeric_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
+              "numeric_mode_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating."
+            }
+          },
+          "answer": {
+            "name": "Smart-home answer",
+            "data": {
+              "url": "Endpoint URL",
+              "model": "Model ID",
+              "api_key": "API key",
+              "timeout": "Request timeout (seconds)",
+              "max_input_chars": "Maximum input characters",
+              "max_tokens": "Maximum output tokens",
+              "temperature": "Sampling temperature",
+              "prompt": "System prompt",
+              "test_connection": "Test connection when saving"
+            },
+            "data_description": {
+              "url": "Full endpoint URL; no path is appended. Localhost refers to Home Assistant itself.",
+              "api_key": "Optional for local servers without authentication. This model uses only this key.",
+              "max_input_chars": "Reject larger requests without truncating candidates or state data. This counts characters, not tokens.",
+              "test_connection": "Sends a model-only test request. It never executes a Home Assistant action.",
+              "prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating."
+            }
+          },
+          "general": {
+            "name": "General model",
+            "data": {
+              "enable": "Enable",
+              "url": "Endpoint URL",
+              "model": "Model ID",
+              "api_key": "API key",
+              "timeout": "Request timeout (seconds)",
+              "max_input_chars": "Maximum input characters",
+              "max_tokens": "Maximum output tokens",
+              "temperature": "Sampling temperature",
+              "prompt": "System prompt",
+              "test_connection": "Test connection when saving"
+            },
+            "data_description": {
+              "url": "Full endpoint URL; no path is appended. Localhost refers to Home Assistant itself.",
+              "api_key": "Optional for local servers without authentication. This model uses only this key.",
+              "max_input_chars": "Reject larger requests without truncating candidates or state data. This counts characters, not tokens.",
+              "test_connection": "Sends a model-only test request. It never executes a Home Assistant action.",
+              "enable": "When disabled, unrelated requests use the fixed unsure reply. No model request is sent.",
+              "prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating."
+            }
+          }
+        }
+      },
+      "reconfigure": {
+        "title": "Configure conversation agent",
+        "description": "Choose models and edit their prompts and limits in the same block. {error}",
+        "data": {
+          "name": "Agent name",
+          "excluded_entities": "Excluded entities",
+          "unsure_reply": "Unsure reply",
+          "error_reply": "Error reply",
+          "answer_error_reply": "Reply when the action completed but answer generation failed"
+        },
+        "data_description": {
+          "excluded_entities": "Home Assistant exposed-entity settings are always respected. These entities are additionally excluded.",
+          "answer_error_reply": "Used only after an action completed; it must not imply the action failed."
+        },
+        "sections": {
+          "decider": {
+            "name": "Decider",
+            "data": {
+              "url": "Endpoint URL",
+              "model": "Model ID",
+              "api_key": "API key",
+              "timeout": "Request timeout (seconds)",
+              "max_input_chars": "Maximum input characters",
+              "service_prompt": "Action selection prompt",
+              "domain_prompt": "State-query domain prompt",
+              "area_prompt": "Area selection prompt",
+              "target_prompt": "Target selection prompt",
+              "numeric_prompt": "Numeric value prompt",
+              "numeric_mode_prompt": "Absolute/relative selection prompt",
+              "service_confidence": "Minimum action confidence",
+              "domain_confidence": "Minimum state-query domain confidence",
+              "area_confidence": "Minimum area confidence",
+              "target_confidence": "Minimum target confidence",
+              "numeric_confidence": "Minimum numeric confidence",
+              "temperature_min": "Minimum temperature",
+              "temperature_max": "Maximum temperature",
+              "temperature_levels": "Temperature anchor levels",
+              "temperature_step": "Temperature rounding step",
+              "temperature_default_change": "Default warmer/colder change",
+              "temperature_baseline": "Relative temperature baseline",
+              "brightness_min": "Minimum brightness (%)",
+              "brightness_max": "Maximum brightness (%)",
+              "brightness_levels": "Brightness anchor levels",
+              "brightness_step": "Brightness rounding step (%)",
+              "brightness_default_change": "Default brighter/dimmer change (percentage points)",
+              "test_connection": "Test connection when saving"
+            },
+            "data_description": {
+              "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
+              "api_key": "Optional for local servers without authentication. This model uses only this key.",
+              "max_input_chars": "Reject larger requests without truncating candidates or state data. This counts characters, not tokens.",
+              "test_connection": "Sends a model-only test request. It never executes a Home Assistant action.",
+              "temperature_min": "Uses your Home Assistant temperature unit; defaults assume Celsius. Device limits also apply.",
+              "temperature_step": "Whole degrees by default. A device may require a larger step.",
+              "temperature_default_change": "Interprets vague warmer/colder requests; execution still uses the rounding step.",
+              "brightness_default_change": "Interprets vague brighter/dimmer requests.",
+              "service_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
+              "domain_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
+              "area_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
+              "target_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
+              "numeric_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
+              "numeric_mode_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating."
+            }
+          },
+          "answer": {
+            "name": "Smart-home answer",
+            "data": {
+              "url": "Endpoint URL",
+              "model": "Model ID",
+              "api_key": "API key",
+              "timeout": "Request timeout (seconds)",
+              "max_input_chars": "Maximum input characters",
+              "max_tokens": "Maximum output tokens",
+              "temperature": "Sampling temperature",
+              "prompt": "System prompt",
+              "test_connection": "Test connection when saving"
+            },
+            "data_description": {
+              "url": "Full endpoint URL; no path is appended. Localhost refers to Home Assistant itself.",
+              "api_key": "Optional for local servers without authentication. This model uses only this key.",
+              "max_input_chars": "Reject larger requests without truncating candidates or state data. This counts characters, not tokens.",
+              "test_connection": "Sends a model-only test request. It never executes a Home Assistant action.",
+              "prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating."
+            }
+          },
+          "general": {
+            "name": "General model",
+            "data": {
+              "enable": "Enable",
+              "url": "Endpoint URL",
+              "model": "Model ID",
+              "api_key": "API key",
+              "timeout": "Request timeout (seconds)",
+              "max_input_chars": "Maximum input characters",
+              "max_tokens": "Maximum output tokens",
+              "temperature": "Sampling temperature",
+              "prompt": "System prompt",
+              "test_connection": "Test connection when saving"
+            },
+            "data_description": {
+              "url": "Full endpoint URL; no path is appended. Localhost refers to Home Assistant itself.",
+              "api_key": "Optional for local servers without authentication. This model uses only this key.",
+              "max_input_chars": "Reject larger requests without truncating candidates or state data. This counts characters, not tokens.",
+              "test_connection": "Sends a model-only test request. It never executes a Home Assistant action.",
+              "enable": "When disabled, unrelated requests use the fixed unsure reply. No model request is sent.",
+              "prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating."
+            }
+          }
+        }
+      }
+    },
+    "error": {
+      "invalid_settings": "Check the settings or connection test result shown above."
+    },
+    "abort": {
+      "reconfigure_successful": "Configuration updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Configure conversation agent",
+        "description": "Choose models and edit their prompts and limits in the same block. {error}",
+        "data": {
+          "name": "Agent name",
+          "excluded_entities": "Excluded entities",
+          "unsure_reply": "Unsure reply",
+          "error_reply": "Error reply",
+          "answer_error_reply": "Reply when the action completed but answer generation failed"
+        },
+        "data_description": {
+          "excluded_entities": "Home Assistant exposed-entity settings are always respected. These entities are additionally excluded.",
+          "answer_error_reply": "Used only after an action completed; it must not imply the action failed."
+        },
+        "sections": {
+          "decider": {
+            "name": "Decider",
+            "data": {
+              "url": "Endpoint URL",
+              "model": "Model ID",
+              "api_key": "API key",
+              "timeout": "Request timeout (seconds)",
+              "max_input_chars": "Maximum input characters",
+              "service_prompt": "Action selection prompt",
+              "domain_prompt": "State-query domain prompt",
+              "area_prompt": "Area selection prompt",
+              "target_prompt": "Target selection prompt",
+              "numeric_prompt": "Numeric value prompt",
+              "numeric_mode_prompt": "Absolute/relative selection prompt",
+              "service_confidence": "Minimum action confidence",
+              "domain_confidence": "Minimum state-query domain confidence",
+              "area_confidence": "Minimum area confidence",
+              "target_confidence": "Minimum target confidence",
+              "numeric_confidence": "Minimum numeric confidence",
+              "temperature_min": "Minimum temperature",
+              "temperature_max": "Maximum temperature",
+              "temperature_levels": "Temperature anchor levels",
+              "temperature_step": "Temperature rounding step",
+              "temperature_default_change": "Default warmer/colder change",
+              "temperature_baseline": "Relative temperature baseline",
+              "brightness_min": "Minimum brightness (%)",
+              "brightness_max": "Maximum brightness (%)",
+              "brightness_levels": "Brightness anchor levels",
+              "brightness_step": "Brightness rounding step (%)",
+              "brightness_default_change": "Default brighter/dimmer change (percentage points)",
+              "test_connection": "Test connection when saving"
+            },
+            "data_description": {
+              "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
+              "api_key": "Optional for local servers without authentication. This model uses only this key.",
+              "max_input_chars": "Reject larger requests without truncating candidates or state data. This counts characters, not tokens.",
+              "test_connection": "Sends a model-only test request. It never executes a Home Assistant action.",
+              "temperature_min": "Uses your Home Assistant temperature unit; defaults assume Celsius. Device limits also apply.",
+              "temperature_step": "Whole degrees by default. A device may require a larger step.",
+              "temperature_default_change": "Interprets vague warmer/colder requests; execution still uses the rounding step.",
+              "brightness_default_change": "Interprets vague brighter/dimmer requests.",
+              "service_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
+              "domain_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
+              "area_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
+              "target_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
+              "numeric_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
+              "numeric_mode_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating."
+            }
+          },
+          "answer": {
+            "name": "Smart-home answer",
+            "data": {
+              "url": "Endpoint URL",
+              "model": "Model ID",
+              "api_key": "API key",
+              "timeout": "Request timeout (seconds)",
+              "max_input_chars": "Maximum input characters",
+              "max_tokens": "Maximum output tokens",
+              "temperature": "Sampling temperature",
+              "prompt": "System prompt",
+              "test_connection": "Test connection when saving"
+            },
+            "data_description": {
+              "url": "Full endpoint URL; no path is appended. Localhost refers to Home Assistant itself.",
+              "api_key": "Optional for local servers without authentication. This model uses only this key.",
+              "max_input_chars": "Reject larger requests without truncating candidates or state data. This counts characters, not tokens.",
+              "test_connection": "Sends a model-only test request. It never executes a Home Assistant action.",
+              "prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating."
+            }
+          },
+          "general": {
+            "name": "General model",
+            "data": {
+              "enable": "Enable",
+              "url": "Endpoint URL",
+              "model": "Model ID",
+              "api_key": "API key",
+              "timeout": "Request timeout (seconds)",
+              "max_input_chars": "Maximum input characters",
+              "max_tokens": "Maximum output tokens",
+              "temperature": "Sampling temperature",
+              "prompt": "System prompt",
+              "test_connection": "Test connection when saving"
+            },
+            "data_description": {
+              "url": "Full endpoint URL; no path is appended. Localhost refers to Home Assistant itself.",
+              "api_key": "Optional for local servers without authentication. This model uses only this key.",
+              "max_input_chars": "Reject larger requests without truncating candidates or state data. This counts characters, not tokens.",
+              "test_connection": "Sends a model-only test request. It never executes a Home Assistant action.",
+              "enable": "When disabled, unrelated requests use the fixed unsure reply. No model request is sent.",
+              "prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating."
+            }
+          }
+        }
+      }
+    },
+    "error": {
+      "invalid_settings": "Check the settings or connection test result shown above."
+    }
+  },
+  "selector": {
+    "temperature_baseline": {
+      "options": {
+        "target": "Existing thermostat target",
+        "measured": "Measured room temperature"
+      }
+    }
+  }
+}

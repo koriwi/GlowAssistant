@@ -1,0 +1,27 @@
+name: Validate
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Tests (HA 2026.4.2)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - run: python -m pip install -r requirements.txt -r requirements-ha-test.txt ruff
+      - run: python -m unittest -v
+      - run: ruff check --select E4,E7,E9,F,I custom_components test_integration_engine.py test_integration_client.py test_ha_integration.py
+  hassfest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master

@@ -8,6 +8,12 @@
 
 # Repository
 
+- HACS integration: `custom_components/glow_assistant`, domain `glow_assistant`, targeting the user's HA 2026.4.2. `hacs.json` is at the repository root. Repository URL: https://github.com/koriwi/GlowAssistant. Keep the HA minimum and test dependency aligned with this version; check with the user before raising it.
+- HA 2026.4.2 uses `voluptuous` config schemas; do not use newer `probatio` or `vol.Secret` APIs. API-key fields use password text selectors.
+- HA config/options UI has three expanded model sections (decider, smart-home answer, general), with prompts, connections, numeric settings and request limits kept in the relevant model section. General has an enable checkbox; disabled general requests use the fixed unsure reply. Prompt text is not templated; blank restores the default.
+- Integration uses direct HA actions and registry/state snapshots, never HA MCP or a long-lived HA token. Domain follows the selected action; state queries still classify a domain. It uses HA's exposed-entity settings minus optional exclusions and rechecks exposure before execution. Area actions expand to explicit exposed entity IDs.
+- Pure integration engine/client/settings tests run offline. `test_ha_integration.py` needs HA (Python 3.14.2+, `requirements-ha-test.txt`) and otherwise skips explicitly. GitHub Actions runs HA tests and hassfest. Do not claim those checks ran locally if HA could not be installed.
+- The integration is self-contained; its numeric helper is an isolated copy of the prototype helper. Keep probe/debugging behavior out of the HA path. Future MCP tools and multi-turn model context are not implemented.
 - Local Python 3.11+ prototype; eventual goal is a Home Assistant conversation agent integration.
 - Install dependencies: `python -m pip install -r requirements.txt` in a virtual environment.
 - Inspect built-in HA MCP: `python prototype.py --inspect`.

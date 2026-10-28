@@ -1,0 +1,31 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "sections": {
+          "decider": "mdi:routes",
+          "answer": "mdi:message-text",
+          "general": "mdi:brain"
+        }
+      },
+      "reconfigure": {
+        "sections": {
+          "decider": "mdi:routes",
+          "answer": "mdi:message-text",
+          "general": "mdi:brain"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "sections": {
+          "decider": "mdi:routes",
+          "answer": "mdi:message-text",
+          "general": "mdi:brain"
+        }
+      }
+    }
+  }
+}

@@ -1,6 +1,52 @@
 # GlowAssistant
 
-Local prototype for a future Home Assistant conversation agent. See [plan.md](plan.md).
+Home Assistant conversation agent, installable as a HACS custom integration. The local MCP prototype remains available for development. See [plan.md](plan.md).
+
+## Home Assistant integration
+
+Targets **Home Assistant 2026.4.2**; HACS minimum and HA test dependencies are pinned to that version. The integration is in `custom_components/glow_assistant` and uses HA's direct actions and state/area/entity registries. It does not need an HA token or HA MCP endpoint.
+
+Install from a checkout by copying `custom_components/glow_assistant` into your HA configuration's `custom_components` directory, then restart HA. Once these files are on GitHub, you can instead add `https://github.com/koriwi/GlowAssistant` under **HACS → Custom repositories**, category **Integration**, download it, and restart HA.
+
+1. Open **Settings → Devices & services → Add integration → GlowAssistant**.
+2. Fill in the **Decider** and **Smart-home answer** models. Each block contains its endpoint, model ID, API key, prompts, and limits. Model-only connection tests are optional checkboxes in those same blocks.
+3. Optionally enable and configure the **General model**. When disabled, unrelated requests return `ich bin mir nicht sicher`.
+4. Choose the new conversation entity as the conversation agent for an Assist pipeline under **Settings → Voice assistants**. STT/TTS stay configured in the Assist pipeline.
+
+Reopen **Configure** on the integration to edit the same grouped settings. Saving updates the existing entry and reloads the integration; a full HA restart is not required for those changes.
+
+Endpoint examples:
+
+| Model block | OpenRouter | llama.cpp |
+|---|---|---|
+| Decider | `https://openrouter.ai/api/alpha/decisions` | `http://MODEL-SERVER:8321/v1/systemone` |
+| Smart-home answer / General | `https://openrouter.ai/api/v1/chat/completions` | `http://MODEL-SERVER:8322/v1/chat/completions` |
+
+Use the actual host, port, and model ID for each server. **`localhost` means the machine/container running Home Assistant**, which may differ from your development machine. Each model has its own API-key field; the integration does not read the prototype's `.env` or inherit keys between models. Local unauthenticated servers can leave the key blank.
+
+Prompts are editable plain instructions. Request/context data is injected separately, with no Jinja or other templating. Clear a prompt field to restore its built-in default. Choice IDs and response validation remain code-managed. Confidence thresholds default to zero, preserving the prototype's behavior until configured.
+
+The decider uses **registered HA action names**, such as `light.turn_off`. The action determines its domain; the domain question is used for state queries. Brightness requests use a separate classifier candidate for `light.turn_on` with `brightness_pct`, and climate requests use `climate.set_temperature`. Execution currently supports target-only entity actions plus these two numeric parameters; other required parameter types are not advertised.
+
+HA's existing exposed-entity settings determine which entities are available, with an additional optional exclusion list. Area selection filters the context before target selection. Room-wide calls expand into explicit exposed, non-excluded entity IDs, and exposure is checked again before execution. This avoids affecting hidden or excluded devices in the same room. The original HA conversation context is attached to direct action calls.
+
+Temperature defaults remain **16–26, 9 anchors, whole-degree execution**, with the existing thermostat target as the relative baseline. Limits use HA's temperature unit; installations using Fahrenheit should adjust the defaults. Device min/max and step attributes further constrain temperature execution. Relative room-wide changes require a common known baseline; unresolved requests return the fixed unsure reply without a chat-model call.
+
+Input limits count **characters**, including the request instructions and candidate metadata; they are not estimated token counts. Oversized requests are rejected rather than silently truncated. Chat output limits count tokens. Model calls and actions are never automatically retried. If answer generation fails after an action completes, the separate configurable reply states that the command was sent but its answer could not be generated.
+
+MCP tools for the general model, conversation memory, color control, and extraction of other action parameters remain future work. HA maintains the conversation transcript, but previous turns are not yet sent to the models.
+
+## Integration development checks
+
+Offline checks, including the unchanged prototype suite:
+
+```bash
+python -m unittest -v
+```
+
+To also run the HA API/config-flow tests, use Python 3.14.2+ and install `requirements-ha-test.txt` alongside `requirements.txt`. Those seven tests are explicitly skipped when HA is unavailable. GitHub Actions installs HA, runs the tests, and runs hassfest. No tests execute real device actions or contact model servers.
+
+## Local prototype
 
 For isolated brightness/temperature extraction tests, see [numeric_probe.md](numeric_probe.md). That command does not execute HA tools or change the agent path.
 

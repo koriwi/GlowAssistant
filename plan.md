@@ -16,6 +16,9 @@ The prototype selects a tool or state query, domain, and target. State queries d
 
 ## Agreed choices
 
+- HACS integration lives in `custom_components/glow_assistant`, targeting the user's HA 2026.4.2; keep the local MCP prototype available separately.
+- Integration configuration groups all settings by model usage: Decider, Smart-home answer, General. Each block contains its own endpoint, model, key, prompts, timeout and applicable limits. General has one enable checkbox; disabled general queries use the fixed unsure reply.
+- Integration uses direct HA actions and cached registry/state data, with HA exposure settings and optional exclusions. Area actions expand to explicit allowed entity IDs. General-model MCP tools remain deferred.
 - Use HA's **built-in MCP server**, despite a third-party server also being available.
 - Endpoint: `https://assistant.gosewis.ch/api/mcp`.
 - Authenticate with a **long-lived HA token**.
