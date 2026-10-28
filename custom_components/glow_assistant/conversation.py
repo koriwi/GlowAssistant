@@ -5,6 +5,7 @@ from homeassistant.const import MATCH_ALL
 from homeassistant.helpers import intent
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from .chat_log_trace import ChatLogTrace
 from .client import ModelClient, ModelError
 from .engine import AgentEngine
 from .ha_context import async_execute, async_snapshot
@@ -48,7 +49,8 @@ class GlowConversationEntity(conversation.ConversationEntity, conversation.Abstr
         try:
             snapshot = await async_snapshot(self.hass, excluded)
             client = ModelClient(async_get_clientsession(self.hass))
-            result = await AgentEngine(self.settings, client, execute).process(
+            trace = ChatLogTrace(chat_log, user_input.agent_id)
+            result = await AgentEngine(self.settings, client, execute, trace=trace).process(
                 user_input.text, user_input.language, snapshot,
             )
             text = result["answer"]

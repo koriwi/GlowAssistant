@@ -36,6 +36,23 @@ Input limits count **characters**, including the request instructions and candid
 
 MCP tools for the general model, conversation memory, color control, and extraction of other action parameters remain future work. HA maintains the conversation transcript, but previous turns are not yet sent to the models.
 
+## Voice assistant debugging
+
+Open **Settings → Voice assistants → your assistant → Debug** and inspect a new run. GlowAssistant records its stages as native external tool calls/results in the upper conversation area:
+
+- `glow_assistant_select_service_and_domain`
+- `glow_assistant_select_area`
+- `glow_assistant_select_target`
+- `glow_assistant_extract_numeric_value`, when needed
+- `glow_assistant_execute_action`, for device commands
+- `glow_assistant_generate_answer` or `glow_assistant_general_answer`
+
+Expand a **Result for …** entry for the selected choice and resolved entity/area metadata, confidence, configured threshold, effective choice after the threshold, top alternatives, elapsed milliseconds, and returned model usage. The domain result is marked `used: false` when the domain comes directly from the selected HA action. Numeric results show the score/mode; the execution entry shows the actual applied arguments.
+
+Calls appear when each stage starts and get a result when it finishes. Failed model calls include their error and duration, preserving earlier completed stages. The final spoken response stays separate. These entries describe the existing pipeline; recording them does not make extra model calls or repeat device actions. API keys, endpoint URLs, and system-prompt templates are not attached to the trace.
+
+No frontend changes or resources are needed. Existing runs do not gain these records retroactively.
+
 ## Integration development checks
 
 Offline checks, including the unchanged prototype suite:

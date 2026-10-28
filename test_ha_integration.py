@@ -148,6 +148,22 @@ class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Smart-home answer generation failed: Model endpoint returned HTTP 401.", logs.output[0])
         self.assertEqual(result.response.speech["plain"]["speech"], self.settings()["error_reply"])
 
+    async def test_native_chat_log_accepts_external_decider_calls_and_results(self):
+        from homeassistant.components.conversation.chat_log import ChatLog
+
+        from custom_components.glow_assistant.chat_log_trace import ChatLogTrace
+
+        chat_log = ChatLog(hass=SimpleNamespace(data={}), conversation_id="conversation-trace")
+        trace = ChatLogTrace(chat_log, "conversation.glow")
+        trace("service", {"model": "decider"})
+        trace("service", {}, {"duration_ms": 42, "decisions": {"service": {"choice": "query_state", "confidence": 0.9}}})
+        call_message, result_message = chat_log.content[-2:]
+        self.assertEqual(call_message.role, "assistant")
+        self.assertTrue(call_message.tool_calls[0].external)
+        self.assertEqual(result_message.role, "tool_result")
+        self.assertEqual(result_message.tool_call_id, call_message.tool_calls[0].id)
+        self.assertEqual(result_message.tool_result["duration_ms"], 42)
+
 
 if __name__ == "__main__":
     unittest.main()

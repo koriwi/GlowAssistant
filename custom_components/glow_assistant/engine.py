@@ -4,6 +4,7 @@ from time import perf_counter
 
 from .client import ModelError
 from .const import GENERAL, QUERY, UNSURE
+from .debug import decision_details
 from .numeric_values import decode_numeric, finite_number, numeric_request
 
 
@@ -98,18 +99,41 @@ def current_setting(entity, parameter, baseline):
 
 
 class AgentEngine:
-    def __init__(self, settings, client, execute):
+    def __init__(self, settings, client, execute, trace=None):
         self.settings = settings
         self.client = client
         self.execute = execute
+        self.trace = trace
+
+    def _trace(self, stage, arguments, result=None):
+        if self.trace:
+            self.trace(stage, arguments, result)
 
     async def _decide(self, result, stage, state, questions):
+        config = self.settings["decider"]
+        self._trace(stage, {
+            "model": config["model"], **state,
+            "candidate_counts": {name: len(question["criteria"]) for name, question in questions.items()},
+        })
         started = perf_counter()
-        response = await self.client.decide(self.settings["decider"], state, questions)
-        result["timings_ms"][stage] = round((perf_counter() - started) * 1000)
-        result["usage"][stage] = response.get("usage", {})
-        result["decisions"][stage] = response.get("answers", {})
-        return response
+        details = {"status": "incomplete"}
+        try:
+            response = await self.client.decide(config, state, questions)
+            result["usage"][stage] = response.get("usage", {})
+            result["decisions"][stage] = response.get("answers", {})
+            details.update(
+                status="completed",
+                decisions=decision_details(questions, result["decisions"][stage], config),
+                usage=result["usage"][stage],
+            )
+            return response
+        except ModelError as error:
+            details.update(status="error", error=str(error))
+            raise
+        finally:
+            result["timings_ms"][stage] = round((perf_counter() - started) * 1000)
+            details["duration_ms"] = result["timings_ms"][stage]
+            self._trace(stage, {}, details)
 
     def _choice(self, response, question, options):
         threshold = self.settings["decider"][f"{question if question != 'numeric_mode' else 'numeric'}_confidence"]
@@ -197,12 +221,20 @@ class AgentEngine:
             arguments = {"entity_id": [entity["entity_id"] for entity in members]}
             if action["parameter"]:
                 arguments[action["parameter"]] = await self._numeric(result, members, action["parameter"])
+            self._trace("execution", {"service": action["service"], "arguments": arguments})
+            execution_started = perf_counter()
             try:
                 await self.execute(action["service"], arguments)
-            except ActionError:
-                result["execution"] = {"status": "error", "error": "Action failed; device outcome unconfirmed."}
+            except ActionError as error:
+                result["execution"] = {"status": "error", "error": f"Action failed; device outcome unconfirmed: {error}"}
             else:
                 result["execution"] = {"status": "completed", "arguments": arguments}
+            finally:
+                result["timings_ms"]["execution"] = round((perf_counter() - execution_started) * 1000)
+                self._trace("execution", {}, {
+                    **result.get("execution", {"status": "incomplete"}),
+                    "duration_ms": result["timings_ms"]["execution"],
+                })
         facts = {key: value for key, value in result.items()
                  if key not in ("decisions", "usage", "timings_ms")}
         try:
@@ -216,11 +248,20 @@ class AgentEngine:
             result["answer_error"] = str(error)
 
     async def _chat(self, result, stage, messages):
+        config = self.settings[stage]
+        self._trace(stage, {"model": config["model"], "max_tokens": config["max_tokens"]})
         started = perf_counter()
+        details = {"status": "incomplete"}
         try:
-            result["answer"], result["usage"][stage] = await self.client.chat(self.settings[stage], messages)
+            result["answer"], result["usage"][stage] = await self.client.chat(config, messages)
+            details.update(status="completed", answer=result["answer"], usage=result["usage"][stage])
+        except ModelError as error:
+            details.update(status="error", error=str(error))
+            raise
         finally:
             result["timings_ms"][stage] = round((perf_counter() - started) * 1000)
+            details["duration_ms"] = result["timings_ms"][stage]
+            self._trace(stage, {}, details)
 
     async def _numeric(self, result, members, service_parameter):
         parameter = "temperature" if service_parameter == "temperature" else "brightness"

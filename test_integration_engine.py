@@ -75,12 +75,92 @@ class ScriptedModels:
 
 
 class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
-    async def run_agent(self, choices, snapshot=SNAPSHOT, settings=None, answers=None, executor=None):
+    async def run_agent(self, choices, snapshot=SNAPSHOT, settings=None, answers=None, executor=None, trace=None):
         models = ScriptedModels(choices, answers)
         execute = executor or AsyncMock()
-        agent = AgentEngine(settings or normalize_settings({}), models, execute)
+        agent = AgentEngine(settings or normalize_settings({}), models, execute, trace=trace)
         result = await agent.process("test request", "de", snapshot)
         return result, models, execute
+
+    async def test_trace_reports_each_decision_and_action_without_extra_requests(self):
+        events = []
+        def trace(stage, arguments, result):
+            events.append(copy.deepcopy((stage, arguments, result)))
+        result, models, execute = await self.run_agent([
+            {"service": "light.turn_off", "domain": "unsure"},
+            {"area": "area:office"}, {"target": "area:office"},
+        ], trace=trace)
+        expected = ["service", "area", "target", "execution", "answer"]
+        self.assertEqual([stage for stage, _, output in events if output is None], expected)
+        self.assertEqual([stage for stage, _, output in events if output is not None], expected)
+        outputs = {stage: output for stage, _, output in events if output is not None}
+        choice = outputs["service"]["decisions"]["service"]
+        self.assertEqual(choice["choice"], "light.turn_off")
+        self.assertEqual(choice["confidence"], 0.9)
+        self.assertEqual(choice["selected"]["service"], "light.turn_off")
+        self.assertFalse(outputs["service"]["decisions"]["domain"]["used"])
+        self.assertEqual(outputs["target"]["decisions"]["target"]["selected"]["name"], "Office")
+        for stage in expected:
+            self.assertGreaterEqual(outputs[stage]["duration_ms"], 0)
+            self.assertEqual(outputs[stage]["status"], "completed")
+        self.assertEqual(outputs["service"]["usage"], {"input_tokens": 5})
+        self.assertEqual(outputs["execution"]["arguments"]["entity_id"], ["light.desk", "light.ceiling"])
+        self.assertEqual(outputs["answer"]["answer"], result["answer"])
+        self.assertEqual(len(models.requests), 3)
+        self.assertEqual(len(models.chat_requests), 1)
+        execute.assert_awaited_once()
+
+    async def test_trace_explains_confidence_rejection(self):
+        events = []
+        settings = normalize_settings({"decider": {"service_confidence": 0.95}})
+        result, _, execute = await self.run_agent(
+            [{"service": "light.turn_off"}], settings=settings, trace=lambda *event: events.append(event),
+        )
+        choice = events[-1][2]["decisions"]["service"]
+        self.assertEqual(choice["choice"], "light.turn_off")
+        self.assertEqual(choice["effective_choice"], "unsure")
+        self.assertEqual(choice["minimum_confidence"], 0.95)
+        self.assertEqual(result["route"], "unsure")
+        execute.assert_not_awaited()
+
+    async def test_trace_retains_failed_answer_timing_and_cause(self):
+        events = []
+        result, _, execute = await self.run_agent([
+            {"service": "query_state", "domain": "light"},
+            {"area": "area:office"}, {"target": "area:office"},
+        ], answers=[ModelError("Model endpoint returned HTTP 401.")], trace=lambda *event: events.append(event))
+        stage, _, output = events[-1]
+        self.assertEqual(stage, "answer")
+        self.assertEqual(output["status"], "error")
+        self.assertEqual(output["error"], result["answer_error"])
+        self.assertIn("duration_ms", output)
+        execute.assert_not_awaited()
+
+    async def test_trace_retains_decider_failure_without_running_later_stages(self):
+        events = []
+        models = ScriptedModels([])
+        models.decide = AsyncMock(side_effect=ModelError("Model connection failed."))
+        execute = AsyncMock()
+        agent = AgentEngine(normalize_settings({}), models, execute, trace=lambda *event: events.append(event))
+        with self.assertRaisesRegex(ModelError, "connection failed"):
+            await agent.process("test", "de", SNAPSHOT)
+        self.assertEqual(len(events), 2)
+        self.assertEqual(events[-1][0], "service")
+        self.assertEqual(events[-1][2]["status"], "error")
+        self.assertIn("duration_ms", events[-1][2])
+        execute.assert_not_awaited()
+
+    async def test_trace_does_not_include_model_credentials_or_prompt_templates(self):
+        events = []
+        settings = normalize_settings({"decider": {"api_key": "secret-decider", "service_prompt": "private-template"},
+                                       "answer": {"api_key": "secret-answer"}})
+        await self.run_agent([
+            {"service": "query_state", "domain": "light"},
+            {"area": "area:office"}, {"target": "area:office"},
+        ], settings=settings, trace=lambda *event: events.append(event))
+        serialized = json.dumps(events)
+        for secret in ("secret-decider", "secret-answer", "private-template"):
+            self.assertNotIn(secret, serialized)
 
     async def test_direct_action_uses_its_domain_and_filtered_room_targets(self):
         result, models, execute = await self.run_agent([
@@ -200,7 +280,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         facts = json.loads(models.chat_requests[0][1][1]["content"])
         self.assertIn("unconfirmed", facts["execution"]["error"])
 
-    async def run_numeric(self, currents=(21,), score=4.02, mode="relative", parameter="temperature", settings=None):
+    async def run_numeric(self, currents=(21,), score=4.02, mode="relative", parameter="temperature", settings=None, trace=None):
         climate = parameter == "temperature"
         name = "climate.set_temperature" if climate else "light.turn_on"
         field = "temperature" if climate else "brightness_pct"
@@ -213,7 +293,19 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         return await self.run_agent([
             {"service": f"{name}:{field}"}, {"area": "area:office"}, {"target": "area:office"},
             {"numeric_mode": mode, "numeric_score": score},
-        ], snapshot=snapshot, settings=settings)
+        ], snapshot=snapshot, settings=settings, trace=trace)
+
+    async def test_numeric_trace_shows_score_confidence_and_actual_applied_value(self):
+        events = []
+        await self.run_numeric(trace=lambda *event: events.append(event))
+        numeric_input = next(arguments for stage, arguments, output in events if stage == "numeric" and output is None)
+        outputs = {stage: output for stage, _, output in events if output is not None}
+        self.assertEqual(numeric_input["current"], 21)
+        self.assertEqual(numeric_input["candidate_counts"]["numeric_score"], 9)
+        self.assertEqual(outputs["numeric"]["decisions"]["numeric_score"]["score"], 4.02)
+        self.assertEqual(outputs["numeric"]["decisions"]["numeric_score"]["confidence"], 0.9)
+        self.assertEqual(outputs["numeric"]["decisions"]["numeric_mode"]["choice"], "relative")
+        self.assertEqual(outputs["execution"]["arguments"]["temperature"], 22)
 
     async def test_temperature_is_quantized_and_relative_direction_preserved(self):
         result, models, execute = await self.run_numeric()
