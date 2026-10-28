@@ -7,10 +7,37 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from tts_answer import answer_config, answer_context, generate_answer
+from tts_answer import answer_config, answer_context, general_config, generate_answer, generate_general_answer
 
 
 class AnswerTests(unittest.TestCase):
+    def test_general_configuration_is_independent_and_uses_its_own_key(self):
+        with patch.dict(os.environ, {
+            "GENERAL_URL": "http://localhost:8323/v1/chat/completions", "GENERAL_MODEL": "smart-model",
+            "ANSWER_API_KEY": "small-model-key", "DECIDER_API_KEY": "decider-key", "OPENROUTER_API_KEY": "router-key",
+        }, clear=True):
+            self.assertEqual(general_config(), {
+                "url": "http://localhost:8323/v1/chat/completions", "model": "smart-model", "api_key": None,
+            })
+            os.environ["GENERAL_API_KEY"] = "general-key"
+            self.assertEqual(general_config()["api_key"], "general-key")
+        with patch.dict(os.environ, {
+            "GENERAL_URL": "https://openrouter.ai/api/v1/chat/completions", "GENERAL_MODEL": "provider/smart-model",
+            "OPENROUTER_API_KEY": "router-key",
+        }, clear=True):
+            self.assertEqual(general_config()["api_key"], "router-key")
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertIsNone(general_config())
+
+    def test_general_model_receives_original_question_without_ha_context_or_tools(self):
+        config = {"url": "http://localhost:8323/v1/chat/completions", "model": "smart-model", "api_key": None}
+        with patch("tts_answer.call_chat", new_callable=AsyncMock, return_value=("330 Meter.", {})) as chat:
+            self.assertEqual(asyncio.run(generate_general_answer("Wie hoch ist der Eiffelturm?", config)), ("330 Meter.", {}))
+        messages, actual_config = chat.await_args.args
+        self.assertEqual(actual_config, config)
+        self.assertEqual(messages[1], {"role": "user", "content": "Wie hoch ist der Eiffelturm?"})
+        self.assertEqual(chat.await_args.kwargs, {"max_tokens": 2048, "label": "General"})
+
     def test_configuration_is_optional_and_independent(self):
         with patch.dict(os.environ, {"OPENROUTER_API_KEY": "router-key"}, clear=True):
             self.assertIsNone(answer_config())

@@ -19,22 +19,38 @@ ANSWER_INSTRUCTIONS = (
 )
 
 
-def answer_config():
-    url = os.environ.get("ANSWER_URL", "").strip()
-    model = os.environ.get("ANSWER_MODEL", "").strip()
+GENERAL_INSTRUCTIONS = (
+    "Answer the user's question directly and accurately. Reply in the user's language. "
+    "Keep the reply concise and suitable for speaking aloud: plain text, no markdown or SSML. "
+    "Say when you are uncertain or lack current information. You have no tools, live data, "
+    "or access to the user's smart home; do not claim to control devices or look things up."
+)
+
+
+def chat_config(prefix):
+    url = os.environ.get(f"{prefix}_URL", "").strip()
+    model = os.environ.get(f"{prefix}_MODEL", "").strip()
     if not url and not model:
         return None
     parsed = urlsplit(url)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
-        raise ValueError("ANSWER_URL must be a full HTTP(S) chat completions endpoint URL.")
+        raise ValueError(f"{prefix}_URL must be a full HTTP(S) chat completions endpoint URL.")
     if not model:
-        raise ValueError("Missing ANSWER_MODEL; set it in .env or the environment.")
-    key = os.environ.get("ANSWER_API_KEY", "").strip()
+        raise ValueError(f"Missing {prefix}_MODEL; set it in .env or the environment.")
+    key = os.environ.get(f"{prefix}_API_KEY", "").strip()
     if not key and parsed.hostname == "openrouter.ai":
         key = os.environ.get("OPENROUTER_API_KEY", "").strip()
         if not key:
-            raise ValueError("Set ANSWER_API_KEY or OPENROUTER_API_KEY for OpenRouter answers.")
+            raise ValueError(f"Set {prefix}_API_KEY or OPENROUTER_API_KEY for OpenRouter answers.")
     return {"url": url, "model": model, "api_key": key or None}
+
+
+def answer_config():
+    return chat_config("ANSWER")
+
+
+def general_config():
+    return chat_config("GENERAL")
 
 
 def answer_context(result):
@@ -64,30 +80,43 @@ def answer_context(result):
 
 
 async def generate_answer(result, config):
+    return await call_chat([
+        {"role": "system", "content": ANSWER_INSTRUCTIONS},
+        {"role": "user", "content": json.dumps(answer_context(result), ensure_ascii=False)},
+    ], config, max_tokens=256)
+
+
+async def generate_general_answer(prompt, config):
+    if not config:
+        raise ValueError("Set GENERAL_URL and GENERAL_MODEL for non-smart-home requests.")
+    return await call_chat([
+        {"role": "system", "content": GENERAL_INSTRUCTIONS},
+        {"role": "user", "content": prompt},
+    ], config, max_tokens=2048, label="General")
+
+
+async def call_chat(messages, config, max_tokens, label="Answer"):
     import httpx
 
     payload = {
         "model": config["model"],
-        "messages": [
-            {"role": "system", "content": ANSWER_INSTRUCTIONS},
-            {"role": "user", "content": json.dumps(answer_context(result), ensure_ascii=False)},
-        ],
+        "messages": messages,
         "temperature": 0.2,
-        "max_tokens": 256,
+        "max_tokens": max_tokens,
     }
     headers = {"Authorization": f"Bearer {config['api_key']}"} if config["api_key"] else {}
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(config["url"], json=payload, headers=headers)
     if response.is_error:
-        raise ValueError(f"Answer endpoint HTTP {response.status_code}.")
+        raise ValueError(f"{label} endpoint HTTP {response.status_code}.")
     data = response.json()
     try:
         choice = data["choices"][0]
         text = choice["message"]["content"]
     except (KeyError, IndexError, TypeError) as error:
-        raise ValueError("Answer endpoint returned no message content.") from error
+        raise ValueError(f"{label} endpoint returned no message content.") from error
     if not isinstance(text, str) or not text.strip():
-        raise ValueError("Answer endpoint returned empty or non-text content.")
+        raise ValueError(f"{label} endpoint returned empty or non-text content.")
     if choice.get("finish_reason") == "length":
-        raise ValueError("Answer endpoint truncated the reply at the token limit.")
+        raise ValueError(f"{label} endpoint truncated the reply at the token limit.")
     return text.strip(), data.get("usage", {})

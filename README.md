@@ -42,9 +42,28 @@ OPENROUTER_API_KEY=your-openrouter-key
 
 The server must support the native `state`/`questions` → `answers` decision protocol. llama.cpp provides this at [`/v1/systemone`](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md#post-v1systemone-typesafe-compatible-system-one-api) for native decision models. An OpenAI-compatible `/v1/chat/completions` endpoint alone does not implement this protocol.
 
+## Uncertain and general requests
+
+The service decision distinguishes two fallback choices:
+
+- `unsure`: ambiguous or unsupported smart-home request. Returns exactly `ich bin mir nicht sicher`, with no answer-model or device call. This also applies to unresolved domain/area/target choices and skipped numeric operations, even without a configured answer endpoint.
+- `not-smarthome-related`: general knowledge or conversation, such as `wie hoch ist der eiffelturm?`. Skips area/target selection and device execution, and sends the original request to a separately configured smart model.
+
+Configure the general model independently, using a full chat-completions endpoint:
+
+```dotenv
+GENERAL_URL=https://openrouter.ai/api/v1/chat/completions
+GENERAL_MODEL=your-provider/smart-model-id
+GENERAL_API_KEY=your-openrouter-key
+```
+
+For local llama.cpp, use your server's URL, for example `http://localhost:8323/v1/chat/completions`, its model ID, and an optional key. `OPENROUTER_API_KEY` is a fallback only for the `openrouter.ai` host. An unconfigured general endpoint produces an explicit `answer_error` for unrelated requests; it is not required for smart-home requests.
+
+General replies are generated directly as concise, speech-ready text in the user's language. They bypass the small `ANSWER_MODEL` and have no tools or MCP access in this version. JSON includes `route` (`smarthome`, `unsure`, or `not-smarthome-related`); general requests add `usage.general` and `timings_ms.general`. Mixed smart-home/general requests and unavailable smart-home operations use `unsure`.
+
 ## Spoken answers
 
-Optionally generate a short reply for TTS after state lookup or command execution. This uses a separate chat model; it does not synthesize audio. Leave `ANSWER_URL` and `ANSWER_MODEL` blank to keep the existing behavior.
+Optionally generate a short reply for TTS after a resolved smart-home state lookup or command execution. This uses a separate chat model; it does not synthesize audio. Leave `ANSWER_URL` and `ANSWER_MODEL` blank to disable this stage; fixed `unsure` replies and general-model routing still apply.
 
 For a local llama.cpp server running a text/chat model:
 
@@ -85,7 +104,7 @@ Fetches MCP tools and Assist context once per script run and keeps that snapshot
 3. Select an entity or area target from candidates filtered by both domain and selected area.
 4. For temperature/brightness setters, extract a numeric value before MCP execution.
 
-The area call receives the prompt and area names/aliases only. `no_area` keeps all candidates from the selected domain when the request identifies no specific room. `other` represents unknown, ambiguous, or multiple requested areas and stops target selection. A known area with no entities in the selected domain also stops selection. No cache is written to disk.
+The area call receives the prompt and area names/aliases only. `no_area` keeps all candidates from the selected domain when the request identifies no specific room. `unsure` represents unknown, ambiguous, or multiple requested areas and stops target selection. A known area with no entities in the selected domain also stops selection. No cache is written to disk.
 
 The service/domain request sends only the user prompt, advertised tool definitions, and available domain choices. The entity catalog is kept locally for the subsequent target and numeric stages.
 
@@ -103,7 +122,7 @@ execution: completed
 arguments: {"domain": ["light"], "area": "Wohnzimmer"}
 ```
 
-The `service` is the actual advertised MCP tool name, rather than an inferred HA service such as `light.turn_off`. If the tool or domain is `other`, target selection is skipped and the summary shows `none`. A target decision of `other` is displayed as `other`.
+The `service` is the actual advertised MCP tool name, rather than an inferred HA service such as `light.turn_off`. If the tool or domain is `unsure`, target selection is skipped and the target summary shows `none`. A target decision of `unsure` is displayed as `unsure`. `not-smarthome-related` is an additional service choice, used only to route unrelated requests.
 
 Execution supports tools whose parameters are limited to target fields (`name`, `area`, `floor`, `domain`, `device_class`). Entity calls use a known name/alias, the area where available, and a domain filter where supported. Area calls send the canonical area name and supported domain filter. Snapshot-local choice IDs are never sent as HA entity IDs. Duplicate entity names within the available scope are skipped.
 
@@ -141,7 +160,7 @@ state: 21.5 °C
 
 Area queries list the states of each entity in the selected area and domain. Climate entities display their state plus measurements such as `current_temperature` and `temperature`. Unknown/unavailable states are shown explicitly; the summary suppresses their potentially stale attributes. If no target is identified, it reports that no state data is available. Values come directly from the cached context without another MCP or model request.
 
-JSON contains `service: null`, the `query_state` choice in the first decision, and a `state_info` list with the matching entries and their raw state/attribute data. `query_state` remains distinct from an unsupported request (`other`). Single measurements should select their reporting entity; questions about a group can select an area.
+JSON contains `service: null`, the `query_state` choice in the first decision, and a `state_info` list with the matching entries and their raw state/attribute data. `query_state` remains distinct from an unsupported request (`unsure`). Single measurements should select their reporting entity; questions about a group can select an area.
 
 For full scores, alternatives, selected metadata, per-request usage/cost, and timings:
 
@@ -153,7 +172,7 @@ Set `DECIDER_MODEL` to try another compatible decision model. The fallback is `M
 
 Target choices get temporary IDs such as `entity_001` and `area_001`. These IDs belong to that classification request; they are not HA registry IDs. Area aliases are grouped with their canonical name. Entities outside the selected domain or selected area are excluded; requests with `no_area` retain the full domain scope. The final target choice still distinguishes a specific device from a room-wide target.
 
-Specific device requests select an entity. Room-wide requests such as "turn off the lights in the living room" select an area. `other` covers no match, unresolved ambiguity, or multiple targets that cannot be represented by one area. Identical entity entries remain separate candidates; the classifier is instructed to choose `other` when it cannot distinguish the target.
+Specific device requests select an entity. Room-wide requests such as "turn off the lights in the living room" select an area. `unsure` covers no match, unresolved ambiguity, or multiple targets that cannot be represented by one area. Identical entity entries remain separate candidates; the classifier is instructed to choose `unsure` when it cannot distinguish the target.
 
 An area target identifies the room. The separately selected `domain`, such as `light`, limits the call to that category when the tool supports a domain parameter.
 

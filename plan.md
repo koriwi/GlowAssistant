@@ -22,14 +22,17 @@ The prototype selects a tool or state query, domain, and target. State queries d
 - Default to **Jev through OpenRouter**. Configure the full native decision endpoint, model ID, and optional key through `DECIDER_URL`, `DECIDER_MODEL`, and `DECIDER_API_KEY`; local llama.cpp can use `http://localhost:8321/v1/systemone`.
 - Fetch MCP tools/context once per run and reuse that in-memory snapshot for all classification stages. No disk cache.
 - Select service/domain in request 1, an area from names/aliases in request 2, then a target filtered by domain and area in request 3.
-- Area selection has `no_area` for requests without a specific room and `other` for unknown/ambiguous/multiple rooms. `no_area` preserves domain-wide target selection; `other` stops selection.
+- Area selection has `no_area` for requests without a specific room and `unsure` for unknown/ambiguous/multiple rooms. `no_area` preserves domain-wide target selection; `unsure` stops selection.
 - Include `query_state` for current-state/measurement questions. It needs no service and reuses cached states/attributes, while still selecting a domain and target.
 - Display selected entity states/attributes with available units for `query_state`; area queries list matching entities in the selected domain.
 - Execute target-only tools and supported temperature/brightness setters. Numeric setters use a fourth Jev Score request. Other extra values are skipped; no automatic retries.
 - Temperature range/levels are constants: 16–26 °C, 9 levels. Relative changes use the existing thermostat target setting.
 - Temperature execution uses a 1 °C step constant based on the user's device metadata; raw fractional estimates are rounded before MCP execution.
 - Report the actual MCP tool name, such as `assist__HassTurnOff`, plus domain, rather than mapping it to an underlying HA service name.
-- Include an explicit `other` option.
+- Include an explicit `unsure` option.
+- `unsure` returns the fixed answer `ich bin mir nicht sicher`, bypassing chat models and device execution.
+- Service selection also offers `not-smarthome-related` for general questions. Route those directly to an independent smart chat endpoint (`GENERAL_URL`, `GENERAL_MODEL`, `GENERAL_API_KEY`); no MCP/tools for that model yet.
+- Resolved smart-home results can use the separate small answer model (`ANSWER_URL`, `ANSWER_MODEL`, `ANSWER_API_KEY`) to produce speech-ready text. General-model answers bypass this stage.
 - Select context entries using temporary choice IDs; exact HA entity IDs are not required for this prototype.
 - Include one choice per distinct area, grouping its aliases. Select an area for room-wide requests and an entity for specific device requests.
 - Keep the implementation simple: one script, no agent framework or speculative abstractions.
@@ -66,9 +69,9 @@ Do not assume MCP exposes every HA entity or every metadata field. If the respon
 - [x] Create one option per available entity using its identifying metadata.
 - [x] Add one option per area with canonical name, aliases, and available domains.
 - [x] Preserve a deterministic mapping from each option to its target within the snapshot.
-- [x] Add `other`: no single entity or area target can represent the request.
+- [x] Add `unsure`: no single entity or area target can represent the request.
 
-For this baseline, `other` includes no match, unresolved ambiguity, and multiple targets that cannot be represented by one area. Room-wide requests such as "turn off the lights in the living room" select the area instead of one lamp or `other`. Use available metadata; do not invent missing aliases or locations.
+For this baseline, `unsure` includes no match, unresolved ambiguity, and multiple targets that cannot be represented by one area. Room-wide requests such as "turn off the lights in the living room" select the area instead of one lamp or `unsure`. Use available metadata; do not invent missing aliases or locations.
 
 ### 3. Classify the service and domain
 
@@ -77,14 +80,14 @@ For this baseline, `other` includes no match, unresolved ambiguity, and multiple
 - [x] Add a distinct `query_state` choice for information available in cached states/attributes.
 - [x] Ask Jev for the MCP tool and domain in the first request.
 - [x] Validate both selections, including explicit tool domain restrictions where provided.
-- [x] Skip target selection when tool or domain is `other`.
+- [x] Skip target selection when tool or domain is `unsure`.
 - [x] Continue domain/target selection for `query_state` and report no service.
 
 ### 4. Select an area and classify the target
 
 - [x] Extract all areas and aliases from cached entity context without another MCP fetch.
 - [x] Send only the prompt and area names/aliases to a dedicated area decider call.
-- [x] Distinguish `no_area` from unsupported/ambiguous area references (`other`).
+- [x] Distinguish `no_area` from unsupported/ambiguous area references (`unsure`).
 - [x] Implement a Decisions API request using Jev's `Choice` primitive.
 - [x] Filter entity and area choices to the selected domain and area, then pass selected tool/domain/area as context.
 - [x] Skip the target call for unknown/ambiguous areas or known areas without matching domain entities.
@@ -92,7 +95,7 @@ For this baseline, `other` includes no match, unresolved ambiguity, and multiple
 - [x] Validate that the selection belongs to the supplied choices.
 - [ ] Verify a real OpenRouter request.
 
-API failures and invalid responses are errors, not `other` selections.
+API failures and invalid responses are errors, not `unsure` selections.
 
 ### 5. Extract supported numeric values and execute tools
 
@@ -122,7 +125,7 @@ API failures and invalid responses are errors, not `other` selections.
 ## Done when
 
 - A local CLI run fetches real HA tools/context once and returns real Jev service/domain and target decisions.
-- Entity selections, area selections, and `other` can be inspected with their scores.
+- Entity selections, area selections, and `unsure` can be inspected with their scores.
 - Failures are visible, query-state requests do not execute device actions, and supported target-only and numeric setters can execute through MCP.
 
 ## Later

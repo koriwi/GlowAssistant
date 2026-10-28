@@ -35,7 +35,7 @@ INSPECTION = {
 
 
 def response(choice="entity_001"):
-    probabilities = dict.fromkeys(("entity_001", "entity_002", "area_001", "area_002", "other"), 0.05)
+    probabilities = dict.fromkeys(("entity_001", "entity_002", "area_001", "area_002", "unsure"), 0.05)
     if choice in probabilities:
         probabilities[choice] = 0.8
     return {
@@ -52,9 +52,9 @@ def response(choice="entity_001"):
 
 
 def service_response(tool="assist__HassTurnOff", domain="light"):
-    tool_scores = dict.fromkeys(("assist__HassTurnOn", "assist__HassTurnOff", "query_state", "other"), 0.1)
+    tool_scores = dict.fromkeys(("assist__HassTurnOn", "assist__HassTurnOff", "query_state", "unsure", "not-smarthome-related"), 0.1)
     tool_scores[tool] = 0.7
-    domain_scores = {"light": 0.1, "other": 0.1}
+    domain_scores = {"light": 0.1, "unsure": 0.1}
     domain_scores[domain] = 0.9
     return {
         "answers": {
@@ -67,7 +67,7 @@ def service_response(tool="assist__HassTurnOff", domain="light"):
 
 def area_response(inspection, choice):
     options, _ = area_request("test", parse_entities(inspection))
-    scores = dict.fromkeys([*options, "other"], 0)
+    scores = dict.fromkeys([*options, "unsure"], 0)
     scores[choice] = 1
     return {"answers": {"area": {
         "type": "choice", "choice": choice, "confidence": 1, "probabilities": scores,
@@ -98,12 +98,12 @@ def numeric_case(parameter="temperature", currents=(20.5,), mode="relative", sco
     }
     first = service_response()
     first["answers"]["service"].update(choice=tool_name,
-        probabilities={tool_name: 0.9, "query_state": 0.05, "other": 0.05})
-    first["answers"]["domain"].update(choice=domain, probabilities={domain: 0.9, "other": 0.1})
+        probabilities={tool_name: 0.9, "query_state": 0.05, "unsure": 0.05, "not-smarthome-related": 0})
+    first["answers"]["domain"].update(choice=domain, probabilities={domain: 0.9, "unsure": 0.1})
     target = response()
     target["answers"]["target"]["probabilities"] = {
         **{f"entity_{index:03}": 0 for index in range(1, len(entities) + 1)},
-        "area_001": 0.1, "other": 0.1,
+        "area_001": 0.1, "unsure": 0.1,
     }
     target["answers"]["target"]["probabilities"]["entity_001"] = 0.8
     levels = 9 if climate else 6
@@ -112,7 +112,7 @@ def numeric_case(parameter="temperature", currents=(20.5,), mode="relative", sco
     scores[str(lower)] = 1 - (score - lower)
     if score != lower:
         scores[str(lower + 1)] = score - lower
-    modes = {"absolute": 0.1, "relative": 0.1, "other": 0.1}
+    modes = {"absolute": 0.1, "relative": 0.1, "unsure": 0.1}
     modes[mode] = 0.8
     numeric = {"answers": {
         "numeric_score": {"type": "score", "score": score, "confidence": 0.8, "probabilities": scores},
@@ -124,7 +124,7 @@ def numeric_case(parameter="temperature", currents=(20.5,), mode="relative", sco
 class PrototypeTests(unittest.TestCase):
     def run_cli(self, responses, inspection=INSPECTION, json_output=True,
                 prompt="turn off the lights in the office", executor=None, exit_code=0, area_choice="no_area",
-                answer_settings=None):
+                answer_settings=None, general_settings=None):
         inspector = AsyncMock(return_value=inspection)
         responses = list(responses)
         if len(responses) > 1:
@@ -146,6 +146,7 @@ class PrototypeTests(unittest.TestCase):
             patch.object(sys, "argv", argv),
             patch("prototype.load_dotenv"),
             patch("prototype.answer_config", return_value=answer_settings),
+            patch("prototype.general_config", return_value=general_settings),
             patch("prototype.setting", return_value="test-credential"),
             patch("prototype.mcp_session", new=connection),
             patch("prototype.inspect_mcp", new=inspector),
@@ -161,6 +162,105 @@ class PrototypeTests(unittest.TestCase):
             output, _, _ = self.run_cli([service_response(), response()])
         generator.assert_not_awaited()
         self.assertNotIn("answer", json.loads(output))
+
+    def test_unsure_returns_fixed_answer_without_chat_or_device_calls(self):
+        cases = (
+            ([service_response("unsure")], "no_area"),
+            ([service_response(domain="unsure")], "no_area"),
+            ([service_response(), response()], "unsure"),
+            ([service_response(), response("unsure")], "no_area"),
+            ([service_response("query_state"), response("unsure")], "no_area"),
+        )
+        for responses, area in cases:
+            executor = AsyncMock()
+            with self.subTest(responses=responses, area=area), \
+                    patch("prototype.generate_answer", new_callable=AsyncMock) as formatter, \
+                    patch("prototype.generate_general_answer", new_callable=AsyncMock) as general:
+                output, _, _ = self.run_cli(
+                    responses, area_choice=area, executor=executor, answer_settings={"model": "small"},
+                    general_settings={"model": "smart"},
+                )
+            result = json.loads(output)
+            self.assertEqual(result["route"], "unsure")
+            self.assertEqual(result["answer"], "ich bin mir nicht sicher")
+            formatter.assert_not_awaited()
+            general.assert_not_awaited()
+            executor.assert_not_awaited()
+
+    def test_numeric_unsure_returns_fixed_answer(self):
+        inspection, responses = numeric_case(mode="unsure")
+        executor = AsyncMock()
+        with patch("prototype.generate_answer", new_callable=AsyncMock) as formatter:
+            output, _, _ = self.run_cli(
+                responses, inspection=inspection, executor=executor, answer_settings={"model": "small"},
+            )
+        self.assertEqual(json.loads(output)["answer"], "ich bin mir nicht sicher")
+        formatter.assert_not_awaited()
+        executor.assert_not_awaited()
+
+    def test_unsure_answer_is_available_without_configured_chat_endpoints(self):
+        output, _, _ = self.run_cli([service_response("unsure")], json_output=False)
+        self.assertIn("answer: ich bin mir nicht sicher\n", output)
+
+    def test_unrelated_request_uses_only_general_endpoint_after_first_decision(self):
+        for domain in ("light", "unsure"):
+            executor = AsyncMock()
+            settings = {"model": "smart"}
+            with self.subTest(domain=domain), \
+                    patch("prototype.generate_general_answer", new_callable=AsyncMock,
+                          return_value=("Der Eiffelturm ist 330 Meter hoch.", {"completion_tokens": 12})) as general, \
+                    patch("prototype.generate_answer", new_callable=AsyncMock) as formatter:
+                output, _, decider = self.run_cli(
+                    [service_response("not-smarthome-related", domain)], prompt="wie hoch ist der eiffelturm?",
+                    executor=executor, general_settings=settings, answer_settings={"model": "small"},
+                )
+            result = json.loads(output)
+            self.assertEqual(result["service"], "not-smarthome-related")
+            self.assertEqual(result["route"], "not-smarthome-related")
+            self.assertEqual(result["answer"], "Der Eiffelturm ist 330 Meter hoch.")
+            self.assertEqual(result["usage"]["general"], {"completion_tokens": 12})
+            self.assertIn("general", result["timings_ms"])
+            self.assertIsNone(result["decisions"]["area"])
+            self.assertIsNone(result["decisions"]["target"])
+            general.assert_awaited_once_with("wie hoch ist der eiffelturm?", settings)
+            self.assertEqual(decider.await_count, 1)
+            formatter.assert_not_awaited()
+            executor.assert_not_awaited()
+
+    def test_missing_general_endpoint_reports_configuration_error(self):
+        executor = AsyncMock()
+        with patch("tts_answer.call_chat", new_callable=AsyncMock) as chat:
+            output, _, _ = self.run_cli(
+                [service_response("not-smarthome-related")], executor=executor, exit_code=1,
+            )
+        result = json.loads(output)
+        self.assertIn("GENERAL_URL and GENERAL_MODEL", result["answer_error"])
+        self.assertNotIn("answer", result)
+        chat.assert_not_awaited()
+        executor.assert_not_awaited()
+
+    def test_general_endpoint_failure_does_not_fall_back_to_other_models(self):
+        with patch("prototype.generate_general_answer", new_callable=AsyncMock,
+                   side_effect=ValueError("General endpoint HTTP 503")) as general, \
+                patch("prototype.generate_answer", new_callable=AsyncMock) as formatter:
+            output, _, _ = self.run_cli(
+                [service_response("not-smarthome-related")], general_settings={"model": "smart"},
+                answer_settings={"model": "small"}, exit_code=1,
+            )
+        self.assertEqual(json.loads(output)["answer_error"], "General endpoint HTTP 503")
+        general.assert_awaited_once()
+        formatter.assert_not_awaited()
+
+    def test_unrelated_is_only_an_option_in_the_service_question(self):
+        entities = parse_entities(INSPECTION)
+        _, _, service = service_request("test", INSPECTION, entities)
+        _, area = area_request("test", entities)
+        _, target = decision_request("test", entities)
+        for payload in (service, area, target):
+            for name, question in payload["questions"].items():
+                self.assertNotIn("other", question["criteria"])
+                self.assertIn("unsure", question["criteria"])
+                self.assertEqual("not-smarthome-related" in question["criteria"], name == "service")
 
     def test_query_answer_receives_selected_cached_state(self):
         with patch("prototype.generate_answer", new_callable=AsyncMock,
@@ -266,7 +366,7 @@ class PrototypeTests(unittest.TestCase):
         self.assertEqual(set(tools), {"assist__HassTurnOn", "assist__HassTurnOff", "query_state"})
         self.assertEqual(domains, {"light": "light"})
         self.assertEqual(payload["state"], {"prompt": "turn off the lights"})
-        self.assertEqual(set(payload["questions"]["service"]["criteria"]), set(tools) | {"other"})
+        self.assertEqual(set(payload["questions"]["service"]["criteria"]), set(tools) | {"unsure", "not-smarthome-related"})
         services, _, _ = service_request("is the lamp on?", {"tools": []}, entities)
         self.assertEqual(set(services), {"query_state"})
 
@@ -285,7 +385,7 @@ class PrototypeTests(unittest.TestCase):
         ])
         self.assertEqual(payload["state"], {"prompt": "turn off lights in the study"})
         self.assertEqual(set(payload["questions"]["area"]["criteria"]),
-                         {"area_001", "area_002", "area_003", "no_area", "other"})
+                         {"area_001", "area_002", "area_003", "no_area", "unsure"})
 
     def test_target_request_filters_both_domain_and_canonical_area(self):
         entities = parse_entities(INSPECTION) + [
@@ -301,7 +401,7 @@ class PrototypeTests(unittest.TestCase):
 
     def test_area_selection_filters_next_call_and_preserves_canonical_execution_target(self):
         target = response("area_001")
-        target["answers"]["target"]["probabilities"] = {"entity_001": 0.1, "area_001": 0.8, "other": 0.1}
+        target["answers"]["target"]["probabilities"] = {"entity_001": 0.1, "area_001": 0.8, "unsure": 0.1}
         executor = AsyncMock(return_value={"status": "completed"})
         output, inspector, decider = self.run_cli(
             [service_response(), target], executor=executor, area_choice="area_001",
@@ -314,7 +414,7 @@ class PrototypeTests(unittest.TestCase):
         self.assertEqual(decider.await_count, 3)
         target_payload, _ = decider.await_args_list[2].args
         self.assertEqual(set(target_payload["questions"]["target"]["criteria"]),
-                         {"entity_001", "area_001", "other"})
+                         {"entity_001", "area_001", "unsure"})
         executor.assert_awaited_once_with(inspector.await_args.args[0], "assist__HassTurnOff", {
             "domain": ["light"], "area": "Office",
         })
@@ -335,12 +435,12 @@ class PrototypeTests(unittest.TestCase):
                 with self.subTest(service=service, prompt=prompt):
                     executor = AsyncMock()
                     output, inspector, decider = self.run_cli(
-                        [service_response(service), response()], area_choice="other", prompt=prompt, executor=executor,
+                        [service_response(service), response()], area_choice="unsure", prompt=prompt, executor=executor,
                     )
                     result = json.loads(output)
                     self.assertIsNone(result["target"])
                     self.assertIsNone(result["decisions"]["target"])
-                    self.assertEqual(result["decisions"]["area"]["choice"], "other")
+                    self.assertEqual(result["decisions"]["area"]["choice"], "unsure")
                     self.assertEqual(decider.await_count, 2)
                     executor.assert_not_awaited()
                     inspector.assert_awaited_once()
@@ -365,7 +465,7 @@ class PrototypeTests(unittest.TestCase):
     def test_area_selection_handles_context_with_no_area_metadata(self):
         options, payload = area_request("turn on the lamp", [{"names": "Lamp", "domain": "light"}])
         self.assertEqual(set(options), {"no_area"})
-        self.assertEqual(set(payload["questions"]["area"]["criteria"]), {"no_area", "other"})
+        self.assertEqual(set(payload["questions"]["area"]["criteria"]), {"no_area", "unsure"})
 
     def test_selected_domain_filters_entities_and_areas(self):
         entities = parse_entities(INSPECTION) + [
@@ -382,18 +482,20 @@ class PrototypeTests(unittest.TestCase):
         self.assertTrue(all(area["domains"] == ["light"] for area in areas))
         self.assertEqual(payload["state"]["service"], service)
 
-    def test_other_returns_no_target(self):
+    def test_unsure_returns_no_target(self):
         options, _ = decision_request("open a nonexistent garage", parse_entities(INSPECTION))
-        data = response("other")
+        data = response("unsure")
         result = selection_result(data, options)
-        self.assertEqual(result["choice"], "other")
+        self.assertEqual(result["choice"], "unsure")
         self.assertIsNone(result["target"])
         self.assertEqual(result["probability"], 0.8)
 
-    def test_invalid_decisions_are_errors_instead_of_other(self):
+    def test_invalid_decisions_are_errors_instead_of_unsure(self):
         options, _ = decision_request("lamp", parse_entities(INSPECTION))
         changes = (
             {"choice": "invented_entity"},
+            {"choice": "other"},
+            {"choice": "not-smarthome-related"},
             {"choice": ["entity_001"]},
             {"type": "score"},
             {"confidence": True},
@@ -429,7 +531,7 @@ class PrototypeTests(unittest.TestCase):
         payload, _ = decider.await_args_list[2].args
         self.assertEqual(payload["state"]["service"], {"tool": "assist__HassTurnOff", "domain": "light"})
         self.assertEqual(set(payload["questions"]["target"]["criteria"]),
-                         {"entity_001", "entity_002", "area_001", "area_002", "other"})
+                         {"entity_001", "entity_002", "area_001", "area_002", "unsure"})
 
     def test_cli_summary_displays_tool_domain_and_area(self):
         output, _, _ = self.run_cli([service_response(), response("area_001")], json_output=False)
@@ -453,9 +555,9 @@ class PrototypeTests(unittest.TestCase):
 
     def test_ambiguous_decisions_and_query_state_never_execute(self):
         for first, second in (
-            (service_response("other"), None),
-            (service_response(domain="other"), None),
-            (service_response(), response("other")),
+            (service_response("unsure"), None),
+            (service_response(domain="unsure"), None),
+            (service_response(), response("unsure")),
             (service_response("query_state"), response()),
         ):
             executor = AsyncMock()
@@ -570,7 +672,7 @@ class PrototypeTests(unittest.TestCase):
     def test_unsupported_numeric_intent_and_invalid_numeric_responses_do_not_execute(self):
         for kind in ("unsupported", "invalid", "schema_limit"):
             with self.subTest(kind=kind):
-                inspection, responses = numeric_case(score=4.8, mode="other" if kind == "unsupported" else "absolute")
+                inspection, responses = numeric_case(score=4.8, mode="unsure" if kind == "unsupported" else "absolute")
                 if kind == "invalid":
                     responses[2]["answers"]["numeric_score"]["score"] = float("nan")
                 if kind == "schema_limit":
@@ -626,7 +728,7 @@ class PrototypeTests(unittest.TestCase):
             session.call_tool.assert_awaited_once_with("assist__HassTurnOff", arguments)
 
     def test_uncertain_service_or_domain_skips_target_request(self):
-        for tool, domain in (("other", "light"), ("assist__HassTurnOff", "other")):
+        for tool, domain in (("unsure", "light"), ("assist__HassTurnOff", "unsure")):
             with self.subTest(tool=tool, domain=domain):
                 output, inspector, decider = self.run_cli([service_response(tool, domain)])
                 result = json.loads(output)
@@ -665,10 +767,10 @@ class PrototypeTests(unittest.TestCase):
     unit_of_measurement: °C
 """
         service = service_response("query_state")
-        service["answers"]["domain"].update(choice="sensor", probabilities={"sensor": 0.9, "other": 0.1})
+        service["answers"]["domain"].update(choice="sensor", probabilities={"sensor": 0.9, "unsure": 0.1})
         target = response()
         target["answers"]["target"]["probabilities"] = {
-            "entity_001": 0.8, "area_001": 0.1, "other": 0.1,
+            "entity_001": 0.8, "area_001": 0.1, "unsure": 0.1,
         }
         output, inspector, _ = self.run_cli(
             [service, target], inspection=inspection, prompt="how warm is the office?",
@@ -729,7 +831,7 @@ class PrototypeTests(unittest.TestCase):
             self.assertNotIn("°C", output.getvalue())
 
     def test_state_query_with_unknown_domain_does_not_guess_a_target(self):
-        output, inspector, decider = self.run_cli([service_response("query_state", "other")])
+        output, inspector, decider = self.run_cli([service_response("query_state", "unsure")])
         result = json.loads(output)
         self.assertIsNone(result["service"])
         self.assertIsNone(result["target"])
@@ -746,8 +848,8 @@ class PrototypeTests(unittest.TestCase):
             self.run_cli([service_response()], inspection=inspection)
 
     def test_unmatched_target_is_visible_in_summary(self):
-        output, _, _ = self.run_cli([service_response(), response("other")], json_output=False)
-        self.assertIn("target type: other\ntarget: other\n", output)
+        output, _, _ = self.run_cli([service_response(), response("unsure")], json_output=False)
+        self.assertIn("target type: unsure\ntarget: unsure\n", output)
 
     def test_inspection_does_not_require_or_call_openrouter(self):
         decider = AsyncMock()
