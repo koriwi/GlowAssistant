@@ -267,6 +267,18 @@ def selection_result(response, options, question="target"):
     }
 
 
+def query_state_info(target, entities, domain):
+    if target is None:
+        return []
+    if target["type"] == "entity":
+        return [target]
+    return [
+        entity for entity in entities
+        if entity["domain"] == domain
+        and (entity.get("areas") or "").split(",", 1)[0].strip() == target["name"]
+    ]
+
+
 def print_result(result):
     target = result["target"]
     if target:
@@ -279,6 +291,28 @@ def print_result(result):
     print(f"domain: {result['domain'] or 'none'}")
     print(f"target type: {target_type}")
     print(f"target: {target_name}")
+    if "state_info" not in result:
+        return
+    if not result["state_info"]:
+        print("info: No state data available for the selected target.")
+    for entity in result["state_info"]:
+        prefix = "  " if target_type == "area" else ""
+        if target_type == "area":
+            print(f"{entity['names']}:")
+        state = entity.get("state")
+        attributes = entity.get("attributes") or {}
+        available = state not in (None, "unknown", "unavailable")
+        unit = attributes.get("unit_of_measurement") if available else None
+        value = state if state is not None else "unknown"
+        print(f"{prefix}state: {value}{' ' + unit if unit else ''}")
+        if not available:
+            continue
+        for name, value in attributes.items():
+            if name in ("unit_of_measurement", "device_class", "temperature_unit"):
+                continue
+            unit = attributes.get("temperature_unit") if "temperature" in name else None
+            value = value if value is not None else "unknown"
+            print(f"{prefix}{name}: {value}{' ' + unit if unit else ''}")
 
 
 def error_message(error):
@@ -352,6 +386,8 @@ async def run():
             "total": round((finished - started) * 1000),
         },
     }
+    if query_state:
+        result["state_info"] = query_state_info(result["target"], entities, domain)
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:

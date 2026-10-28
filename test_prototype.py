@@ -7,7 +7,7 @@ import unittest
 from contextlib import redirect_stdout
 from unittest.mock import AsyncMock, patch
 
-from prototype import decision_request, parse_entities, run, selection_result, service_request
+from prototype import decision_request, parse_entities, print_result, query_state_info, run, selection_result, service_request
 
 
 CONTEXT = """Live Context: An overview of the areas and the devices in this smart home:
@@ -193,6 +193,7 @@ class PrototypeTests(unittest.TestCase):
         output, inspector, decider = self.run_cli([service_response(), response()])
         result = json.loads(output)
         self.assertEqual(result["service"], "assist__HassTurnOff")
+        self.assertNotIn("state_info", result)
         self.assertEqual(result["domain"], "light")
         self.assertEqual(result["target"]["type"], "entity")
         self.assertEqual(result["target"]["areas"], "Office, Study")
@@ -232,6 +233,7 @@ class PrototypeTests(unittest.TestCase):
         self.assertEqual(result["domain"], "light")
         self.assertEqual(result["target"]["state"], "off")
         self.assertEqual(result["target"]["type"], "entity")
+        self.assertEqual(result["state_info"][0]["state"], "off")
         inspector.assert_awaited_once()
         self.assertEqual(decider.await_count, 2)
         payload, _ = decider.await_args_list[1].args
@@ -263,20 +265,62 @@ class PrototypeTests(unittest.TestCase):
         self.assertEqual(result["domain"], "sensor")
         self.assertEqual(result["target"]["state"], "21.5")
         self.assertEqual(result["target"]["attributes"]["unit_of_measurement"], "°C")
+        self.assertEqual(result["state_info"][0]["state"], "21.5")
         inspector.assert_awaited_once()
+        output, _, _ = self.run_cli(
+            [service, target], inspection=inspection, prompt="how warm is the office?", json_output=False,
+        )
+        self.assertIn("state: 21.5 °C\n", output)
 
     def test_state_query_summary_shows_no_service_and_still_selects_an_area(self):
         output, _, _ = self.run_cli(
             [service_response("query_state"), response("area_001")], json_output=False,
             prompt="are all the office lights off?",
         )
-        self.assertEqual(output, "service: none (query state)\ndomain: light\ntarget type: area\ntarget: Office\n")
+        self.assertEqual(output, "service: none (query state)\ndomain: light\ntarget type: area\ntarget: Office\nDesk lamp, Work light:\n  state: off\n")
+
+    def test_area_state_info_includes_only_matching_room_and_domain(self):
+        entities = parse_entities(INSPECTION) + [
+            {"names": "Floor lamp", "domain": "light", "areas": " Office, Study ", "state": "on"},
+            {"names": "Outlet", "domain": "switch", "areas": "Office, Study", "state": "on"},
+            {"names": "No area", "domain": "light", "state": "on"},
+        ]
+        target = {"type": "area", "name": "Office", "aliases": ["Study"]}
+        info = query_state_info(target, entities, "light")
+        self.assertEqual([entity["names"] for entity in info], ["Desk lamp, Work light", "Floor lamp"])
+        self.assertEqual([entity["state"] for entity in info], ["off", "on"])
+
+    def test_climate_state_displays_current_and_target_measurements(self):
+        target = {
+            "type": "entity", "names": "Thermostat", "domain": "climate", "state": "heat",
+            "attributes": {"current_temperature": 21.5, "temperature": 23, "temperature_unit": "°C"},
+        }
+        output = io.StringIO()
+        with redirect_stdout(output):
+            print_result({"service": None, "domain": "climate", "target": target, "state_info": [target]})
+        self.assertIn("state: heat\n", output.getvalue())
+        self.assertIn("current_temperature: 21.5 °C\n", output.getvalue())
+        self.assertIn("temperature: 23 °C\n", output.getvalue())
+
+    def test_unknown_states_do_not_display_stale_measurements(self):
+        for state in (None, "unknown", "unavailable"):
+            target = {
+                "type": "entity", "names": "Temperature", "domain": "sensor", "state": state,
+                "attributes": {"unit_of_measurement": "°C", "temperature": 21.5},
+            }
+            output = io.StringIO()
+            with self.subTest(state=state), redirect_stdout(output):
+                print_result({"service": None, "domain": "sensor", "target": target, "state_info": [target]})
+            self.assertIn(f"state: {state if state is not None else 'unknown'}\n", output.getvalue())
+            self.assertNotIn("21.5", output.getvalue())
+            self.assertNotIn("°C", output.getvalue())
 
     def test_state_query_with_unknown_domain_does_not_guess_a_target(self):
         output, inspector, decider = self.run_cli([service_response("query_state", "other")])
         result = json.loads(output)
         self.assertIsNone(result["service"])
         self.assertIsNone(result["target"])
+        self.assertEqual(result["state_info"], [])
         decider.assert_awaited_once()
         inspector.assert_awaited_once()
 

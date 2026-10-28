@@ -35,7 +35,19 @@ target: Wohnzimmer
 
 The `service` is the actual advertised MCP tool name, rather than an inferred HA service such as `light.turn_off`. If the tool or domain is `other`, target selection is skipped and the summary shows `none`. A target decision of `other` is displayed as `other`.
 
-State questions such as "is the lamp on?" or "how warm is the living room?" can select `query_state`. This uses the already fetched states and attributes and still selects a domain and target. The summary shows `service: none (query state)`; JSON contains `service: null` and the `query_state` choice in the first decision. It remains distinct from an unsupported request (`other`). Single measurements should select their reporting entity; questions about a group can select an area. Answer generation is not implemented.
+State questions such as "is the lamp on?" or "how warm is the living room?" can select `query_state`. This uses the already fetched states and attributes and still selects a domain and target. The summary shows `service: none (query state)` and the selected entity's state and attributes, including units where provided. For example:
+
+```text
+service: none (query state)
+domain: sensor
+target type: entity
+target: Temperatur
+state: 21.5 °C
+```
+
+Area queries list the states of each entity in the selected area and domain. Climate entities display their state plus measurements such as `current_temperature` and `temperature`. Unknown/unavailable states are shown explicitly; the summary suppresses their potentially stale attributes. If no target is identified, it reports that no state data is available. Values come directly from the cached context without another MCP or model request.
+
+JSON contains `service: null`, the `query_state` choice in the first decision, and a `state_info` list with the matching entries and their raw state/attribute data. `query_state` remains distinct from an unsupported request (`other`). Single measurements should select their reporting entity; questions about a group can select an area.
 
 For full scores, alternatives, selected metadata, per-request usage/cost, and timings:
 

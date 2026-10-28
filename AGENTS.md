@@ -14,6 +14,7 @@
 - Classify a prompt: `python prototype.py "your request"`.
 - Classification fetches MCP tools/context once per run, then selects a tool/domain before a compatible target. No disk cache or device execution.
 - State questions can select `query_state`, using cached states/attributes with no service. Domain and target selection still run; `other` remains separate.
+- State-query output displays cached values/attributes; area queries list matching entities in the selected domain. JSON includes `state_info`.
 - Default output is a short summary; `--json` includes both stages' scores, alternatives, usage and timings.
 - Run offline checks: `python -m unittest -v`.
 - Classifier choices use snapshot-local IDs for entities and areas, not HA registry IDs. Room-wide requests select areas; specific device requests select entities.

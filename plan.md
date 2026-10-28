@@ -12,7 +12,7 @@ One Python script accepts a transcribed voice prompt, fetches tools and entity c
 python prototype.py "turn on the desk lamp"
 ```
 
-The prototype selects a tool or state query, domain, and target. It does not execute device actions, generate answers, record audio, or perform speech recognition.
+The prototype selects a tool or state query, domain, and target, and displays cached state values for queries. It does not execute device actions, record audio, or perform speech recognition.
 
 ## Agreed choices
 
@@ -23,6 +23,7 @@ The prototype selects a tool or state query, domain, and target. It does not exe
 - Fetch MCP tools/context once per run and reuse that in-memory snapshot for both classification stages. No disk cache.
 - First select an advertised MCP tool and entity domain in one OpenRouter request. Then select a compatible entity or area in a second request.
 - Include `query_state` for current-state/measurement questions. It needs no service and reuses cached states/attributes, while still selecting a domain and target.
+- Display selected entity states/attributes with available units for `query_state`; area queries list matching entities in the selected domain.
 - Report the actual MCP tool name, such as `assist__HassTurnOff`, plus domain, rather than mapping it to an underlying HA service name.
 - Include an explicit `other` option.
 - Select context entries using temporary choice IDs; exact HA entity IDs are not required for this prototype.
@@ -82,6 +83,8 @@ API failures and invalid responses are errors, not `other` selections.
 ### 5. Report and evaluate
 
 - [x] Print a short service/domain/target summary.
+- [x] Display cached values for state queries, including matching area members, measurements and available units.
+- [x] Show unknown/unavailable states explicitly and suppress stale attributes in the summary.
 - [x] Provide `--json` for both stages' selections, alternatives, scores, usage/cost, and timings.
 - [x] Document setup and the CLI command.
 - [ ] Try representative prompts: clear names, room-wide device groups, area aliases, STT mistakes, ambiguous targets, absent targets, and requests spanning multiple areas.
@@ -96,7 +99,7 @@ API failures and invalid responses are errors, not `other` selections.
 
 ## Later
 
-Use prototype findings to decide the next step toward a HA conversation agent. Answer generation, tool argument extraction, device control, conversation history, and packaging as an integration remain outside this milestone.
+Use prototype findings to decide the next step toward a HA conversation agent. Natural-language responses, tool argument extraction, device control, conversation history, and packaging as an integration remain outside this milestone.
 
 ## References
 
