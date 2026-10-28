@@ -2,6 +2,8 @@
 
 Local prototype for a future Home Assistant conversation agent. See [plan.md](plan.md).
 
+For isolated brightness/temperature extraction tests, see [numeric_probe.md](numeric_probe.md). That command does not execute HA tools or change the agent path.
+
 ## Setup
 
 Python 3.11+:

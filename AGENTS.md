@@ -18,6 +18,7 @@
 - State-query output displays cached values/attributes; area queries list matching entities in the selected domain. JSON includes `state_info`.
 - Default output is a short summary; `--json` includes both stages' scores, alternatives, usage and timings.
 - Run offline checks: `python -m unittest -v`.
+- Isolated numeric experiment: `python numeric_probe.py "Set brightness to 55%" --expected 55`. See `numeric_probe.md`; keep experiment code out of `prototype.py` until explicitly requested.
 - Classifier choices use snapshot-local IDs for entities and areas, not HA registry IDs. Room-wide requests select areas; specific device requests select entities.
 - `.env` contains credentials. Never print its values or commit it.
 - Scope and implementation checklist: `plan.md`.
