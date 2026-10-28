@@ -70,7 +70,7 @@ def numeric_request(prompt, parameter, current, minimum, maximum, levels, unit,
 
 def decode_numeric(response, anchors, method="both", expected=None):
     if not isinstance(response, dict) or "error" in response:
-        raise ValueError(f"OpenRouter returned an error or invalid response: {response}")
+        raise ValueError(f"Decider returned an error or invalid response: {response}")
     if expected is not None and not finite_number(expected):
         raise ValueError("Expected value must be finite.")
     results = {}

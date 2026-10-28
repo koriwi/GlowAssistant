@@ -19,7 +19,7 @@ The prototype selects a tool or state query, domain, and target. State queries d
 - Use HA's **built-in MCP server**, despite a third-party server also being available.
 - Endpoint: `https://assistant.gosewis.ch/api/mcp`.
 - Authenticate with a **long-lived HA token**.
-- Start with **Jev through OpenRouter**. Keep the model ID in one constant so another compatible decision model can be tried by changing that string.
+- Default to **Jev through OpenRouter**. Configure the full native decision endpoint, model ID, and optional key through `DECIDER_URL`, `DECIDER_MODEL`, and `DECIDER_API_KEY`; local llama.cpp can use `http://localhost:8321/v1/systemone`.
 - Fetch MCP tools/context once per run and reuse that in-memory snapshot for both classification stages. No disk cache.
 - First select an advertised MCP tool and entity domain in one OpenRouter request. Then select a compatible entity or area in a second request.
 - Include `query_state` for current-state/measurement questions. It needs no service and reuses cached states/attributes, while still selecting a domain and target.
@@ -41,7 +41,12 @@ Load credentials from a gitignored `.env` file. Provide a tracked `.env.example`
 HA_MCP_URL=https://assistant.gosewis.ch/api/mcp
 HA_TOKEN=...
 OPENROUTER_API_KEY=...
+DECIDER_URL=https://openrouter.ai/api/alpha/decisions
+DECIDER_MODEL=typesafe/jev-1.14
+DECIDER_API_KEY=
 ```
+
+The generic key is optional for unauthenticated local servers. The existing OpenRouter key is used only when the configured endpoint host is `openrouter.ai`. Both commands share these settings.
 
 ## Implementation steps
 

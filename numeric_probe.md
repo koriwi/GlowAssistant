@@ -1,6 +1,6 @@
 # Numeric extraction experiment
 
-Run `numeric_probe.py` to test Jev on numeric settings independently of the conversation agent. It makes one OpenRouter request and never connects to HA or executes a tool. Numeric request/scaling logic is shared with the main agent through `numeric_values.py`; probe flags and debugging output stay in this command.
+Run `numeric_probe.py` to test a decider on numeric settings independently of the conversation agent. It makes one request to the configured decider server and never connects to HA or executes a tool. Numeric request/scaling logic is shared with the main agent through `numeric_values.py`; probe flags and debugging output stay in this command.
 
 ## Commands
 
@@ -36,7 +36,7 @@ python numeric_probe.py "Increase room temperature" --parameter temperature --un
 
 The prompt includes increase/decrease examples from 21.5 °C to 22.0/21.0 °C, plus explicit relative and absolute requests. `--default-step` overrides the vague-request default. These examples guide the model; they do not clamp or rewrite its output. Anchor spacing still limits resolution, especially for Choice.
 
-Use your existing environment and `.env` OpenRouter key. Only `OPENROUTER_API_KEY` is needed. Supply the current value, range, and default step in the same units. The probe does not convert raw HA values. Omit `--current` for absolute requests; relative requests need it to determine a new value.
+Use your existing environment and `.env` decider settings (`DECIDER_URL`, `DECIDER_MODEL`, optional `DECIDER_API_KEY`), as described in [README.md](README.md#decider-server). The existing OpenRouter key still works for the default endpoint; unauthenticated local servers need no key. Supply the current value, range, and default step in the same units. The probe does not convert raw HA values. Omit `--current` for absolute requests; relative requests need it to determine a new value.
 
 ## What it compares
 

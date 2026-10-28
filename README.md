@@ -14,7 +14,33 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-Create `.env` from `.env.example` if it does not already exist, then fill in the HA token and OpenRouter key. Existing environment variables override `.env`.
+Create `.env` from `.env.example` if it does not already exist, then fill in the HA token and decider configuration. Existing environment variables override `.env`.
+
+## Decider server
+
+Both `prototype.py` and `numeric_probe.py` use the same settings. `DECIDER_URL` is the full endpoint URL; no path is appended automatically.
+
+For your local llama.cpp server:
+
+```dotenv
+DECIDER_URL=http://localhost:8321/v1/systemone
+DECIDER_MODEL=your-local-model-id
+DECIDER_API_KEY=
+```
+
+Find the model ID with `curl http://localhost:8321/v1/models`. Local servers without authentication do not need a key.
+
+For OpenRouter:
+
+```dotenv
+DECIDER_URL=https://openrouter.ai/api/alpha/decisions
+DECIDER_MODEL=typesafe/jev-1.14
+OPENROUTER_API_KEY=your-openrouter-key
+```
+
+`DECIDER_API_KEY` supports other authenticated providers and takes precedence over `OPENROUTER_API_KEY`. The legacy key is used only for the `openrouter.ai` host. Omitting the new settings preserves the existing OpenRouter URL and model.
+
+The server must support the native `state`/`questions` → `answers` decision protocol. llama.cpp provides this at [`/v1/systemone`](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md#post-v1systemone-typesafe-compatible-system-one-api) for native decision models. An OpenAI-compatible `/v1/chat/completions` endpoint alone does not implement this protocol.
 
 ## Select a service and target
 
@@ -26,7 +52,7 @@ python prototype.py "Mach es etwas wärmer im Wohnzimmer"
 python prototype.py "Stell die Stehlampe im Wohnzimmer auf 60 Prozent"
 ```
 
-Fetches MCP tools and Assist context once per script run and keeps that snapshot in memory. The first OpenRouter request selects an advertised MCP tool or `query_state`, plus an entity domain. The second selects an entity or area from that domain, using the same snapshot. Temperature and brightness setters add a third numeric extraction request before MCP execution. No cache is written to disk.
+Fetches MCP tools and Assist context once per script run and keeps that snapshot in memory. The first decider request selects an advertised MCP tool or `query_state`, plus an entity domain. The second selects an entity or area from that domain, using the same snapshot. Temperature and brightness setters add a third numeric extraction request before MCP execution. No cache is written to disk.
 
 Example summary:
 
@@ -84,7 +110,7 @@ For full scores, alternatives, selected metadata, per-request usage/cost, and ti
 python prototype.py "Mach alle Lichter im Wohnzimmer aus" --json
 ```
 
-Change `MODEL` in `prototype.py` to try another compatible decision model. The default is `typesafe/jev-1.14`.
+Set `DECIDER_MODEL` to try another compatible decision model. The fallback is `MODEL` in `prototype.py`, currently `typesafe/jev-1.14`.
 
 Target choices get temporary IDs such as `entity_001` and `area_001`. These IDs belong to that classification request; they are not HA registry IDs. Area aliases are grouped with their canonical name. Entities outside the selected domain and areas without that domain are excluded.
 

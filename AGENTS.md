@@ -24,4 +24,5 @@
 - Isolated numeric experiment: `python numeric_probe.py "Set brightness to 55%" --expected 55`. See `numeric_probe.md`; keep probe CLI/debugging behavior separate from normal execution.
 - Classifier choices use snapshot-local IDs for entities and areas, not HA registry IDs. Room-wide requests select areas; specific device requests select entities.
 - `.env` contains credentials. Never print its values or commit it.
+- Both commands use `DECIDER_URL` (full native decision endpoint), `DECIDER_MODEL`, and optional `DECIDER_API_KEY`. Defaults preserve OpenRouter; its legacy key is used only for the `openrouter.ai` host. llama.cpp uses `/v1/systemone`, not the chat completions API.
 - Scope and implementation checklist: `plan.md`.

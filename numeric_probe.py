@@ -7,10 +7,8 @@ from time import perf_counter
 
 from dotenv import load_dotenv
 
-from prototype import MODEL, call_decider, error_message, setting
+from prototype import call_decider, decider_api_key, decider_model, error_message
 from numeric_values import INSTRUCTIONS, decode_numeric as decode_probe, finite_number, numeric_request as probe_request
-
-
 
 
 async def run():
@@ -30,12 +28,12 @@ async def run():
     args = parser.parse_args()
     if args.expected is not None and not finite_number(args.expected):
         parser.error("Expected value must be finite.")
+    load_dotenv(Path(__file__).with_name(".env"))
+    api_key = decider_api_key()
     anchors, payload = probe_request(
         args.prompt, args.parameter, args.current, args.minimum, args.maximum,
-        args.levels, args.unit, args.method, args.default_step, args.instructions, model=MODEL,
+        args.levels, args.unit, args.method, args.default_step, args.instructions, model=decider_model(),
     )
-    load_dotenv(Path(__file__).with_name(".env"))
-    api_key = setting("OPENROUTER_API_KEY")
     started = perf_counter()
     response = await call_decider(payload, api_key)
     results = decode_probe(response, anchors, args.method, args.expected)

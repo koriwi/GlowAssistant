@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
 from time import perf_counter
+from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
@@ -67,6 +68,25 @@ def setting(name):
     if not value:
         raise ValueError(f"Missing {name}; set it in .env or the environment.")
     return value
+
+
+def decider_url():
+    url = os.environ.get("DECIDER_URL", "").strip() or DECISIONS_URL
+    parsed = urlsplit(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise ValueError("DECIDER_URL must be a full HTTP(S) endpoint URL.")
+    return url
+
+
+def decider_model():
+    return os.environ.get("DECIDER_MODEL", "").strip() or MODEL
+
+
+def decider_api_key():
+    key = os.environ.get("DECIDER_API_KEY", "").strip()
+    if not key and urlsplit(decider_url()).hostname == "openrouter.ai":
+        key = setting("OPENROUTER_API_KEY")
+    return key or None
 
 
 async def list_all(method, field):
@@ -182,7 +202,7 @@ def service_request(prompt, inspection, entities):
     }
     domains = {entity["domain"]: entity["domain"] for entity in entities}
     return services, domains, {
-        "model": MODEL,
+        "model": decider_model(),
         "state": {"prompt": prompt, "entities": entities},
         "questions": {
             "service": choice_question(services, SERVICE_INSTRUCTIONS, "Neither a state query nor one advertised MCP tool can fulfill the request."),
@@ -217,7 +237,7 @@ def decision_request(prompt, entities, service=None):
     if service:
         state["service"] = service
     return options, {
-        "model": MODEL,
+        "model": decider_model(),
         "state": state,
         "questions": {
             "target": choice_question(options, SELECTION_INSTRUCTIONS, (
@@ -228,25 +248,25 @@ def decision_request(prompt, entities, service=None):
     }
 
 
-async def call_decider(payload, api_key):
+async def call_decider(payload, api_key=None):
     import httpx
 
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(
-            DECISIONS_URL,
-            headers={"Authorization": f"Bearer {api_key}"},
+            decider_url(),
+            headers={"Authorization": f"Bearer {api_key}"} if api_key else {},
             json=payload,
         )
         if response.is_error:
-            raise ValueError(f"OpenRouter HTTP {response.status_code}: {response.text[:500]}")
+            raise ValueError(f"Decider HTTP {response.status_code}: {response.text[:500]}")
         return response.json()
 
 
 def selection_result(response, options, question="target"):
     if not isinstance(response, dict):
-        raise ValueError("Expected a JSON object from OpenRouter.")
+        raise ValueError("Expected a JSON object from the decider.")
     if "error" in response:
-        raise ValueError(f"OpenRouter error: {response['error']}")
+        raise ValueError(f"Decider error: {response['error']}")
     try:
         answer = response["answers"][question]
         choice = answer["choice"]
@@ -267,10 +287,10 @@ def selection_result(response, options, question="target"):
     except (KeyError, TypeError):
         valid = False
     if not valid:
-        raise ValueError("Invalid OpenRouter choice response or unknown candidate labels.")
+        raise ValueError("Invalid decider choice response or unknown candidate labels.")
     alternatives = sorted(probabilities, key=probabilities.get, reverse=True)
     return {
-        "model": response.get("model", MODEL),
+        "model": response.get("model", decider_model()),
         "candidate_count": len(options),
         "choice": choice,
         question: options.get(choice),
@@ -340,7 +360,7 @@ async def extract_numeric(prompt, tool, target, domain, entities, api_key, confi
     values = current_numeric_values(members, config["parameter"])
     current = values[0] if values and None not in values and len(set(values)) == 1 else None
     anchors, payload = numeric_request(
-        prompt=prompt, current=current, **config, method="score", model=MODEL,
+        prompt=prompt, current=current, **config, method="score", model=decider_model(),
         instructions=NUMERIC_INSTRUCTIONS + (
             " For temperature, current is the thermostat's existing target setting. "
             "Base relative changes on this setting, not the measured room temperature."
@@ -516,7 +536,7 @@ async def run():
     if not args.inspect and (args.prompt is None or not args.prompt.strip()):
         parser.error("Provide a nonempty prompt or use --inspect.")
     load_dotenv(Path(__file__).with_name(".env"))
-    api_key = setting("OPENROUTER_API_KEY") if not args.inspect else None
+    api_key = decider_api_key() if not args.inspect else None
     started = perf_counter()
     url, token = setting("HA_MCP_URL"), setting("HA_TOKEN")
     async with mcp_session(url, token) as session:
