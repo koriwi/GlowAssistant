@@ -1,0 +1,22 @@
+.env
+.env.*
+!.env.example
+.aws/
+
+.venv/
+venv/
+
+# Root-level venv artifacts
+/bin/
+/include/
+/lib/
+/lib64
+/pyvenv.cfg
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+/inspect.txt
+/inspection.json
