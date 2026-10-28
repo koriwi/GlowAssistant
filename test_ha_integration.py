@@ -128,6 +128,26 @@ class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.response.speech["plain"]["speech"], "ich bin mir nicht sicher")
         chat_log.async_add_assistant_content_without_tools.assert_called_once()
 
+    async def test_query_answer_failure_is_logged_with_its_cause(self):
+        from custom_components.glow_assistant.conversation import GlowConversationEntity
+
+        entry = SimpleNamespace(data=self.settings(), entry_id="test-entry")
+        agent = GlowConversationEntity(entry)
+        agent.hass = Mock()
+        chat_log = Mock(conversation_id="conversation-123")
+        user_input = SimpleNamespace(text="ist das licht im buero an?", language="de", agent_id="conversation.glow", context=object())
+        with patch("custom_components.glow_assistant.conversation.async_snapshot", new_callable=AsyncMock, return_value={}), \
+                patch("custom_components.glow_assistant.conversation.async_get_clientsession", return_value=Mock()), \
+                patch("custom_components.glow_assistant.conversation.AgentEngine") as engine, \
+                self.assertLogs("custom_components.glow_assistant.conversation", level="WARNING") as logs:
+            engine.return_value.process = AsyncMock(return_value={
+                "answer": self.settings()["error_reply"], "answer_error": "Model endpoint returned HTTP 401.",
+                "route": "smarthome", "service": "query_state", "timings_ms": {}, "usage": {},
+            })
+            result = await agent._async_handle_message(user_input, chat_log)
+        self.assertIn("Smart-home answer generation failed: Model endpoint returned HTTP 401.", logs.output[0])
+        self.assertEqual(result.response.speech["plain"]["speech"], self.settings()["error_reply"])
+
 
 if __name__ == "__main__":
     unittest.main()

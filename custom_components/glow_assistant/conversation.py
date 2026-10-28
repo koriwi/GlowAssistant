@@ -52,6 +52,8 @@ class GlowConversationEntity(conversation.ConversationEntity, conversation.Abstr
                 user_input.text, user_input.language, snapshot,
             )
             text = result["answer"]
+            if result.get("answer_error"):
+                _LOGGER.warning("Smart-home answer generation failed: %s", result["answer_error"])
             _LOGGER.debug("route=%s service=%s timings_ms=%s usage=%s",
                           result["route"], result["service"], result["timings_ms"], result["usage"])
         except ModelError as error:

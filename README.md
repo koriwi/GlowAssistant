@@ -44,7 +44,7 @@ Offline checks, including the unchanged prototype suite:
 python -m unittest -v
 ```
 
-To also run the HA API/config-flow tests, use Python 3.14.2+ and install `requirements-ha-test.txt` alongside `requirements.txt`. Those seven tests are explicitly skipped when HA is unavailable. GitHub Actions installs HA, runs the tests, and runs hassfest. No tests execute real device actions or contact model servers.
+To also run the HA API/config-flow tests, use Python 3.14.2+ and install `requirements-ha-test.txt` alongside `requirements.txt`. HA-specific tests are explicitly skipped when HA is unavailable. GitHub Actions installs HA, runs the tests, and runs hassfest. No tests execute real device actions or contact model servers.
 
 ## Local prototype
 

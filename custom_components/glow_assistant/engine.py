@@ -210,15 +210,17 @@ class AgentEngine:
                 {"role": "system", "content": self.settings["answer"]["prompt"]},
                 {"role": "user", "content": json.dumps(facts, ensure_ascii=False, default=str)},
             ])
-        except ModelError:
+        except ModelError as error:
             completed = result.get("execution", {}).get("status") == "completed"
             result["answer"] = self.settings["answer_error_reply" if completed else "error_reply"]
-            result["answer_error"] = True
+            result["answer_error"] = str(error)
 
     async def _chat(self, result, stage, messages):
         started = perf_counter()
-        result["answer"], result["usage"][stage] = await self.client.chat(self.settings[stage], messages)
-        result["timings_ms"][stage] = round((perf_counter() - started) * 1000)
+        try:
+            result["answer"], result["usage"][stage] = await self.client.chat(self.settings[stage], messages)
+        finally:
+            result["timings_ms"][stage] = round((perf_counter() - started) * 1000)
 
     async def _numeric(self, result, members, service_parameter):
         parameter = "temperature" if service_parameter == "temperature" else "brightness"

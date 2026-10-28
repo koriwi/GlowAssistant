@@ -174,8 +174,21 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         execute.assert_awaited_once()
         self.assertEqual(result["execution"]["status"], "completed")
         self.assertEqual(result["answer"], DEFAULTS["answer_error_reply"])
-        self.assertTrue(result["answer_error"])
+        self.assertEqual(result["answer_error"], "No answer")
+        self.assertIn("answer", result["timings_ms"])
         self.assertEqual(len(models.chat_requests), 1)
+
+    async def test_query_answer_failure_preserves_state_and_error_details(self):
+        result, models, execute = await self.run_agent([
+            {"service": "query_state", "domain": "light"},
+            {"area": "area:office"}, {"target": "entity:light.desk"},
+        ], answers=[ModelError("Model reply reached its output token limit.")])
+        self.assertEqual(result["answer"], DEFAULTS["error_reply"])
+        self.assertEqual(result["answer_error"], "Model reply reached its output token limit.")
+        self.assertEqual(result["state_info"][0]["state"], "on")
+        self.assertIn("answer", result["timings_ms"])
+        self.assertEqual(len(models.chat_requests), 1)
+        execute.assert_not_awaited()
 
     async def test_action_failure_is_reported_as_unconfirmed(self):
         execute = AsyncMock(side_effect=ActionError("partial failure"))
