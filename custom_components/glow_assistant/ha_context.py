@@ -26,10 +26,11 @@ def entity_context(hass, excluded):
             attributes.setdefault("temperature_unit", hass.config.units.temperature_unit)
         entities.append({
             "entity_id": state.entity_id, "name": state.name,
-            "aliases": sorted(entry.aliases) if entry else [],
+            "aliases": sorted(alias for alias in entry.aliases if isinstance(alias, str)) if entry else [],
             "domain": state.domain, "state": state.state,
             "area_id": area.id if area else None, "area_name": area.name if area else None,
-            "area_aliases": sorted(area.aliases) if area else [], "attributes": attributes,
+            "area_aliases": sorted(alias for alias in area.aliases if isinstance(alias, str)) if area else [],
+            "attributes": attributes,
         })
     return entities
 
