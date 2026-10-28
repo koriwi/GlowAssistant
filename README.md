@@ -63,6 +63,8 @@ The area call receives the prompt and area names/aliases only. `no_area` keeps a
 
 The service/domain request sends only the user prompt, advertised tool definitions, and available domain choices. The entity catalog is kept locally for the subsequent target and numeric stages.
 
+Unqualified warmer/colder requests default to heating/AC (`climate`). Lighting temperature is selected only when the prompt explicitly refers to lighting, a lamp, color temperature, warm/cold white, or Kelvin.
+
 Example summary:
 
 ```text

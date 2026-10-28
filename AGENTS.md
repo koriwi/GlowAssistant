@@ -15,6 +15,7 @@
 - Classification fetches MCP tools/context once per run, then selects service/domain → area → compatible target. No disk cache.
 - Area selection receives only prompt and area names/aliases. `no_area` retains all domain candidates; `other` stops target selection. Known areas filter target candidates by domain and canonical area name.
 - Service/domain selection receives the user prompt, tool definitions and domain choices, without the entity catalog. Target and numeric stages use the cached entity data.
+- Unqualified warmer/colder requests mean heating/AC (`climate`). Light color temperature requires an explicit lighting reference.
 - Non-query commands execute target-only MCP tools and supported temperature/brightness setters automatically. Other extra values and ambiguous/unsupported targets are skipped. Never run live device actions as an incidental test.
 - Numeric setters use a fourth decider request with Score. Temperature constants: 16–26 °C, 9 levels. Relative temperature changes use the existing thermostat target (`temperature`), not the measured `current_temperature`.
 - Temperature execution currently uses `TEMPERATURE_STEP = 1.0`, matching the user's reported thermostat step. Send whole-degree integers and preserve the direction of subdegree relative changes; the isolated probe keeps raw estimates.

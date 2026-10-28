@@ -34,6 +34,10 @@ SERVICE_INSTRUCTIONS = (
     "have already been fetched locally, so these questions need no additional tool or service call. "
     "Prefer query_state over GetLiveContext for these questions. "
     "Do not select query_state for state changes or conditional action requests. "
+    "Unqualified warmer/colder/cooler commands mean room-temperature adjustment using heating/AC. "
+    "For example, 'mach n bisschen waermer im buero' and 'mach es kaelter' need a climate "
+    "temperature-setting tool. Use light color-temperature tools only when the request "
+    "explicitly refers to lighting, a lamp, color temperature, warm/cold white, or Kelvin. "
     "Use the tool descriptions and input schemas. Prefer a specific matching tool over "
     "a generic service-call tool. Do not invent a service that is not advertised. "
     "Choose other for unsupported or ambiguous requests, or requests requiring "
@@ -41,6 +45,11 @@ SERVICE_INSTRUCTIONS = (
 )
 DOMAIN_INSTRUCTIONS = (
     "Which single Home Assistant entity domain should the requested operation target? "
+    "Default warmer/colder/cooler adjustment requests to climate, including German "
+    "'waermer', 'wärmer', 'kaelter' and 'kälter'. A room name alone does not imply lighting. "
+    "Select light for temperature changes only when lighting, a lamp, color temperature, "
+    "warm/cold white or Kelvin is explicitly requested. If climate is unavailable, choose "
+    "other instead of reinterpreting room-temperature requests as lighting changes. "
     "Use the prompt and available domain choices to distinguish device categories. Respect the "
     "matching MCP tool's domain restrictions. State queries still need a domain and target, "
     "even though no service is called. Choose other when no entity-domain target "
