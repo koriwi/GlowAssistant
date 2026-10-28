@@ -4,9 +4,9 @@
 
 Build a Home Assistant conversation agent integration in small steps. Develop and evaluate the core logic locally first, without HA deployments or restarts.
 
-## First milestone: entity selection prototype
+## First milestone: target selection prototype
 
-One Python script accepts a transcribed voice prompt, fetches entity context from HA's built-in MCP server, and asks Jev through OpenRouter which entity the user meant.
+One Python script accepts a transcribed voice prompt, fetches entity context from HA's built-in MCP server, and asks Jev through OpenRouter which entity or area the user meant.
 
 ```bash
 python prototype.py "turn on the desk lamp"
@@ -20,9 +20,10 @@ The prototype selects a target only. It does not execute device actions, record 
 - Endpoint: `https://assistant.gosewis.ch/api/mcp`.
 - Authenticate with a **long-lived HA token**.
 - Start with **Jev through OpenRouter**. Keep the model ID in one constant so another compatible decision model can be tried by changing that string.
-- Start with all available entity candidates in one classification request.
+- Start with all available entity and area candidates in one classification request.
 - Include an explicit `other` option.
 - Select context entries using temporary choice IDs; exact HA entity IDs are not required for this prototype.
+- Include one choice per distinct area, grouping its aliases. Select an area for room-wide requests and an entity for specific device requests.
 - Keep the implementation simple: one script, no agent framework or speculative abstractions.
 
 ## Local configuration
@@ -37,7 +38,7 @@ OPENROUTER_API_KEY=...
 
 ## Implementation steps
 
-Current status: the user verified live MCP inspection and supplied `inspect.txt`: 151 entries, no entity IDs, and two entries with identical names/domain/area. Selecting context entries was approved. The classification CLI is implemented; a real OpenRouter run and accuracy evaluation remain pending.
+Current status: the user verified live MCP inspection and supplied `inspect.txt`: 151 entities across 17 areas, no registry IDs, and two entries with identical names/domain/area. Entity and area classification is implemented and tested offline; live model behavior and accuracy evaluation remain pending.
 
 ### 1. Inspect MCP entity context
 
@@ -50,10 +51,11 @@ Do not assume MCP exposes every HA entity or every metadata field. If the respon
 ### 2. Prepare choices
 
 - [x] Create one option per available entity using its identifying metadata.
-- [x] Preserve a deterministic mapping from each option to its entity within the snapshot.
-- [x] Add `other`: no single entity can be identified from the request.
+- [x] Add one option per area with canonical name, aliases, and available domains.
+- [x] Preserve a deterministic mapping from each option to its target within the snapshot.
+- [x] Add `other`: no single entity or area target can represent the request.
 
-For this baseline, `other` includes no match, unresolved ambiguity, and requests targeting multiple entities. Use available metadata; do not invent missing aliases or locations.
+For this baseline, `other` includes no match, unresolved ambiguity, and multiple targets that cannot be represented by one area. Room-wide requests such as "turn off the lights in the living room" select the area instead of one lamp or `other`. Use available metadata; do not invent missing aliases or locations.
 
 ### 3. Classify through OpenRouter
 
@@ -66,15 +68,15 @@ API failures and invalid responses are errors, not `other` selections.
 
 ### 4. Report and evaluate
 
-- [x] Print the selected entity or `other`, top alternatives, confidence, timing, and cost where reported.
+- [x] Print a typed entity/area target or `other`, top alternatives, confidence, timing, and cost where reported.
 - [x] Document setup and the CLI command.
-- [ ] Try representative prompts: clear names, room references, aliases, STT mistakes, ambiguous targets, absent entities, and multiple targets.
-- [ ] Compare expected versus selected entities to judge whether this approach is useful.
+- [ ] Try representative prompts: clear names, room-wide device groups, area aliases, STT mistakes, ambiguous targets, absent targets, and requests spanning multiple areas.
+- [ ] Compare expected versus selected targets to judge whether this approach is useful.
 
 ## Done when
 
 - A local CLI run fetches real HA context and returns a real Jev decision.
-- Both entity selections and `other` can be inspected with their scores.
+- Entity selections, area selections, and `other` can be inspected with their scores.
 - Failures are visible, and no device actions are executed.
 
 ## Later

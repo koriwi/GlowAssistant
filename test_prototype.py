@@ -24,13 +24,16 @@ INSPECTION = {"context": json.dumps({"success": True, "result": CONTEXT})}
 
 
 def response(choice="entity_001"):
+    probabilities = dict.fromkeys(("entity_001", "entity_002", "area_001", "area_002", "other"), 0.05)
+    if choice in probabilities:
+        probabilities[choice] = 0.8
     return {
         "answers": {
-            "entity": {
+            "target": {
                 "type": "choice",
                 "choice": choice,
                 "confidence": 0.65,
-                "probabilities": {"entity_001": 0.8, "entity_002": 0.1, "other": 0.1},
+                "probabilities": probabilities,
             }
         },
         "usage": {"cost": 0.00002},
@@ -60,28 +63,48 @@ class PrototypeTests(unittest.TestCase):
         entity = {"names": "Same name", "domain": "switch"}
         options, payload = decision_request("turn it on", [entity, entity])
         self.assertEqual(list(options), ["entity_001", "entity_002"])
-        self.assertEqual(len(payload["questions"]["entity"]["criteria"]), 3)
+        self.assertEqual(len(payload["questions"]["target"]["criteria"]), 3)
+
+    def test_area_choices_group_aliases_and_available_domains(self):
+        entities = parse_entities(INSPECTION) + [
+            {"names": "Floor lamp", "domain": "light", "areas": "Office, Study"},
+            {"names": "Outlet", "domain": "switch", "areas": " Office, Study, Workroom "},
+            {"names": "Unassigned", "domain": "sensor"},
+        ]
+        options, _ = decision_request("turn off the lights in the study", entities)
+        areas = [target for target in options.values() if target["type"] == "area"]
+        self.assertEqual(len(areas), 2)
+        self.assertEqual(areas[0], {
+            "type": "area", "name": "Office", "aliases": ["Study", "Workroom"],
+            "domains": ["light", "switch"],
+        })
+        self.assertEqual(len([target for target in options.values() if target["type"] == "entity"]), 5)
+
+    def test_area_selection_maps_to_room_instead_of_one_lamp(self):
+        options, _ = decision_request("turn off the lights in the study", parse_entities(INSPECTION))
+        result = selection_result(response("area_001"), options)
+        self.assertEqual(result["target"], {
+            "type": "area", "name": "Office", "aliases": ["Study"], "domains": ["light"],
+        })
+        self.assertEqual(result["probability"], 0.8)
 
     def test_selection_maps_back_to_metadata_and_preserves_scores(self):
         entities = parse_entities(INSPECTION)
         options, payload = decision_request("turn on the office desk lamp", entities)
         result = selection_result(response(), options)
         self.assertEqual(payload["state"]["prompt"], "turn on the office desk lamp")
-        self.assertEqual(result["entity"], entities[0])
+        self.assertEqual(result["target"], {**entities[0], "type": "entity"})
         self.assertEqual(result["probability"], 0.8)
         self.assertEqual(result["confidence"], 0.65)
         self.assertEqual(result["usage"]["cost"], 0.00002)
 
-    def test_other_returns_no_entity(self):
+    def test_other_returns_no_target(self):
         options, _ = decision_request("open a nonexistent garage", parse_entities(INSPECTION))
         data = response("other")
-        data["answers"]["entity"]["probabilities"] = {
-            "entity_001": 0.05, "entity_002": 0.05, "other": 0.9,
-        }
         result = selection_result(data, options)
         self.assertEqual(result["choice"], "other")
-        self.assertIsNone(result["entity"])
-        self.assertEqual(result["probability"], 0.9)
+        self.assertIsNone(result["target"])
+        self.assertEqual(result["probability"], 0.8)
 
     def test_invalid_decisions_are_errors_instead_of_other(self):
         options, _ = decision_request("lamp", parse_entities(INSPECTION))
@@ -92,11 +115,11 @@ class PrototypeTests(unittest.TestCase):
             {"confidence": True},
             {"confidence": float("nan")},
             {"probabilities": {"entity_001": 1.0}},
-            {"probabilities": {"entity_001": 1.1, "entity_002": 0, "other": 0}},
+            {"probabilities": {**response()["answers"]["target"]["probabilities"], "entity_001": 1.1}},
         )
         for change in changes:
             data = copy.deepcopy(response())
-            data["answers"]["entity"].update(change)
+            data["answers"]["target"].update(change)
             with self.subTest(change=change), self.assertRaises(ValueError):
                 selection_result(data, options)
         for data in ({}, {"error": {"message": "Provider failed"}}, []):
@@ -116,12 +139,13 @@ class PrototypeTests(unittest.TestCase):
         ):
             self.assertEqual(asyncio.run(run()), 0)
         result = json.loads(output.getvalue())
-        self.assertEqual(result["entity"]["areas"], "Office, Study")
-        self.assertEqual(result["candidate_count"], 2)
+        self.assertEqual(result["target"]["type"], "entity")
+        self.assertEqual(result["target"]["areas"], "Office, Study")
+        self.assertEqual(result["candidate_count"], 4)
         decider.assert_awaited_once()
         payload, _ = decider.await_args.args
-        self.assertEqual(set(payload["questions"]["entity"]["criteria"]),
-                         {"entity_001", "entity_002", "other"})
+        self.assertEqual(set(payload["questions"]["target"]["criteria"]),
+                         {"entity_001", "entity_002", "area_001", "area_002", "other"})
 
     def test_inspection_does_not_require_or_call_openrouter(self):
         decider = AsyncMock()

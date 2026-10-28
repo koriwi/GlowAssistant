@@ -13,6 +13,6 @@
 - Inspect built-in HA MCP: `python prototype.py --inspect`.
 - Classify a prompt: `python prototype.py "your request"`.
 - Run offline checks: `python -m unittest -v`.
-- Classifier choices use snapshot-local IDs mapped to context entries, not HA entity IDs.
+- Classifier choices use snapshot-local IDs for entities and areas, not HA registry IDs. Room-wide requests select areas; specific device requests select entities.
 - `.env` contains credentials. Never print its values or commit it.
 - Scope and implementation checklist: `plan.md`.
