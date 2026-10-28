@@ -22,7 +22,7 @@ python prototype.py "Mach alle Lichter im Wohnzimmer aus"
 python prototype.py "Wie warm ist es im Wohnzimmer?"
 ```
 
-Fetches MCP tools and Assist context once per script run and keeps that snapshot in memory. The first OpenRouter request selects an advertised MCP tool or `query_state`, plus an entity domain. The second selects an entity or area from that domain, using the same snapshot. No cache is written to disk, and no device actions are executed.
+Fetches MCP tools and Assist context once per script run and keeps that snapshot in memory. The first OpenRouter request selects an advertised MCP tool or `query_state`, plus an entity domain. The second selects an entity or area from that domain, using the same snapshot. Non-query commands now execute the selected target-only tool through MCP. No cache is written to disk.
 
 Example summary:
 
@@ -31,9 +31,15 @@ service: assist__HassTurnOff
 domain: light
 target type: area
 target: Wohnzimmer
+execution: completed
+arguments: {"domain": ["light"], "area": "Wohnzimmer"}
 ```
 
 The `service` is the actual advertised MCP tool name, rather than an inferred HA service such as `light.turn_off`. If the tool or domain is `other`, target selection is skipped and the summary shows `none`. A target decision of `other` is displayed as `other`.
+
+Execution supports tools whose parameters are limited to target fields (`name`, `area`, `floor`, `domain`, `device_class`). Entity calls use a known name/alias, the area where available, and a domain filter where supported. Area calls send the canonical area name and supported domain filter. Snapshot-local choice IDs are never sent as HA entity IDs. Duplicate entity names within the available scope are skipped.
+
+Tools needing additional parameters, such as brightness, temperature, or a list item, are skipped for now. Missing/ambiguous targets and unsupported target schemas are also skipped with a reason. Calls are not automatically retried. `completed` means MCP reported completion; it does not independently verify the resulting device state. MCP errors and transport failures produce a nonzero exit code, and full tool responses are included in `--json` output.
 
 State questions such as "is the lamp on?" or "how warm is the living room?" can select `query_state`. This uses the already fetched states and attributes and still selects a domain and target. The summary shows `service: none (query state)` and the selected entity's state and attributes, including units where provided. For example:
 
@@ -61,7 +67,7 @@ Target choices get temporary IDs such as `entity_001` and `area_001`. These IDs 
 
 Specific device requests select an entity. Room-wide requests such as "turn off the lights in the living room" select an area. `other` covers no match, unresolved ambiguity, or multiple targets that cannot be represented by one area. Identical entity entries remain separate candidates; the classifier is instructed to choose `other` when it cannot distinguish the target.
 
-An area target identifies the room. The separately selected `domain`, such as `light`, preserves the device category for future execution. Tool argument extraction and execution are not implemented.
+An area target identifies the room. The separately selected `domain`, such as `light`, limits the call to that category when the tool supports a domain parameter. Extraction of additional tool arguments is not implemented.
 
 For the API format, see [OpenRouter's Jev tutorial](https://openrouter.ai/docs/guides/community/jev-tutorial).
 
@@ -87,4 +93,4 @@ python prototype.py --inspect > inspection.json
 python -m unittest -v
 ```
 
-Tests cover parsing, service/state-query and target decisions, measurement metadata, domain filtering, one MCP fetch per run, error handling, and the CLI flow with mocked service calls. Real model accuracy still needs live prompt trials.
+Tests cover parsing, service/state-query and target decisions, measurements, domain filtering, one MCP context fetch per run, target argument construction, execution/error handling, and the CLI flow with mocked service calls. Tests do not operate real devices. Real model accuracy and device execution still need live trials.

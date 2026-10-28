@@ -12,7 +12,8 @@
 - Install dependencies: `python -m pip install -r requirements.txt` in a virtual environment.
 - Inspect built-in HA MCP: `python prototype.py --inspect`.
 - Classify a prompt: `python prototype.py "your request"`.
-- Classification fetches MCP tools/context once per run, then selects a tool/domain before a compatible target. No disk cache or device execution.
+- Classification fetches MCP tools/context once per run, then selects a tool/domain before a compatible target. No disk cache.
+- Non-query commands execute target-only MCP tools automatically. Tools needing extra values and ambiguous/unsupported targets are skipped. Never run live device actions as an incidental test.
 - State questions can select `query_state`, using cached states/attributes with no service. Domain and target selection still run; `other` remains separate.
 - State-query output displays cached values/attributes; area queries list matching entities in the selected domain. JSON includes `state_info`.
 - Default output is a short summary; `--json` includes both stages' scores, alternatives, usage and timings.

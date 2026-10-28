@@ -4,10 +4,11 @@ import io
 import json
 import sys
 import unittest
-from contextlib import redirect_stdout
-from unittest.mock import AsyncMock, patch
+from contextlib import asynccontextmanager, redirect_stdout
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
 
-from prototype import decision_request, parse_entities, print_result, query_state_info, run, selection_result, service_request
+from prototype import decision_request, execute_mcp, parse_entities, print_result, query_state_info, run, selection_result, service_request, target_arguments
 
 
 CONTEXT = """Live Context: An overview of the areas and the devices in this smart home:
@@ -20,11 +21,15 @@ CONTEXT = """Live Context: An overview of the areas and the devices in this smar
   state: 'on'
   areas: Bedroom
 """
+TARGET_SCHEMA = {"type": "object", "properties": {
+    "name": {"type": "string"}, "area": {"type": "string"},
+    "domain": {"type": "array", "items": {"type": "string"}},
+}}
 INSPECTION = {
     "context": json.dumps({"success": True, "result": CONTEXT}),
     "tools": [
-        {"name": "assist__HassTurnOn", "description": "Turn on a device", "inputSchema": {}},
-        {"name": "assist__HassTurnOff", "description": "Turn off a device", "inputSchema": {}},
+        {"name": "assist__HassTurnOn", "description": "Turn on a device", "inputSchema": TARGET_SCHEMA},
+        {"name": "assist__HassTurnOff", "description": "Turn off a device", "inputSchema": TARGET_SCHEMA},
     ],
 }
 
@@ -62,9 +67,17 @@ def service_response(tool="assist__HassTurnOff", domain="light"):
 
 class PrototypeTests(unittest.TestCase):
     def run_cli(self, responses, inspection=INSPECTION, json_output=True,
-                prompt="turn off the lights in the office"):
+                prompt="turn off the lights in the office", executor=None, exit_code=0):
         inspector = AsyncMock(return_value=inspection)
         decider = AsyncMock(side_effect=responses)
+        async def completed(session, name, arguments):
+            return {"status": "completed", "arguments": arguments, "response": {"isError": False}}
+        if executor is None:
+            executor = AsyncMock(side_effect=completed)
+        session = SimpleNamespace()
+        @asynccontextmanager
+        async def connection(url, token):
+            yield session
         output = io.StringIO()
         argv = ["prototype.py", prompt]
         if json_output:
@@ -73,11 +86,13 @@ class PrototypeTests(unittest.TestCase):
             patch.object(sys, "argv", argv),
             patch("prototype.load_dotenv"),
             patch("prototype.setting", return_value="test-credential"),
+            patch("prototype.mcp_session", new=connection),
             patch("prototype.inspect_mcp", new=inspector),
             patch("prototype.call_decider", new=decider),
+            patch("prototype.execute_mcp", new=executor),
             redirect_stdout(output),
         ):
-            self.assertEqual(asyncio.run(run()), 0)
+            self.assertEqual(asyncio.run(run()), exit_code)
         return output.getvalue(), inspector, decider
 
     def test_tool_and_resource_context_preserve_aliases_and_state(self):
@@ -210,7 +225,85 @@ class PrototypeTests(unittest.TestCase):
 
     def test_cli_summary_displays_tool_domain_and_area(self):
         output, _, _ = self.run_cli([service_response(), response("area_001")], json_output=False)
-        self.assertEqual(output, "service: assist__HassTurnOff\ndomain: light\ntarget type: area\ntarget: Office\n")
+        self.assertEqual(output, 'service: assist__HassTurnOff\ndomain: light\ntarget type: area\ntarget: Office\nexecution: completed\narguments: {"domain": ["light"], "area": "Office"}\n')
+
+    def test_entity_execution_uses_alias_area_and_domain_once(self):
+        executor = AsyncMock(return_value={"status": "completed"})
+        output, inspector, _ = self.run_cli([service_response(), response()], executor=executor)
+        self.assertEqual(json.loads(output)["execution"]["status"], "completed")
+        executor.assert_awaited_once_with(inspector.await_args.args[0], "assist__HassTurnOff", {
+            "domain": ["light"], "name": "Desk lamp", "area": "Office",
+        })
+        inspector.assert_awaited_once()
+
+    def test_area_execution_keeps_domain_filter_and_omits_entity_name(self):
+        executor = AsyncMock(return_value={"status": "completed"})
+        _, inspector, _ = self.run_cli([service_response(), response("area_001")], executor=executor)
+        executor.assert_awaited_once_with(inspector.await_args.args[0], "assist__HassTurnOff", {
+            "domain": ["light"], "area": "Office",
+        })
+
+    def test_ambiguous_decisions_and_query_state_never_execute(self):
+        for first, second in (
+            (service_response("other"), None),
+            (service_response(domain="other"), None),
+            (service_response(), response("other")),
+            (service_response("query_state"), response()),
+        ):
+            executor = AsyncMock()
+            responses = [first] + ([second] if second is not None else [])
+            self.run_cli(responses, executor=executor)
+            executor.assert_not_awaited()
+
+    def test_tools_needing_extra_values_are_skipped(self):
+        inspection = copy.deepcopy(INSPECTION)
+        inspection["tools"][1]["inputSchema"]["properties"]["brightness"] = {"type": "integer"}
+        executor = AsyncMock()
+        output, _, _ = self.run_cli([service_response(), response()], inspection=inspection, executor=executor)
+        result = json.loads(output)
+        self.assertEqual(result["execution"]["status"], "skipped")
+        self.assertIn("brightness", result["execution"]["reason"])
+        executor.assert_not_awaited()
+
+    def test_execution_errors_are_reported_and_not_retried(self):
+        for failure in (TimeoutError("timed out"), None):
+            executor = AsyncMock(side_effect=failure, return_value={"status": "error", "error": "HA rejected the target"})
+            output, _, _ = self.run_cli([service_response(), response()], executor=executor, exit_code=1)
+            result = json.loads(output)
+            self.assertEqual(result["execution"]["status"], "error")
+            executor.assert_awaited_once()
+
+    def test_target_arguments_reject_unsupported_and_nonunique_targets(self):
+        entities = parse_entities(INSPECTION)
+        tool = INSPECTION["tools"][1]
+        target = {**entities[0], "type": "entity"}
+        with self.assertRaisesRegex(ValueError, "not unique"):
+            target_arguments(tool, target, "light", entities + [entities[0]])
+        with self.assertRaisesRegex(ValueError, "does not support area"):
+            target_arguments({"inputSchema": {"properties": {"name": {}}}}, {"type": "area", "name": "Office"}, "light", entities)
+        with self.assertRaisesRegex(ValueError, "does not support named"):
+            target_arguments({"inputSchema": {"properties": {"area": {}}}}, target, "light", entities)
+        required = copy.deepcopy(tool)
+        required["inputSchema"]["required"] = ["floor"]
+        with self.assertRaisesRegex(ValueError, "Missing required arguments: floor"):
+            target_arguments(required, target, "light", entities)
+
+    def test_execute_mcp_passes_exact_arguments_and_recognizes_errors(self):
+        for data in (
+            {"isError": False, "content": [{"type": "text", "text": '{"success":true}'}]},
+            {"isError": True, "content": [{"type": "text", "text": "No matching device"}]},
+            {"isError": False, "content": [{"type": "text", "text": '{"success":false,"error":"Not found"}'}]},
+            {"isError": False, "structuredContent": {"response_type": "error"}, "content": []},
+            {"isError": False, "content": [{"type": "text", "text": '{"response_type":"action_done","data":{"failed":[{"name":"Lamp"}]}}'}]},
+        ):
+            response = SimpleNamespace(isError=data["isError"], model_dump=Mock(return_value=data))
+            session = SimpleNamespace(call_tool=AsyncMock(return_value=response))
+            arguments = {"area": "Office", "domain": ["light"]}
+            with self.subTest(data=data):
+                result = asyncio.run(execute_mcp(session, "assist__HassTurnOff", arguments))
+            self.assertEqual(result["status"], "completed" if data["content"] and data["content"][0]["text"] == '{"success":true}' else "error")
+            self.assertEqual(result["response"], data)
+            session.call_tool.assert_awaited_once_with("assist__HassTurnOff", arguments)
 
     def test_uncertain_service_or_domain_skips_target_request(self):
         for tool, domain in (("other", "light"), ("assist__HassTurnOff", "other")):
@@ -338,10 +431,14 @@ class PrototypeTests(unittest.TestCase):
 
     def test_inspection_does_not_require_or_call_openrouter(self):
         decider = AsyncMock()
+        @asynccontextmanager
+        async def connection(url, token):
+            yield SimpleNamespace()
         with (
             patch.object(sys, "argv", ["prototype.py", "--inspect"]),
             patch("prototype.load_dotenv"),
             patch("prototype.setting", side_effect=lambda name: {"HA_MCP_URL": "test", "HA_TOKEN": "test"}[name]),
+            patch("prototype.mcp_session", new=connection),
             patch("prototype.inspect_mcp", new=AsyncMock(return_value=INSPECTION)),
             patch("prototype.call_decider", new=decider),
             redirect_stdout(io.StringIO()),

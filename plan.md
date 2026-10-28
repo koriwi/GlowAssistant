@@ -12,7 +12,7 @@ One Python script accepts a transcribed voice prompt, fetches tools and entity c
 python prototype.py "turn on the desk lamp"
 ```
 
-The prototype selects a tool or state query, domain, and target, and displays cached state values for queries. It does not execute device actions, record audio, or perform speech recognition.
+The prototype selects a tool or state query, domain, and target. State queries display cached values; other requests execute target-only MCP tools. Audio capture and speech recognition remain outside this milestone.
 
 ## Agreed choices
 
@@ -24,6 +24,7 @@ The prototype selects a tool or state query, domain, and target, and displays ca
 - First select an advertised MCP tool and entity domain in one OpenRouter request. Then select a compatible entity or area in a second request.
 - Include `query_state` for current-state/measurement questions. It needs no service and reuses cached states/attributes, while still selecting a domain and target.
 - Display selected entity states/attributes with available units for `query_state`; area queries list matching entities in the selected domain.
+- Execute non-query tools that need only target fields. Tools needing extra values are skipped for now; no automatic argument extraction or retries.
 - Report the actual MCP tool name, such as `assist__HassTurnOff`, plus domain, rather than mapping it to an underlying HA service name.
 - Include an explicit `other` option.
 - Select context entries using temporary choice IDs; exact HA entity IDs are not required for this prototype.
@@ -80,7 +81,16 @@ For this baseline, `other` includes no match, unresolved ambiguity, and multiple
 
 API failures and invalid responses are errors, not `other` selections.
 
-### 5. Report and evaluate
+### 5. Execute target-only tools
+
+- [x] Send selected name/area and supported domain filter to the advertised MCP tool.
+- [x] Reuse the original MCP session and cached discovery/context data for execution.
+- [x] Skip queries, ambiguous/unsupported targets, duplicate entity names in scope, and tools needing additional values.
+- [x] Display execution status and actual arguments; include the complete MCP response in JSON.
+- [x] Report MCP/transport errors without retries.
+- [ ] Verify a live device command.
+
+### 6. Report and evaluate
 
 - [x] Print a short service/domain/target summary.
 - [x] Display cached values for state queries, including matching area members, measurements and available units.
@@ -95,11 +105,11 @@ API failures and invalid responses are errors, not `other` selections.
 
 - A local CLI run fetches real HA tools/context once and returns real Jev service/domain and target decisions.
 - Entity selections, area selections, and `other` can be inspected with their scores.
-- Failures are visible, and no device actions are executed.
+- Failures are visible, query-state requests do not execute device actions, and non-query target-only tools can execute through MCP.
 
 ## Later
 
-Use prototype findings to decide the next step toward a HA conversation agent. Natural-language responses, tool argument extraction, device control, conversation history, and packaging as an integration remain outside this milestone.
+Use prototype findings to decide the next step toward a HA conversation agent. Natural-language responses, extraction of additional tool arguments, conversation history, and packaging as an integration remain outside this milestone.
 
 ## References
 

@@ -3,6 +3,7 @@ import asyncio
 import json
 import os
 import sys
+from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
 from time import perf_counter
@@ -15,6 +16,7 @@ CONTEXT_TOOLS = ("assist__GetLiveContext", "homeassistant__GetLiveContext", "Get
 MODEL = "typesafe/jev-1.14"
 DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions"
 QUERY_STATE = "query_state"
+TARGET_FIELDS = {"name", "area", "floor", "domain", "device_class"}
 SERVICE_INSTRUCTIONS = (
     "Does the transcribed user request need an advertised MCP tool or only a state query? "
     "Select query_state for questions about current state or measurements, such as "
@@ -69,7 +71,8 @@ async def list_all(method, field):
             return items
 
 
-async def inspect_mcp(url, token):
+@asynccontextmanager
+async def mcp_session(url, token):
     import httpx
     from mcp import ClientSession
     from mcp.client.streamable_http import streamable_http_client
@@ -81,41 +84,45 @@ async def inspect_mcp(url, token):
             async with ClientSession(
                 streams[0], streams[1], read_timeout_seconds=timedelta(seconds=20),
             ) as session:
-                initialized = await session.initialize()
-                tools = (
-                    await list_all(session.list_tools, "tools")
-                    if initialized.capabilities.tools is not None else []
-                )
-                resources = (
-                    await list_all(session.list_resources, "resources")
-                    if initialized.capabilities.resources is not None else []
-                )
-                inspection = {
-                    "server": initialized.serverInfo.model_dump(exclude_none=True),
-                    "tools": [tool.model_dump(exclude_none=True) for tool in tools],
-                    "resources": [resource.model_dump(mode="json", exclude_none=True)
-                                  for resource in resources],
-                }
-                if any(str(resource.uri) == CONTEXT_URI for resource in resources):
-                    response = await session.read_resource(CONTEXT_URI)
-                    inspection["context_source"] = CONTEXT_URI
-                    inspection["context"] = "\n".join(
-                        block.text for block in response.contents if hasattr(block, "text")
-                    )
-                else:
-                    tool = next((tool for tool in tools if tool.name in CONTEXT_TOOLS), None)
-                    if tool is None:
-                        inspection["context_error"] = "No built-in Assist context resource or tool found."
-                        return inspection
-                    response = await session.call_tool(tool.name, {})
-                    inspection["context_source"] = tool.name
-                    if response.isError:
-                        inspection["context_error"] = "GetLiveContext returned an error."
-                    inspection["tool_response"] = response.model_dump(mode="json", exclude_none=True)
-                    inspection["context"] = "\n".join(
-                        block.text for block in response.content if block.type == "text"
-                    )
-                return inspection
+                yield session
+
+
+async def inspect_mcp(session):
+    initialized = await session.initialize()
+    tools = (
+        await list_all(session.list_tools, "tools")
+        if initialized.capabilities.tools is not None else []
+    )
+    resources = (
+        await list_all(session.list_resources, "resources")
+        if initialized.capabilities.resources is not None else []
+    )
+    inspection = {
+        "server": initialized.serverInfo.model_dump(exclude_none=True),
+        "tools": [tool.model_dump(exclude_none=True) for tool in tools],
+        "resources": [resource.model_dump(mode="json", exclude_none=True)
+                      for resource in resources],
+    }
+    if any(str(resource.uri) == CONTEXT_URI for resource in resources):
+        response = await session.read_resource(CONTEXT_URI)
+        inspection["context_source"] = CONTEXT_URI
+        inspection["context"] = "\n".join(
+            block.text for block in response.contents if hasattr(block, "text")
+        )
+    else:
+        tool = next((tool for tool in tools if tool.name in CONTEXT_TOOLS), None)
+        if tool is None:
+            inspection["context_error"] = "No built-in Assist context resource or tool found."
+            return inspection
+        response = await session.call_tool(tool.name, {})
+        inspection["context_source"] = tool.name
+        if response.isError:
+            inspection["context_error"] = "GetLiveContext returned an error."
+        inspection["tool_response"] = response.model_dump(mode="json", exclude_none=True)
+        inspection["context"] = "\n".join(
+            block.text for block in response.content if block.type == "text"
+        )
+    return inspection
 
 
 def parse_entities(inspection):
@@ -279,6 +286,68 @@ def query_state_info(target, entities, domain):
     ]
 
 
+def target_arguments(tool, target, domain, entities):
+    schema = tool.get("inputSchema", {})
+    properties = schema.get("properties", {})
+    extra = set(properties) - TARGET_FIELDS
+    if extra:
+        raise ValueError(f"Tool needs extra argument handling: {', '.join(sorted(extra))}.")
+    arguments = {}
+    if "domain" in properties:
+        arguments["domain"] = [domain] if properties["domain"].get("type") == "array" else domain
+    if target["type"] == "area":
+        if "area" not in properties:
+            raise ValueError("Tool does not support area targets.")
+        arguments["area"] = target["name"]
+    else:
+        if "name" not in properties:
+            raise ValueError("Tool does not support named entity targets.")
+        name = target["names"].split(",", 1)[0].strip()
+        arguments["name"] = name
+        area = (target.get("areas") or "").split(",", 1)[0].strip()
+        if area and "area" in properties:
+            arguments["area"] = area
+        matches = [
+            entity for entity in entities
+            if entity["domain"] == domain
+            and name.casefold() in [alias.strip().casefold() for alias in entity["names"].split(",")]
+            and ("area" not in arguments or
+                 (entity.get("areas") or "").split(",", 1)[0].strip() == arguments["area"])
+        ]
+        if len(matches) != 1:
+            raise ValueError("Selected entity name is not unique within the available target scope.")
+    missing = set(schema.get("required", [])) - set(arguments)
+    if missing:
+        raise ValueError(f"Missing required arguments: {', '.join(sorted(missing))}.")
+    return arguments
+
+
+async def execute_mcp(session, tool_name, arguments):
+    response = await session.call_tool(tool_name, arguments)
+    data = response.model_dump(mode="json", exclude_none=True)
+    failed = response.isError
+    payloads = [data.get("structuredContent")]
+    messages = []
+    for block in data.get("content", []):
+        if block.get("type") == "text":
+            messages.append(block["text"])
+            try:
+                payloads.append(json.loads(block["text"]))
+            except json.JSONDecodeError:
+                pass
+    for payload in payloads:
+        if isinstance(payload, dict) and (
+            payload.get("success") is False or payload.get("error")
+            or payload.get("response_type") == "error"
+            or (isinstance(payload.get("data"), dict) and payload["data"].get("failed"))
+        ):
+            failed = True
+    result = {"status": "error" if failed else "completed", "arguments": arguments, "response": data}
+    if failed:
+        result["error"] = "\n".join(messages) or json.dumps(data, ensure_ascii=False)
+    return result
+
+
 def print_result(result):
     target = result["target"]
     if target:
@@ -291,6 +360,13 @@ def print_result(result):
     print(f"domain: {result['domain'] or 'none'}")
     print(f"target type: {target_type}")
     print(f"target: {target_name}")
+    if "execution" in result:
+        execution = result["execution"]
+        print(f"execution: {execution['status']}")
+        if "arguments" in execution:
+            print(f"arguments: {json.dumps(execution['arguments'], ensure_ascii=False)}")
+        if "reason" in execution or "error" in execution:
+            print(f"result: {execution.get('reason') or execution['error']}")
     if "state_info" not in result:
         return
     if not result["state_info"]:
@@ -324,9 +400,9 @@ def error_message(error):
 
 
 async def run():
-    parser = argparse.ArgumentParser(description="Select a Home Assistant service or state query, domain and target.")
+    parser = argparse.ArgumentParser(description="Select a Home Assistant target and query its state or execute a target-only MCP tool.")
     parser.add_argument("prompt", nargs="?", help="Transcribed user request.")
-    parser.add_argument("--json", action="store_true", help="Include decision scores, alternatives, usage and timings.")
+    parser.add_argument("--json", action="store_true", help="Include decisions, execution response, usage and timings.")
     parser.add_argument("--inspect", action="store_true",
                         help="Print MCP discovery and raw entity context; no OpenRouter call.")
     args = parser.parse_args()
@@ -337,7 +413,13 @@ async def run():
     load_dotenv(Path(__file__).with_name(".env"))
     api_key = setting("OPENROUTER_API_KEY") if not args.inspect else None
     started = perf_counter()
-    inspection = await inspect_mcp(setting("HA_MCP_URL"), setting("HA_TOKEN"))
+    url, token = setting("HA_MCP_URL"), setting("HA_TOKEN")
+    async with mcp_session(url, token) as session:
+        return await process_request(args, api_key, session, started)
+
+
+async def process_request(args, api_key, session, started):
+    inspection = await inspect_mcp(session)
     fetched = perf_counter()
     if args.inspect:
         print(json.dumps(inspection, ensure_ascii=False, indent=2))
@@ -388,11 +470,29 @@ async def run():
     }
     if query_state:
         result["state_info"] = query_state_info(result["target"], entities, domain)
+    elif tool is None or domain is None or result["target"] is None:
+        result["execution"] = {"status": "skipped", "reason": "No unambiguous service, domain and target selected."}
+    else:
+        try:
+            arguments = target_arguments(tool, result["target"], domain, entities)
+        except ValueError as error:
+            result["execution"] = {"status": "skipped", "reason": str(error)}
+        else:
+            execution_started = perf_counter()
+            try:
+                result["execution"] = await execute_mcp(session, tool_name, arguments)
+            except Exception as error:
+                result["execution"] = {
+                    "status": "error", "arguments": arguments,
+                    "error": f"MCP call failed; device outcome unconfirmed: {error_message(error)}",
+                }
+            result["timings_ms"]["execution"] = round((perf_counter() - execution_started) * 1000)
+    result["timings_ms"]["total"] = round((perf_counter() - started) * 1000)
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:
         print_result(result)
-    return 0
+    return 1 if result.get("execution", {}).get("status") == "error" else 0
 
 
 if __name__ == "__main__":
