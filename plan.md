@@ -24,7 +24,9 @@ The prototype selects a tool or state query, domain, and target. State queries d
 - First select an advertised MCP tool and entity domain in one OpenRouter request. Then select a compatible entity or area in a second request.
 - Include `query_state` for current-state/measurement questions. It needs no service and reuses cached states/attributes, while still selecting a domain and target.
 - Display selected entity states/attributes with available units for `query_state`; area queries list matching entities in the selected domain.
-- Execute non-query tools that need only target fields. Tools needing extra values are skipped for now; no automatic argument extraction or retries.
+- Execute target-only tools and supported temperature/brightness setters. Numeric setters use a third Jev Score request. Other extra values are skipped; no automatic retries.
+- Temperature range/levels are constants: 16–26 °C, 9 levels. Relative changes use the existing thermostat target setting.
+- Temperature execution uses a 1 °C step constant based on the user's device metadata; raw fractional estimates are rounded before MCP execution.
 - Report the actual MCP tool name, such as `assist__HassTurnOff`, plus domain, rather than mapping it to an underlying HA service name.
 - Include an explicit `other` option.
 - Select context entries using temporary choice IDs; exact HA entity IDs are not required for this prototype.
@@ -81,11 +83,16 @@ For this baseline, `other` includes no match, unresolved ambiguity, and multiple
 
 API failures and invalid responses are errors, not `other` selections.
 
-### 5. Execute target-only tools
+### 5. Extract supported numeric values and execute tools
 
+- [x] Share numeric request/decoding logic with the standalone probe.
+- [x] Extract temperature and brightness using a third Score request and distinguish absolute/relative/unsupported requests.
+- [x] Use cached thermostat target settings and brightness percentages as baselines.
+- [x] Quantize temperature to the configured device step and preserve the direction of substep relative changes.
+- [x] Require a common baseline for relative area changes; allow absolute area settings with differing baselines.
 - [x] Send selected name/area and supported domain filter to the advertised MCP tool.
 - [x] Reuse the original MCP session and cached discovery/context data for execution.
-- [x] Skip queries, ambiguous/unsupported targets, duplicate entity names in scope, and tools needing additional values.
+- [x] Skip queries, ambiguous/unsupported targets, duplicate entity names in scope, and unsupported additional values.
 - [x] Display execution status and actual arguments; include the complete MCP response in JSON.
 - [x] Report MCP/transport errors without retries.
 - [ ] Verify a live device command.
@@ -105,11 +112,11 @@ API failures and invalid responses are errors, not `other` selections.
 
 - A local CLI run fetches real HA tools/context once and returns real Jev service/domain and target decisions.
 - Entity selections, area selections, and `other` can be inspected with their scores.
-- Failures are visible, query-state requests do not execute device actions, and non-query target-only tools can execute through MCP.
+- Failures are visible, query-state requests do not execute device actions, and supported target-only and numeric setters can execute through MCP.
 
 ## Later
 
-Use prototype findings to decide the next step toward a HA conversation agent. Natural-language responses, extraction of additional tool arguments, conversation history, and packaging as an integration remain outside this milestone.
+Use prototype findings to decide the next step toward a HA conversation agent. Natural-language responses, additional argument types beyond temperature/brightness, conversation history, and packaging as an integration remain outside this milestone.
 
 ## References
 

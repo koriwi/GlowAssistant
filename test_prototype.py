@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager, redirect_stdout
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
-from prototype import decision_request, execute_mcp, parse_entities, print_result, query_state_info, run, selection_result, service_request, target_arguments
+from prototype import current_numeric_values, decision_request, execute_mcp, parse_entities, print_result, query_state_info, run, selection_result, service_request, target_arguments
 
 
 CONTEXT = """Live Context: An overview of the areas and the devices in this smart home:
@@ -63,6 +63,53 @@ def service_response(tool="assist__HassTurnOff", domain="light"):
         },
         "usage": {"cost": 0.00003},
     }
+
+
+def numeric_case(parameter="temperature", currents=(20.5,), mode="relative", score=4):
+    climate = parameter == "temperature"
+    domain = "climate" if climate else "light"
+    tool_name = "assist__HassClimateSetTemperature" if climate else "assist__HassLightSet"
+    properties = copy.deepcopy(TARGET_SCHEMA["properties"])
+    if climate:
+        properties.pop("domain")
+        properties["temperature"] = {"type": "number"}
+    else:
+        properties.update(brightness={"type": "integer", "minimum": 0, "maximum": 100},
+                          color={"type": "string"}, temperature={"type": "integer"})
+    entities = [
+        {"names": f"Device {index}", "domain": domain, "state": "heat" if climate else "on",
+         "areas": "Office, Study", "attributes": {"temperature": current, "current_temperature": 24.5}
+         if climate else {"brightness": current}}
+        for index, current in enumerate(currents, 1)
+    ]
+    inspection = {
+        "context": json.dumps(entities),
+        "tools": [{"name": tool_name, "description": f"Set {parameter}",
+                   "inputSchema": {"type": "object", "properties": properties}}],
+    }
+    first = service_response()
+    first["answers"]["service"].update(choice=tool_name,
+        probabilities={tool_name: 0.9, "query_state": 0.05, "other": 0.05})
+    first["answers"]["domain"].update(choice=domain, probabilities={domain: 0.9, "other": 0.1})
+    target = response()
+    target["answers"]["target"]["probabilities"] = {
+        **{f"entity_{index:03}": 0 for index in range(1, len(entities) + 1)},
+        "area_001": 0.1, "other": 0.1,
+    }
+    target["answers"]["target"]["probabilities"]["entity_001"] = 0.8
+    levels = 9 if climate else 6
+    scores = {str(index): 0 for index in range(levels)}
+    lower = int(score)
+    scores[str(lower)] = 1 - (score - lower)
+    if score != lower:
+        scores[str(lower + 1)] = score - lower
+    modes = {"absolute": 0.1, "relative": 0.1, "other": 0.1}
+    modes[mode] = 0.8
+    numeric = {"answers": {
+        "numeric_score": {"type": "score", "score": score, "confidence": 0.8, "probabilities": scores},
+        "numeric_mode": {"type": "choice", "choice": mode, "confidence": 0.8, "probabilities": modes},
+    }, "usage": {"cost": 0.00004}}
+    return inspection, [first, target, numeric]
 
 
 class PrototypeTests(unittest.TestCase):
@@ -264,6 +311,118 @@ class PrototypeTests(unittest.TestCase):
         self.assertEqual(result["execution"]["status"], "skipped")
         self.assertIn("brightness", result["execution"]["reason"])
         executor.assert_not_awaited()
+
+    def test_temperature_extraction_uses_constants_and_existing_target_before_execution(self):
+        inspection, responses = numeric_case()
+        executor = AsyncMock(return_value={"status": "completed"})
+        output, inspector, decider = self.run_cli(
+            responses, inspection=inspection, executor=executor, prompt="make the office warmer",
+        )
+        result = json.loads(output)
+        self.assertEqual(decider.await_count, 3)
+        payload, _ = decider.await_args_list[2].args
+        self.assertEqual(payload["state"]["current"], 20.5)
+        self.assertEqual((payload["state"]["minimum"], payload["state"]["maximum"]), (16, 26))
+        self.assertEqual(len(payload["questions"]["numeric_score"]["criteria"]), 9)
+        self.assertEqual(result["decisions"]["numeric"]["value"], 21)
+        self.assertEqual(result["usage"]["numeric"], {"cost": 0.00004})
+        executor.assert_awaited_once_with(inspector.await_args.args[0], "assist__HassClimateSetTemperature", {
+            "name": "Device 1", "area": "Office", "temperature": 21,
+        })
+        inspector.assert_awaited_once()
+
+    def test_absolute_temperature_does_not_need_an_existing_setting(self):
+        inspection, responses = numeric_case(currents=(None,), mode="absolute", score=4.8)
+        executor = AsyncMock(return_value={"status": "completed"})
+        output, _, _ = self.run_cli(responses, inspection=inspection, executor=executor, prompt="set it to 22 degrees")
+        self.assertEqual(json.loads(output)["decisions"]["numeric"]["value"], 22)
+        self.assertEqual(executor.await_args.args[2]["temperature"], 22)
+
+    def test_temperature_is_quantized_to_whole_degrees_before_mcp_call(self):
+        inspection, responses = numeric_case(currents=(20,), score=4.02)
+        executor = AsyncMock(return_value={"status": "completed"})
+        output, _, _ = self.run_cli(responses, inspection=inspection, executor=executor)
+        numeric = json.loads(output)["decisions"]["numeric"]
+        self.assertAlmostEqual(numeric["estimate"]["value"], 21.025)
+        self.assertEqual(numeric["value"], 21)
+        temperature = executor.await_args.args[2]["temperature"]
+        self.assertEqual(temperature, 21)
+        self.assertIsInstance(temperature, int)
+
+    def test_subdegree_relative_changes_preserve_direction(self):
+        for score, expected in ((3.6, 21), (3.44, 21), (4.4, 21), (4.56, 21)):
+            current = 20 if score < 4 else 22
+            with self.subTest(score=score, current=current):
+                inspection, responses = numeric_case(currents=(current,), score=score)
+                executor = AsyncMock(return_value={"status": "completed"})
+                self.run_cli(responses, inspection=inspection, executor=executor)
+                self.assertEqual(executor.await_args.args[2]["temperature"], expected)
+
+    def test_relative_temperature_without_inferred_change_is_skipped(self):
+        inspection, responses = numeric_case(currents=(21,), score=4)
+        executor = AsyncMock()
+        output, _, _ = self.run_cli(responses, inspection=inspection, executor=executor)
+        executor.assert_not_awaited()
+        self.assertIn("No temperature change inferred", json.loads(output)["execution"]["reason"])
+
+    def test_brightness_uses_percent_baseline_and_sends_an_integer(self):
+        inspection, responses = numeric_case("brightness", currents=(51,), mode="absolute", score=3.13)
+        executor = AsyncMock(return_value={"status": "completed"})
+        output, _, decider = self.run_cli(responses, inspection=inspection, executor=executor, prompt="set brightness to 63 percent")
+        payload, _ = decider.await_args_list[2].args
+        self.assertEqual(payload["state"]["current"], 20)
+        arguments = executor.await_args.args[2]
+        self.assertEqual(arguments["brightness"], 63)
+        self.assertIsInstance(arguments["brightness"], int)
+        self.assertNotIn("temperature", arguments)
+        self.assertNotIn("color", arguments)
+        self.assertEqual(json.loads(output)["execution"]["status"], "completed")
+
+    def test_current_brightness_prefers_explicit_percent_and_handles_off_or_unavailable(self):
+        entities = [
+            {"state": "on", "attributes": {"brightness_pct": "70", "brightness": "51"}},
+            {"state": "off", "attributes": {"brightness": 100}},
+            {"state": "unavailable", "attributes": {"brightness": 100}},
+        ]
+        self.assertEqual(current_numeric_values(entities, "brightness"), [70, 0, None])
+
+    def test_relative_area_temperature_requires_one_common_target_setting(self):
+        for currents, should_execute in (((20.5, 20.5), True), ((20.5, 22), False), ((None,), False)):
+            with self.subTest(currents=currents):
+                inspection, responses = numeric_case(currents=currents)
+                responses[1]["answers"]["target"]["choice"] = "area_001"
+                executor = AsyncMock(return_value={"status": "completed"})
+                output, _, _ = self.run_cli(responses, inspection=inspection, executor=executor)
+                if should_execute:
+                    self.assertEqual(executor.await_args.args[2], {"area": "Office", "temperature": 21})
+                else:
+                    executor.assert_not_awaited()
+                    self.assertEqual(json.loads(output)["execution"]["status"], "skipped")
+
+    def test_absolute_area_temperature_can_replace_different_settings(self):
+        inspection, responses = numeric_case(currents=(20, 23), mode="absolute", score=4.8)
+        responses[1]["answers"]["target"]["choice"] = "area_001"
+        executor = AsyncMock(return_value={"status": "completed"})
+        self.run_cli(responses, inspection=inspection, executor=executor)
+        self.assertEqual(executor.await_args.args[2], {"area": "Office", "temperature": 22})
+
+    def test_unsupported_numeric_intent_and_invalid_numeric_responses_do_not_execute(self):
+        for kind in ("unsupported", "invalid", "schema_limit"):
+            with self.subTest(kind=kind):
+                inspection, responses = numeric_case(score=4.8, mode="other" if kind == "unsupported" else "absolute")
+                if kind == "invalid":
+                    responses[2]["answers"]["numeric_score"]["score"] = float("nan")
+                if kind == "schema_limit":
+                    inspection["tools"][0]["inputSchema"]["properties"]["temperature"]["maximum"] = 21
+                executor = AsyncMock()
+                output, _, _ = self.run_cli(responses, inspection=inspection, executor=executor)
+                executor.assert_not_awaited()
+                self.assertEqual(json.loads(output)["execution"]["status"], "skipped")
+
+    def test_numeric_value_is_visible_in_summary(self):
+        inspection, responses = numeric_case()
+        output, _, _ = self.run_cli(responses, inspection=inspection, json_output=False)
+        self.assertIn("temperature: 21 °C\n", output)
 
     def test_execution_errors_are_reported_and_not_retried(self):
         for failure in (TimeoutError("timed out"), None):

@@ -1,6 +1,6 @@
 # Numeric extraction experiment
 
-Run `numeric_probe.py` to test Jev on numeric settings independently of the conversation agent. It makes one OpenRouter request and never connects to HA or executes a tool. It reuses the existing model/API helpers without changing `prototype.py`.
+Run `numeric_probe.py` to test Jev on numeric settings independently of the conversation agent. It makes one OpenRouter request and never connects to HA or executes a tool. Numeric request/scaling logic is shared with the main agent through `numeric_values.py`; probe flags and debugging output stay in this command.
 
 ## Commands
 
@@ -65,7 +65,7 @@ Add `--json` to see the full request, raw response, probabilities per anchor, de
 python numeric_probe.py "Set brightness to 55%" --expected 55 --json
 ```
 
-`--expected` is only used locally for absolute-error reporting. It is never sent to Jev. Use `--instructions "..."` to replace the experimental question wording, or edit `INSTRUCTIONS` in `numeric_probe.py`.
+`--expected` is only used locally for absolute-error reporting. It is never sent to Jev. Use `--instructions "..."` to replace the wording for this probe run. Default numeric instructions live in `numeric_values.py` and are also used by the main agent.
 
 Offline checks:
 

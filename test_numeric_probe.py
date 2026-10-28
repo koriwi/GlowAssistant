@@ -67,11 +67,16 @@ class NumericProbeTests(unittest.TestCase):
     def test_invalid_ranges_levels_and_values_are_rejected(self):
         for minimum, maximum, levels, current in (
             (0, 0, 6, 0), (100, 0, 6, 40), (0, 100, 11, 40),
-            (0, 100, 1, 40), (0, 100, 6, 101), (0, float("inf"), 6, 40),
+            (0, 100, 1, 40), (0, float("inf"), 6, 40),
             (0, 100, 6, float("nan")),
         ):
             with self.subTest(values=(minimum, maximum, levels, current)), self.assertRaises(ValueError):
                 probe_request("set it", "brightness", current, minimum, maximum, levels, "%")
+
+    def test_current_setting_can_be_outside_the_new_output_range(self):
+        anchors, payload = probe_request("set temperature to 22", "temperature", 30, 16, 26, 9, "°C")
+        self.assertEqual(payload["state"]["current"], 30)
+        self.assertEqual((anchors[0], anchors[-1]), (16, 26))
 
     def test_malformed_numeric_outputs_are_rejected(self):
         for change in (

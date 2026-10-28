@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import json
+import math
 import os
 import sys
 from contextlib import asynccontextmanager
@@ -10,6 +11,7 @@ from time import perf_counter
 
 from dotenv import load_dotenv
 
+from numeric_values import INSTRUCTIONS as NUMERIC_INSTRUCTIONS, decode_numeric, finite_number, numeric_request
 
 CONTEXT_URI = "homeassistant://assist/context-snapshot"
 CONTEXT_TOOLS = ("assist__GetLiveContext", "homeassistant__GetLiveContext", "GetLiveContext")
@@ -17,6 +19,13 @@ MODEL = "typesafe/jev-1.14"
 DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions"
 QUERY_STATE = "query_state"
 TARGET_FIELDS = {"name", "area", "floor", "domain", "device_class"}
+TEMPERATURE_MIN = 16
+TEMPERATURE_MAX = 26
+TEMPERATURE_LEVELS = 9
+TEMPERATURE_STEP = 1.0
+BRIGHTNESS_MIN = 0
+BRIGHTNESS_MAX = 100
+BRIGHTNESS_LEVELS = 6
 SERVICE_INSTRUCTIONS = (
     "Does the transcribed user request need an advertised MCP tool or only a state query? "
     "Select query_state for questions about current state or measurements, such as "
@@ -286,13 +295,106 @@ def query_state_info(target, entities, domain):
     ]
 
 
-def target_arguments(tool, target, domain, entities):
+def numeric_config(tool, domain):
+    name = tool.get("name", "").rsplit("__", 1)[-1]
+    if name == "HassClimateSetTemperature" and domain == "climate":
+        return {"parameter": "temperature", "minimum": TEMPERATURE_MIN,
+                "maximum": TEMPERATURE_MAX, "levels": TEMPERATURE_LEVELS, "unit": "°C"}
+    if name == "HassLightSet" and domain == "light":
+        return {"parameter": "brightness", "minimum": BRIGHTNESS_MIN,
+                "maximum": BRIGHTNESS_MAX, "levels": BRIGHTNESS_LEVELS, "unit": "%"}
+    return None
+
+
+def current_numeric_values(entities, parameter):
+    values = []
+    for entity in entities:
+        attributes = entity.get("attributes") or {}
+        value = None
+        if entity.get("state") not in (None, "unknown", "unavailable"):
+            if parameter == "temperature":
+                unit = str(attributes.get("temperature_unit", "°C")).strip().casefold()
+                if unit not in ("°c", "c", "celsius"):
+                    raise ValueError("Temperature extraction is configured for Celsius only.")
+                value = attributes.get("temperature")
+            elif entity.get("state") == "off":
+                value = 0
+            elif attributes.get("brightness_pct") is not None:
+                value = attributes["brightness_pct"]
+            elif attributes.get("brightness") is not None:
+                # HA state brightness is 0–255; the intent takes a percentage
+                try:
+                    value = float(attributes["brightness"]) * 100 / 255
+                except (TypeError, ValueError):
+                    pass
+        try:
+            value = float(value) if value is not None and not isinstance(value, bool) else None
+        except (TypeError, ValueError):
+            value = None
+        values.append(value if finite_number(value) else None)
+    return values
+
+
+async def extract_numeric(prompt, tool, target, domain, entities, api_key, config):
+    members = query_state_info(target, entities, domain)
+    values = current_numeric_values(members, config["parameter"])
+    current = values[0] if values and None not in values and len(set(values)) == 1 else None
+    anchors, payload = numeric_request(
+        prompt=prompt, current=current, **config, method="score", model=MODEL,
+        instructions=NUMERIC_INSTRUCTIONS + (
+            " For temperature, current is the thermostat's existing target setting. "
+            "Base relative changes on this setting, not the measured room temperature."
+        ),
+    )
+    modes = {
+        "absolute": f"An explicit new absolute {config['parameter']} is requested within the supplied range.",
+        "relative": f"A relative change to {config['parameter']} is requested, using current as the baseline.",
+    }
+    payload["state"].update(target=target, current_values=values)
+    payload["questions"]["numeric_mode"] = choice_question(modes, (
+        f"Does the request specify an absolute or relative change to {config['parameter']}? "
+        "Choose other for a different property (including light color/color temperature), "
+        "multiple parameter changes, or a requested result outside the supplied range. "
+        "Relative changes require a known common current value; absolute changes do not."
+    ), "Unsupported, ambiguous, missing baseline, or outside the supplied numeric range.")
+    response = await call_decider(payload, api_key)
+    mode = selection_result(response, modes, "numeric_mode")
+    if mode["numeric_mode"] is None:
+        raise ValueError("Numeric request is unsupported, ambiguous, or outside the configured range.")
+    if mode["choice"] == "relative" and current is None:
+        raise ValueError("Relative numeric changes require a known common current setting for all targets.")
+    estimate = decode_numeric(response, anchors, method="score")["score"]
+    parameter = config["parameter"]
+    schema = tool["inputSchema"]["properties"][parameter]
+    value = estimate["value"]
+    if parameter == "temperature":
+        value = math.floor(value / TEMPERATURE_STEP + 0.5) * TEMPERATURE_STEP
+        if mode["choice"] == "relative" and value == current:
+            change = estimate["value"] - current
+            if change == 0:
+                raise ValueError("No temperature change inferred from the request.")
+            value = current + math.copysign(TEMPERATURE_STEP, change)
+        if value == int(value):
+            value = int(value)
+    elif schema.get("type") == "integer":
+        value = int(round(value))
+    if not config["minimum"] <= value <= config["maximum"]:
+        raise ValueError("Rounded numeric value is outside the configured range.")
+    if value < schema.get("minimum", -float("inf")) or value > schema.get("maximum", float("inf")):
+        raise ValueError("Extracted numeric value violates the MCP tool schema.")
+    return {"parameter": parameter, "current": current, "current_values": values, "unit": config["unit"],
+            "value": value, "mode": mode, "estimate": estimate}, response.get("usage", {})
+
+
+def target_arguments(tool, target, domain, entities, numeric_arguments=None):
     schema = tool.get("inputSchema", {})
     properties = schema.get("properties", {})
     extra = set(properties) - TARGET_FIELDS
-    if extra:
+    config = numeric_config(tool, domain)
+    numeric_arguments = numeric_arguments or {}
+    if extra and (not config or set(numeric_arguments) != {config["parameter"]}):
         raise ValueError(f"Tool needs extra argument handling: {', '.join(sorted(extra))}.")
-    arguments = {}
+    arguments = dict(numeric_arguments)
     if "domain" in properties:
         arguments["domain"] = [domain] if properties["domain"].get("type") == "array" else domain
     if target["type"] == "area":
@@ -360,6 +462,9 @@ def print_result(result):
     print(f"domain: {result['domain'] or 'none'}")
     print(f"target type: {target_type}")
     print(f"target: {target_name}")
+    if "numeric" in result.get("decisions", {}):
+        numeric = result["decisions"]["numeric"]
+        print(f"{numeric['parameter']}: {numeric['value']:g} {numeric['unit']}")
     if "execution" in result:
         execution = result["execution"]
         print(f"execution: {execution['status']}")
@@ -400,7 +505,7 @@ def error_message(error):
 
 
 async def run():
-    parser = argparse.ArgumentParser(description="Select a Home Assistant target and query its state or execute a target-only MCP tool.")
+    parser = argparse.ArgumentParser(description="Select a Home Assistant target and query its state or execute a supported MCP tool.")
     parser.add_argument("prompt", nargs="?", help="Transcribed user request.")
     parser.add_argument("--json", action="store_true", help="Include decisions, execution response, usage and timings.")
     parser.add_argument("--inspect", action="store_true",
@@ -474,7 +579,18 @@ async def process_request(args, api_key, session, started):
         result["execution"] = {"status": "skipped", "reason": "No unambiguous service, domain and target selected."}
     else:
         try:
-            arguments = target_arguments(tool, result["target"], domain, entities)
+            numeric_arguments = {}
+            config = numeric_config(tool, domain)
+            if config:
+                numeric_started = perf_counter()
+                numeric, usage = await extract_numeric(
+                    args.prompt, tool, result["target"], domain, entities, api_key, config,
+                )
+                result["decisions"]["numeric"] = numeric
+                result["usage"]["numeric"] = usage
+                result["timings_ms"]["numeric"] = round((perf_counter() - numeric_started) * 1000)
+                numeric_arguments[numeric["parameter"]] = numeric["value"]
+            arguments = target_arguments(tool, result["target"], domain, entities, numeric_arguments)
         except ValueError as error:
             result["execution"] = {"status": "skipped", "reason": str(error)}
         else:
