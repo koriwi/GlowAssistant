@@ -7,6 +7,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .chat_log_trace import ChatLogTrace
 from .client import ModelClient, ModelError
+from .debug import failure_details, model_failure
 from .engine import AgentEngine
 from .ha_context import async_execute, async_snapshot
 from .history import conversation_history
@@ -43,6 +44,7 @@ class GlowConversationEntity(conversation.ConversationEntity, conversation.Abstr
 
     async def _async_handle_message(self, user_input, chat_log):
         excluded = set(self.settings["excluded_entities"])
+        trace = ChatLogTrace(chat_log, user_input.agent_id)
 
         async def execute(action, arguments):
             await async_execute(self.hass, excluded, user_input.context, action, arguments)
@@ -50,7 +52,6 @@ class GlowConversationEntity(conversation.ConversationEntity, conversation.Abstr
         try:
             snapshot = await async_snapshot(self.hass, excluded)
             client = ModelClient(async_get_clientsession(self.hass))
-            trace = ChatLogTrace(chat_log, user_input.agent_id)
             history = conversation_history(chat_log.content, self.settings["history_messages"]) if self.settings["history_enabled"] else []
             result = await AgentEngine(self.settings, client, execute, trace=trace, history=history).process(
                 user_input.text, user_input.language, snapshot,
@@ -62,9 +63,13 @@ class GlowConversationEntity(conversation.ConversationEntity, conversation.Abstr
                           result["route"], result["service"], result["timings_ms"], result["usage"])
         except ModelError as error:
             _LOGGER.warning("Model request failed: %s", error)
+            if not trace.failure_reported:
+                trace.failure(model_failure(trace.stage, error))
             text = self.settings["error_reply"]
         except Exception:
             _LOGGER.exception("Conversation processing failed")
+            trace.failure(failure_details(trace.stage, "An unexpected integration error stopped the request.",
+                                          "Check the Home Assistant logs for the error details. Include them when reporting this issue."))
             text = self.settings["error_reply"]
         chat_log.async_add_assistant_content_without_tools(
             conversation.AssistantContent(agent_id=user_input.agent_id, content=text),

@@ -164,6 +164,44 @@ class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result_message.tool_call_id, call_message.tool_calls[0].id)
         self.assertEqual(result_message.tool_result["duration_ms"], 42)
 
+    async def test_native_chat_log_accepts_visible_failure_summary_without_adding_it_to_history(self):
+        from homeassistant.components.conversation.chat_log import (
+            ChatLog,
+            UserContent,
+        )
+
+        from custom_components.glow_assistant.chat_log_trace import ChatLogTrace
+        from custom_components.glow_assistant.debug import model_failure
+        from custom_components.glow_assistant.history import conversation_history
+
+        chat_log = ChatLog(hass=SimpleNamespace(data={}), conversation_id="failure-trace")
+        chat_log.async_add_user_content(UserContent(content="test"))
+        trace = ChatLogTrace(chat_log, "conversation.glow")
+        trace.failure(model_failure("answer", "Model reply reached its output token limit."))
+        bubble, details = chat_log.content[-2:]
+        self.assertIn("Increase Maximum output tokens", bubble.content)
+        self.assertEqual(details.tool_result["stage"], "answer")
+        self.assertEqual(conversation_history(chat_log.content, 10), [])
+
+    async def test_context_failure_reaches_debug_chat_and_keeps_the_configured_spoken_reply(self):
+        from custom_components.glow_assistant.conversation import GlowConversationEntity
+
+        agent = GlowConversationEntity(SimpleNamespace(data=self.settings(), entry_id="test-entry"))
+        agent.hass = Mock()
+        chat_log = Mock(conversation_id="conversation-error")
+        user_input = SimpleNamespace(text="test", language="de", agent_id="conversation.glow", context=object())
+        with patch("custom_components.glow_assistant.conversation.async_snapshot", new_callable=AsyncMock,
+                   side_effect=TypeError("private exception details")), \
+                self.assertLogs("custom_components.glow_assistant.conversation", level="ERROR"):
+            result = await agent._async_handle_message(user_input, chat_log)
+        bubble, details, spoken = [call.args[0] for call in chat_log.async_add_assistant_content_without_tools.call_args_list]
+        self.assertIn("Read Home Assistant devices", bubble.content)
+        self.assertIn("unexpected integration error", bubble.content)
+        self.assertNotIn("private exception details", bubble.content)
+        self.assertEqual(details.tool_result["stage"], "context")
+        self.assertEqual(spoken.content, self.settings()["error_reply"])
+        self.assertEqual(result.response.speech["plain"]["speech"], self.settings()["error_reply"])
+
     async def test_mcp_servers_use_structured_fields_and_mask_the_token(self):
         from custom_components.glow_assistant.config_flow import settings_schema
 

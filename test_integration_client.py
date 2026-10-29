@@ -3,7 +3,10 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
+import aiohttp
+
 from custom_components.glow_assistant.client import ModelClient, ModelError
+from custom_components.glow_assistant.debug import model_failure
 from custom_components.glow_assistant.settings import normalize_settings
 
 
@@ -58,6 +61,39 @@ class IntegrationClientTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(status=status), self.assertRaisesRegex(ModelError, f"HTTP {status}"):
                 await client.chat(normalize_settings({})["answer"], [])
             session.post.assert_called_once()
+
+    async def test_connection_timeout_and_invalid_json_have_distinct_diagnostics(self):
+        for error, expected in (
+            (TimeoutError(), "timed out"),
+            (aiohttp.ClientConnectionError("private connection detail"), "connection failed"),
+            (ValueError("private invalid response"), "invalid JSON"),
+        ):
+            client, session, response = self.client({})
+            response.json.side_effect = error
+            with self.subTest(error=type(error)), self.assertRaisesRegex(ModelError, expected) as caught:
+                await client.chat(normalize_settings({})["answer"], [])
+            self.assertNotIn("private", str(caught.exception))
+            session.post.assert_called_once()
+
+    def test_model_diagnostics_name_the_relevant_settings_without_exposing_unknown_errors(self):
+        for stage, message, expected in (
+            ("answer", "Model reply reached its output token limit.", "Increase Maximum output tokens under Smart-home answer"),
+            ("general", "Model input exceeds its configured character limit.", "Maximum input characters under General model"),
+            ("service", "Model endpoint returned HTTP 401.", "API key"),
+            ("answer", "Model endpoint returned HTTP 404.", "server URL and model name"),
+            ("general", "Model endpoint returned HTTP 429.", "usage limits"),
+            ("service", "Malformed classifier response.", "/v1/systemone"),
+            ("target", "Model request timed out.", "timeout under Decider"),
+            ("mcp_connect", "MCP server connection or tool discovery failed.", "bearer tokens"),
+            ("mcp", "MCP tool call failed; its outcome is unconfirmed. It was not retried.", "before repeating"),
+            ("general", "General model reached the MCP tool-round limit.", "tool-round"),
+            ("general", "private provider detail with secret-token", "Home Assistant logs"),
+        ):
+            with self.subTest(stage=stage, message=message):
+                details = model_failure(stage, ModelError(message))
+                self.assertIn(expected, details["suggestion"])
+                self.assertEqual(details["stage"], stage)
+                self.assertNotIn("secret-token", str(details))
 
     async def test_invalid_empty_and_truncated_chat_responses(self):
         for data in (

@@ -8,6 +8,9 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
+from custom_components.glow_assistant.debug import failure_details, model_failure
+from custom_components.glow_assistant.history import conversation_history
+
 
 @dataclass
 class ToolInput:
@@ -22,6 +25,7 @@ class AssistantContent:
     agent_id: str
     tool_calls: list
     content: str | None = None
+    role: str = "assistant"
 
 
 @dataclass
@@ -30,6 +34,7 @@ class ToolResultContent:
     tool_call_id: str
     tool_name: str
     tool_result: dict
+    role: str = "tool_result"
 
 
 class ChatLogTraceTests(unittest.TestCase):
@@ -80,6 +85,34 @@ class ChatLogTraceTests(unittest.TestCase):
         self.trace("answer", {}, {"status": "error", "error": "Token limit reached", "duration_ms": 120})
         self.assertEqual(self.messages[-1].tool_result["status"], "error")
         self.assertFalse(self.trace.calls)
+
+    def test_failure_is_visible_text_with_expandable_details_and_stays_out_of_history(self):
+        details = model_failure("answer", "Model reply reached its output token limit.")
+        self.trace.failure(details)
+        bubble, result = self.messages
+        self.assertIn("output token limit", bubble.content)
+        self.assertIn("Increase Maximum output tokens under Smart-home answer", bubble.content)
+        self.assertTrue(bubble.tool_calls[0].external)
+        self.assertEqual(result.tool_result["stage"], "answer")
+        self.assertEqual(result.tool_call_id, bubble.tool_calls[0].id)
+        self.assertEqual(conversation_history(self.messages, 10), [])
+        self.assertTrue(self.trace.failure_reported)
+        self.assertFalse(self.trace.calls)
+
+    def test_unexpected_failure_closes_pending_calls_and_retains_command_uncertainty(self):
+        self.trace("execution", {"service": "light.turn_off"})
+        self.trace.failure(failure_details("execution", "An unexpected error occurred.", "Check the logs."))
+        self.assertEqual(self.messages[1].tool_result["status"], "error")
+        self.assertIn("outcome is unconfirmed", self.messages[2].content)
+        self.assertFalse(self.trace.calls)
+
+    def test_answer_failure_after_execution_shows_that_the_command_was_already_sent(self):
+        self.trace("execution", {"service": "light.turn_off"})
+        self.trace("execution", {}, {"status": "completed"})
+        self.trace.failure(model_failure("answer", "Model returned no spoken answer."))
+        self.assertIn("Home Assistant accepted the device command", self.messages[2].content)
+        self.assertIn("Check the device before repeating", self.messages[2].content)
+        self.assertEqual(self.messages[3].tool_result["device_command"], "completed")
 
 
 if __name__ == "__main__":

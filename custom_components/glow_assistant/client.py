@@ -24,8 +24,12 @@ class ModelClient:
                 if response.status != 200:
                     raise ModelError(f"Model endpoint returned HTTP {response.status}.")
                 data = await response.json(content_type=None)
-        except (aiohttp.ClientError, TimeoutError, ValueError) as error:
-            raise ModelError("Model connection failed or returned invalid JSON.") from error
+        except TimeoutError as error:
+            raise ModelError("Model request timed out.") from error
+        except aiohttp.ClientError as error:
+            raise ModelError("Model connection failed.") from error
+        except ValueError as error:
+            raise ModelError("Model endpoint returned invalid JSON.") from error
         if not isinstance(data, dict) or "error" in data:
             raise ModelError("Model endpoint returned an error or invalid object.")
         return data

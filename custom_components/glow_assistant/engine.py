@@ -4,14 +4,16 @@ from time import perf_counter
 
 from .client import ModelError
 from .const import GENERAL, HISTORY_INSTRUCTIONS, QUERY, UNSURE
-from .debug import decision_details
+from .debug import STAGE_LABELS, decision_details, failure_details, model_failure
 from .general import general_answer
 from .history import with_history
 from .numeric_values import decode_numeric, finite_number, numeric_request
 
 
 class Uncertain(Exception):
-    pass
+    def __init__(self, stage, reason, suggestion, **details):
+        super().__init__(reason)
+        self.details = failure_details(stage, reason, suggestion, status="stopped", **details)
 
 
 class ActionError(Exception):
@@ -107,10 +109,21 @@ class AgentEngine:
         self.execute = execute
         self.trace = trace
         self.history = list(history or []) if settings["history_enabled"] else []
+        self.stage = "service"
 
     def _trace(self, stage, arguments, result=None):
+        if result is None and stage != "failure":
+            self.stage = stage
         if self.trace:
             self.trace(stage, arguments, result)
+
+    def _failure(self, result, details):
+        execution = result.get("execution", {}).get("status")
+        details = {**details, "device_command":
+                   "completed" if execution == "completed" else "unconfirmed" if execution == "error" else "not_sent"}
+        result.setdefault("failures", []).append(details)
+        self._trace("failure", details)
+        self._trace("failure", {}, details)
 
     async def _decide(self, result, stage, state, questions):
         config = self.settings["decider"]
@@ -144,8 +157,17 @@ class AgentEngine:
             self._trace(stage, {}, details)
 
     def _choice(self, response, question, options):
+        self.stage = "numeric" if question == "numeric_mode" else question
         threshold = self.settings["decider"][f"{question if question != 'numeric_mode' else 'numeric'}_confidence"]
-        return read_choice(response, question, options, threshold)
+        choice = read_choice(response, question, options, threshold)
+        if choice == UNSURE:
+            confidence = response["answers"][question]["confidence"]
+            reason = (f"The model's confidence ({confidence:.0%}) is below the configured minimum ({threshold:.0%})."
+                      if confidence < threshold else "The model selected unsure; it could not make one clear selection.")
+            raise Uncertain(question, reason,
+                            f"Rephrase the request with a specific action, room, or device. Review {STAGE_LABELS[question]} above.",
+                            confidence=confidence, minimum_confidence=threshold)
+        return choice
 
     async def process(self, prompt, language, snapshot):
         result = {
@@ -155,8 +177,12 @@ class AgentEngine:
         }
         try:
             await self._process(result, snapshot)
-        except Uncertain:
+        except Uncertain as error:
             result.update(route=UNSURE, answer=self.settings["unsure_reply"])
+            self._failure(result, error.details)
+        except ModelError as error:
+            self._failure(result, model_failure(self.stage, error))
+            raise
         return result
 
     async def _process(self, result, snapshot):
@@ -177,11 +203,10 @@ class AgentEngine:
             "domain": choice_question(domains, config["domain_prompt"]),
         })
         service_choice = self._choice(response, "service", services)
-        if service_choice == UNSURE:
-            raise Uncertain
         if service_choice == GENERAL:
             if not self.settings["general"]["enable"]:
-                raise Uncertain
+                raise Uncertain("general", "The request is not about the smart home, but the general model is disabled.",
+                                "Enable General model to answer general questions.")
             result["route"] = GENERAL
             messages = [
                 {"role": "system", "content": f"{self.settings['general']['prompt']}\n{language_instruction}"},
@@ -191,7 +216,7 @@ class AgentEngine:
                 started = perf_counter()
                 try:
                     result["answer"], rounds = await general_answer(
-                        self.client, self.settings["general"], with_history(messages, self.history), trace=self.trace,
+                        self.client, self.settings["general"], with_history(messages, self.history), trace=self._trace,
                     )
                     result["usage"]["general"] = {"rounds": rounds}
                 finally:
@@ -202,8 +227,6 @@ class AgentEngine:
         query = service_choice == QUERY
         action = actions.get(service_choice)
         domain = self._choice(response, "domain", domains) if query else action["service"].split(".", 1)[0]
-        if domain == UNSURE:
-            raise Uncertain
         result["service"] = QUERY if query else action["service"]
         result["domain"] = domain
         areas = {**{f"area:{key}": value for key, value in areas_from(entities).items()},
@@ -212,27 +235,26 @@ class AgentEngine:
             "area": choice_question(areas, config["area_prompt"]),
         })
         area = self._choice(response, "area", areas)
-        if area == UNSURE:
-            raise Uncertain
         candidates = [entity for entity in entities if entity["domain"] == domain
                       and (area == "no_area" or entity.get("area_id") == area.removeprefix("area:"))]
         if not candidates:
-            raise Uncertain
+            raise Uncertain("target", "No exposed devices match the selected device type and room filter.",
+                            "Check the device's room, Assist exposure settings, and GlowAssistant exclusions.",
+                            domain=domain, area=areas[area])
         options = target_options(candidates)
         response = await self._decide(result, "target", {
             "prompt": prompt, "service": result["service"], "domain": domain,
             "area": areas[area] if area != "no_area" else None,
         }, {"target": choice_question(options, config["target_prompt"])})
         target = self._choice(response, "target", options)
-        if target == UNSURE:
-            raise Uncertain
         result["target"] = options[target]
         if result["target"]["type"] == "entity":
             members = [entity for entity in candidates if entity["entity_id"] == result["target"]["entity_id"]]
         else:
             members = [entity for entity in candidates if entity.get("area_id") == result["target"]["area_id"]]
         if not members:
-            raise Uncertain
+            raise Uncertain("target", "The selected target contains no matching exposed devices.",
+                            "Check Assist exposure settings and the device's room assignment.")
         if query:
             result["state_info"] = [
                 {"name": entity["name"], "state": entity["state"], "attributes":
@@ -257,8 +279,11 @@ class AgentEngine:
                     **result.get("execution", {"status": "incomplete"}),
                     "duration_ms": result["timings_ms"]["execution"],
                 })
+            if result["execution"]["status"] == "error":
+                self._failure(result, failure_details("execution", "Home Assistant could not confirm the device command.",
+                                                     "Check the device's availability, Assist exposure, and Home Assistant logs."))
         facts = {key: value for key, value in result.items()
-                 if key not in ("decisions", "usage", "timings_ms")}
+                 if key not in ("decisions", "usage", "timings_ms", "failures")}
         try:
             await self._chat(result, "answer", [
                 {"role": "system", "content": f"{self.settings['answer']['prompt']}\n{language_instruction}"},
@@ -268,6 +293,7 @@ class AgentEngine:
             completed = result.get("execution", {}).get("status") == "completed"
             result["answer"] = self.settings["answer_error_reply" if completed else "error_reply"]
             result["answer_error"] = str(error)
+            self._failure(result, model_failure("answer", error))
 
     async def _chat(self, result, stage, messages):
         config = self.settings[stage]
@@ -286,6 +312,7 @@ class AgentEngine:
             self._trace(stage, {}, details)
 
     async def _numeric(self, result, members, service_parameter):
+        self.stage = "numeric"
         parameter = "temperature" if service_parameter == "temperature" else "brightness"
         config = self.settings["decider"]
         values = [current_setting(entity, parameter, config["temperature_baseline"]) for entity in members]
@@ -296,7 +323,8 @@ class AgentEngine:
         if parameter == "temperature":
             units = {entity.get("attributes", {}).get("temperature_unit", "°C") for entity in members}
             if len(units) != 1:
-                raise Uncertain
+                raise Uncertain("numeric", "The selected thermostats use different temperature units.",
+                                "Select one thermostat, or set the devices to the same temperature unit.")
             unit = units.pop()
             for entity in members:
                 attributes = entity.get("attributes", {})
@@ -304,9 +332,11 @@ class AgentEngine:
                 maximum = min(maximum, attributes.get("max_temp", maximum))
                 step = max(step, attributes.get("target_temp_step", step))
         elif any(set(entity.get("attributes", {}).get("supported_color_modes", [])) == {"onoff"} for entity in members):
-            raise Uncertain
+            raise Uncertain("numeric", "A selected light supports only on/off, not brightness changes.",
+                            "Select a dimmable light, or ask to turn the light on or off.")
         if minimum >= maximum:
-            raise Uncertain
+            raise Uncertain("numeric", "The configured limits and device limits have no usable range in common.",
+                            "Check the numeric limits under Decider and the device's supported range.")
         anchors, payload = numeric_request(
             result["request"], parameter, current, minimum, maximum,
             int(config[f"{parameter}_levels"]), unit, method="score",
@@ -317,29 +347,37 @@ class AgentEngine:
         payload["questions"]["numeric_mode"] = choice_question(modes, config["numeric_mode_prompt"])
         response = await self._decide(result, "numeric", payload["state"], payload["questions"])
         mode = self._choice(response, "numeric_mode", modes)
-        if mode == UNSURE or (mode == "relative" and current is None):
-            raise Uncertain
+        if mode == "relative" and current is None:
+            raise Uncertain("numeric", "The current settings are unavailable or differ between the selected devices.",
+                            "Specify an absolute value, or select one device with a known current setting.",
+                            current_values=values)
         try:
             estimate = decode_numeric(response, anchors, method="score")["score"]
         except ValueError as error:
             raise ModelError("Malformed numeric response.") from error
         if estimate["confidence"] < config["numeric_confidence"]:
-            raise Uncertain
+            raise Uncertain("numeric", "The model's confidence in the new value is below the configured minimum.",
+                            "Specify an explicit new value. Review the numeric confidence threshold under Decider.",
+                            confidence=estimate["confidence"], minimum_confidence=config["numeric_confidence"])
         raw = estimate["value"]
         value = math.floor(raw / step + 0.5) * step
         if mode == "relative":
             if math.isclose(raw, current):
-                raise Uncertain
+                raise Uncertain("numeric", "The model's new value would not change the current setting.",
+                                "Specify the desired value or the size of the change.")
             if raw > current and value <= current:
                 value = (math.floor(current / step) + 1) * step
             elif raw < current and value >= current:
                 value = (math.ceil(current / step) - 1) * step
         if not minimum <= value <= maximum:
-            raise Uncertain
+            raise Uncertain("numeric", "The new value is outside the allowed range after rounding to the device's step.",
+                            "Choose a value inside the supported range, or review the numeric limits under Decider.",
+                            value=value, minimum=minimum, maximum=maximum)
         for entity in members:
             if parameter == "temperature":
                 attributes = entity.get("attributes", {})
                 device_step = attributes.get("target_temp_step", step)
                 if not math.isclose(value / device_step, round(value / device_step), abs_tol=1e-6):
-                    raise Uncertain
+                    raise Uncertain("numeric", "The new value does not match a selected thermostat's temperature step.",
+                                    "Choose a supported whole step, or select one thermostat.", value=value, device_step=device_step)
         return int(value) if float(value).is_integer() else round(value, 6)

@@ -192,11 +192,19 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         result, _, execute = await self.run_agent(
             [{"service": "light.turn_off"}], settings=settings, trace=lambda *event: events.append(event),
         )
-        choice = events[-1][2]["decisions"]["service"]
+        choice = next(output["decisions"]["service"] for stage, _, output in events
+                      if stage == "service" and output is not None)
         self.assertEqual(choice["choice"], "light.turn_off")
         self.assertEqual(choice["effective_choice"], "unsure")
         self.assertEqual(choice["minimum_confidence"], 0.95)
         self.assertEqual(result["route"], "unsure")
+        failure = events[-1][2]
+        self.assertEqual(events[-1][0], "failure")
+        self.assertEqual(failure, result["failures"][0])
+        self.assertIn("90%", failure["reason"])
+        self.assertIn("95%", failure["reason"])
+        self.assertEqual(failure["stage"], "service")
+        self.assertEqual(failure["device_command"], "not_sent")
         execute.assert_not_awaited()
 
     async def test_trace_retains_failed_answer_timing_and_cause(self):
@@ -205,11 +213,15 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
             {"service": "query_state", "domain": "light"},
             {"area": "area:office"}, {"target": "area:office"},
         ], answers=[ModelError("Model endpoint returned HTTP 401.")], trace=lambda *event: events.append(event))
-        stage, _, output = events[-1]
-        self.assertEqual(stage, "answer")
+        output = next(output for stage, _, output in events if stage == "answer" and output is not None)
         self.assertEqual(output["status"], "error")
         self.assertEqual(output["error"], result["answer_error"])
         self.assertIn("duration_ms", output)
+        failure = events[-1][2]
+        self.assertEqual(failure["stage"], "answer")
+        self.assertEqual(failure["http_status"], 401)
+        self.assertIn("API key", failure["suggestion"])
+        self.assertIn("Smart-home answer", failure["suggestion"])
         execute.assert_not_awaited()
 
     async def test_trace_retains_decider_failure_without_running_later_stages(self):
@@ -220,10 +232,10 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         agent = AgentEngine(normalize_settings({}), models, execute, trace=lambda *event: events.append(event))
         with self.assertRaisesRegex(ModelError, "connection failed"):
             await agent.process("test", "de", SNAPSHOT)
-        self.assertEqual(len(events), 2)
-        self.assertEqual(events[-1][0], "service")
-        self.assertEqual(events[-1][2]["status"], "error")
-        self.assertIn("duration_ms", events[-1][2])
+        self.assertEqual([stage for stage, _, _ in events], ["service", "service", "failure", "failure"])
+        self.assertEqual(events[1][2]["status"], "error")
+        self.assertIn("duration_ms", events[1][2])
+        self.assertIn("could not be reached", events[-1][2]["reason"])
         execute.assert_not_awaited()
 
     async def test_trace_does_not_include_model_credentials_or_prompt_templates(self):
@@ -282,17 +294,20 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
             [{"service": "light.turn_off"}, {"area": "unsure"}],
             [{"service": "light.turn_off"}, {"area": "no_area"}, {"target": "unsure"}],
         ]
-        for choices in cases:
+        for choices, expected_stage in zip(cases, ("service", "domain", "area", "target")):
             with self.subTest(choices=choices):
                 result, models, execute = await self.run_agent(choices)
                 self.assertEqual(result["answer"], "ich bin mir nicht sicher")
                 self.assertEqual(result["route"], "unsure")
+                self.assertEqual(result["failures"][0]["stage"], expected_stage)
+                self.assertIn("selected unsure", result["failures"][0]["reason"])
                 self.assertFalse(models.chat_requests)
                 execute.assert_not_awaited()
 
     async def test_disabled_general_returns_fixed_unsure(self):
         result, models, execute = await self.run_agent([{"service": "not-smarthome-related"}])
         self.assertEqual(result["answer"], "ich bin mir nicht sicher")
+        self.assertIn("general model is disabled", result["failures"][0]["reason"])
         self.assertFalse(models.chat_requests)
         execute.assert_not_awaited()
 
@@ -322,6 +337,8 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         ])
         self.assertEqual(result["route"], "unsure")
         self.assertEqual(len(models.requests), 2)
+        self.assertEqual(result["failures"][0]["stage"], "target")
+        self.assertIn("No exposed devices", result["failures"][0]["reason"])
         execute.assert_not_awaited()
 
     async def test_answer_failure_after_action_preserves_outcome_and_never_retries(self):
@@ -334,6 +351,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["answer_error"], "No answer")
         self.assertIn("answer", result["timings_ms"])
         self.assertEqual(len(models.chat_requests), 1)
+        self.assertEqual(result["failures"][0]["device_command"], "completed")
 
     async def test_query_answer_failure_preserves_state_and_error_details(self):
         result, models, execute = await self.run_agent([
@@ -356,6 +374,9 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["execution"]["status"], "error")
         facts = json.loads(models.chat_requests[0][1][1]["content"])
         self.assertIn("unconfirmed", facts["execution"]["error"])
+        self.assertEqual(result["failures"][0]["stage"], "execution")
+        self.assertEqual(result["failures"][0]["device_command"], "unconfirmed")
+        self.assertNotIn("failures", facts)
 
     async def run_numeric(self, currents=(21,), score=4.02, mode="relative", parameter="temperature", settings=None, trace=None, history=None):
         climate = parameter == "temperature"
@@ -409,6 +430,29 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         result, models, execute = await self.run_numeric(currents=(20, 22))
         self.assertEqual(result["route"], "unsure")
         self.assertFalse(models.chat_requests)
+        self.assertIn("differ between", result["failures"][0]["reason"])
+        self.assertEqual(result["failures"][0]["current_values"], [20, 22])
+        execute.assert_not_awaited()
+
+    async def test_missing_current_value_explains_why_relative_change_stopped(self):
+        result, models, execute = await self.run_numeric(currents=(None,))
+        self.assertEqual(result["failures"][0]["stage"], "numeric")
+        self.assertIn("unavailable", result["failures"][0]["reason"])
+        self.assertIn("absolute value", result["failures"][0]["suggestion"])
+        self.assertFalse(models.chat_requests)
+        execute.assert_not_awaited()
+
+    async def test_invalid_decision_after_response_still_emits_a_failure_summary(self):
+        events = []
+        models = ScriptedModels([])
+        models.decide = AsyncMock(return_value={"answers": {}})
+        execute = AsyncMock()
+        agent = AgentEngine(normalize_settings({}), models, execute, trace=lambda *event: events.append(event))
+        with self.assertRaises(ModelError):
+            await agent.process("test", "de", SNAPSHOT)
+        self.assertEqual(events[-1][0], "failure")
+        self.assertEqual(events[-1][2]["stage"], "service")
+        self.assertIn("invalid decision", events[-1][2]["reason"])
         execute.assert_not_awaited()
 
     async def test_absolute_area_can_set_a_common_temperature(self):
