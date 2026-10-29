@@ -8,6 +8,7 @@ from .debug import STAGE_LABELS, decision_details, failure_details, model_failur
 from .general import general_answer
 from .history import with_history
 from .numeric_values import decode_numeric, finite_number, numeric_request
+from .text_values import TEXT_ACTIONS, decode_text, text_request
 
 
 class Uncertain(Exception):
@@ -55,6 +56,12 @@ def action_options(services):
         fields = description.get("fields") or {}
         required = {key for key, field in fields.items() if field.get("required")}
         base = {"service": name, "description": description.get("description", name)}
+        if name in TEXT_ACTIONS:
+            parameter, explanation = TEXT_ACTIONS[name]
+            if parameter in fields and required <= {parameter}:
+                options[name] = {**base, "parameter": parameter, "parameter_type": "text",
+                                 "parameter_description": explanation, "mode": "Only the named free-text parameter; no extra fields."}
+            continue
         if not required and name != "climate.set_temperature":
             options[name] = {**base, "parameter": None, "mode": "target-only; no extra values"}
         parameter = {"climate.set_temperature": "temperature", "light.turn_on": "brightness_pct"}.get(name)
@@ -264,7 +271,10 @@ class AgentEngine:
         else:
             arguments = {"entity_id": [entity["entity_id"] for entity in members]}
             if action["parameter"]:
-                arguments[action["parameter"]] = await self._numeric(result, members, action["parameter"])
+                if action.get("parameter_type") == "text":
+                    arguments[action["parameter"]] = await self._text(result)
+                else:
+                    arguments[action["parameter"]] = await self._numeric(result, members, action["parameter"])
             self._trace("execution", {"service": action["service"], "arguments": arguments})
             execution_started = perf_counter()
             try:
@@ -310,6 +320,18 @@ class AgentEngine:
             result["timings_ms"][stage] = round((perf_counter() - started) * 1000)
             details["duration_ms"] = result["timings_ms"][stage]
             self._trace(stage, {}, details)
+
+    async def _text(self, result):
+        config = self.settings["decider"]
+        words, payload = text_request(result["request"], result["service"], config["text_prompt"])
+        payload["state"]["target"] = result["target"]
+        response = await self._decide(result, "text", payload["state"], payload["questions"])
+        text = decode_text(response, words, config["text_confidence"])
+        if not text:
+            raise Uncertain("text", "No payload words were selected above the text confidence threshold.",
+                            "State the item or message explicitly. Review Text extraction confidence under Decider.",
+                            confidence_threshold=config["text_confidence"])
+        return text
 
     async def _numeric(self, result, members, service_parameter):
         self.stage = "numeric"

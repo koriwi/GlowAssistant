@@ -8,11 +8,13 @@ from .const import (
     DOMAIN_PROMPT,
     GENERAL_PROMPT,
     LEGACY_GENERAL_PROMPT,
+    LEGACY_SERVICE_PROMPT,
     NUMERIC_MODE_PROMPT,
     SERVICE_PROMPT,
     TARGET_PROMPT,
 )
 from .numeric_values import INSTRUCTIONS
+from .text_values import INSTRUCTIONS as TEXT_INSTRUCTIONS
 
 DEFAULTS = {
     "name": "GlowAssistant",
@@ -23,6 +25,7 @@ DEFAULTS = {
         "service_prompt": SERVICE_PROMPT, "domain_prompt": DOMAIN_PROMPT,
         "area_prompt": AREA_PROMPT, "target_prompt": TARGET_PROMPT,
         "numeric_prompt": INSTRUCTIONS, "numeric_mode_prompt": NUMERIC_MODE_PROMPT,
+        "text_prompt": TEXT_INSTRUCTIONS, "text_confidence": 0.5,
         "service_confidence": 0, "domain_confidence": 0, "area_confidence": 0,
         "target_confidence": 0, "numeric_confidence": 0,
         "temperature_min": 16, "temperature_max": 26, "temperature_levels": 9,
@@ -67,6 +70,8 @@ def normalize_settings(data):
             settings[key] = data[key]
     if settings["general"]["prompt"] == LEGACY_GENERAL_PROMPT:
         settings["general"]["prompt"] = GENERAL_PROMPT
+    if settings["decider"]["service_prompt"] == LEGACY_SERVICE_PROMPT:
+        settings["decider"]["service_prompt"] = SERVICE_PROMPT
     return settings
 
 
@@ -88,7 +93,7 @@ def validate_settings(data):
             _range(config, "max_tokens", 1, 100000, group, integer=True)
             _range(config, "temperature", 0, 2, group)
     decider = settings["decider"]
-    for stage in ("service", "domain", "area", "target", "numeric"):
+    for stage in ("service", "domain", "area", "target", "numeric", "text"):
         _range(decider, f"{stage}_confidence", 0, 1, "decider")
     for parameter in ("temperature", "brightness"):
         lower = -100 if parameter == "temperature" else 0

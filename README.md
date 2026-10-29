@@ -3,6 +3,7 @@
 A Home Assistant conversation agent. Install it with HACS.
 
 GlowAssistant supports state queries, actions that need only a target, brightness changes, and thermostat temperature changes.
+It can add shopping or to-do items, send messages to notify entities, and announce messages on Assist satellites.
 It uses Home Assistant's exposed entities. You can exclude additional entities in the integration settings.
 
 Minimum Home Assistant version: **2026.4.2**.

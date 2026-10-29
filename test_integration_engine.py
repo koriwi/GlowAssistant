@@ -2,7 +2,7 @@ import copy
 import json
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from custom_components.glow_assistant.client import ModelError
 from custom_components.glow_assistant.engine import (
@@ -16,6 +16,7 @@ from custom_components.glow_assistant.settings import (
     normalize_settings,
     validate_settings,
 )
+from custom_components.glow_assistant.text_values import TEXT_ACTIONS
 
 
 def entity(entity_id, name, area="office", state="on", **attributes):
@@ -75,11 +76,11 @@ class ScriptedModels:
 
 
 class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
-    async def run_agent(self, choices, snapshot=SNAPSHOT, settings=None, answers=None, executor=None, trace=None, history=None, language="de"):
+    async def run_agent(self, choices, snapshot=SNAPSHOT, settings=None, answers=None, executor=None, trace=None, history=None, language="de", prompt="test request"):
         models = ScriptedModels(choices, answers)
         execute = executor or AsyncMock()
         agent = AgentEngine(settings or normalize_settings({}), models, execute, trace=trace, history=history)
-        result = await agent.process("test request", language, snapshot)
+        result = await agent.process(prompt, language, snapshot)
         return result, models, execute
 
     async def test_pipeline_language_reaches_every_decider_and_the_answer_model(self):
@@ -473,6 +474,99 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(models.chat_requests)
         execute.assert_not_awaited()
 
+    async def run_text(self, service="todo.add_item", settings=None, trace=None, history=None, target_area=False, answers=None, executor=None):
+        domain = service.split(".")[0]
+        parameter = TEXT_ACTIONS[service][0]
+        prompt = "Schreibe Energy Energy Drinks auf die Einkaufsliste"
+        choices = [
+            {"service": service}, {"area": "no_area"},
+            {"target": "area:office" if target_area else f"entity:{domain}.destination"},
+            {f"word_{index}": "keep" if index in (1, 2, 3) else "drop" for index in range(len(prompt.split()))},
+        ]
+        members = [entity(f"{domain}.destination", "Einkaufsliste" if domain == "todo" else "Destination")]
+        if target_area:
+            members.append(entity(f"{domain}.second", "Second destination"))
+        if domain == "todo":
+            members[0].update(area_id=None, area_name=None)
+        snapshot = {
+            "entities": [*members, entity("light.unrelated", "Unrelated lamp")],
+            "services": {service: {"target": {}, "fields": {parameter: {"required": domain != "assist_satellite"}}}},
+        }
+        return await self.run_agent(choices, snapshot=snapshot, settings=settings, trace=trace, history=history,
+                                    prompt=prompt, answers=answers, executor=executor)
+
+    async def test_three_allowed_text_actions_copy_payload_into_the_correct_field(self):
+        for service, (parameter, _) in TEXT_ACTIONS.items():
+            with self.subTest(service=service):
+                result, models, execute = await self.run_text(service)
+                domain = service.split(".")[0]
+                execute.assert_awaited_once_with(service, {"entity_id": [f"{domain}.destination"], parameter: "Energy Energy Drinks"})
+                self.assertEqual(result["execution"]["status"], "completed")
+                self.assertEqual(len(models.requests), 4)
+                state = models.requests[-1][1]
+                self.assertEqual(state["service"], service)
+                self.assertEqual(state["parameter"], parameter)
+                self.assertEqual(state["language"], "de")
+                self.assertEqual(state["words"], result["request"].split())
+                facts = json.loads(models.chat_requests[0][1][1]["content"])
+                self.assertEqual(facts["execution"]["arguments"][parameter], "Energy Energy Drinks")
+
+    async def test_announcement_area_target_keeps_the_existing_entity_scope(self):
+        _, _, execute = await self.run_text("assist_satellite.announce", target_area=True)
+        execute.assert_awaited_once_with("assist_satellite.announce", {
+            "entity_id": ["assist_satellite.destination", "assist_satellite.second"], "message": "Energy Energy Drinks",
+        })
+
+    async def test_text_threshold_equality_drops_words_and_empty_payload_never_executes(self):
+        settings = normalize_settings({"decider": {"text_confidence": 0.9}})
+        result, models, execute = await self.run_text(settings=settings)
+        self.assertEqual(result["route"], "unsure")
+        self.assertEqual(result["failures"][0]["stage"], "text")
+        self.assertIn("No payload words", result["failures"][0]["reason"])
+        self.assertFalse(models.chat_requests)
+        execute.assert_not_awaited()
+
+    async def test_text_trace_shows_confidence_threshold_and_kept_words_without_prompt_template(self):
+        events = []
+        settings = normalize_settings({"history_enabled": True, "decider": {
+            "text_prompt": "private-text-template", "text_confidence": 0.7,
+        }})
+        history = [{"role": "assistant", "content": "Previous item"}]
+        _, models, _ = await self.run_text(settings=settings, trace=lambda *event: events.append(event), history=history)
+        self.assertEqual(models.requests[-1][1]["history"], history)
+        self.assertTrue(all("private-text-template" in question["instructions"] for question in models.requests[-1][2].values()))
+        self.assertNotIn("private-text-template", json.dumps(events))
+        output = next(output for stage, _, output in events if stage == "text" and output is not None)
+        self.assertGreaterEqual(output["duration_ms"], 0)
+        self.assertEqual(output["decisions"]["word_1"]["confidence"], 0.9)
+        self.assertEqual(output["decisions"]["word_1"]["minimum_confidence"], 0.7)
+        self.assertTrue(output["decisions"]["word_1"]["kept"])
+        self.assertEqual(output["decisions"]["word_0"]["effective_choice"], "drop")
+
+    async def test_answer_failure_after_text_action_does_not_repeat_the_action(self):
+        result, _, execute = await self.run_text(answers=[ModelError("Model reply reached its output token limit.")])
+        execute.assert_awaited_once()
+        self.assertEqual(result["execution"]["status"], "completed")
+        self.assertEqual(result["failures"][0]["device_command"], "completed")
+
+    async def test_incomplete_text_response_never_executes_and_has_a_debug_failure(self):
+        original = ScriptedModels.decide
+
+        async def incomplete(model, config, state, questions):
+            response = await original(model, config, state, questions)
+            if "word_0" in questions:
+                response["answers"].pop("word_0")
+            return response
+
+        events = []
+        execute = AsyncMock()
+        with patch.object(ScriptedModels, "decide", new=incomplete), self.assertRaises(ModelError):
+            await self.run_text(executor=execute, trace=lambda *event: events.append(event))
+        execute.assert_not_awaited()
+        failure = events[-1][2]
+        self.assertEqual(failure["stage"], "text")
+        self.assertIn("incomplete word selections", failure["reason"])
+
 
 class IntegrationSettingsTests(unittest.TestCase):
     def local_settings(self):
@@ -533,6 +627,20 @@ class IntegrationSettingsTests(unittest.TestCase):
         self.assertEqual(normalize_settings({"general": {"prompt": LEGACY_GENERAL_PROMPT}})["general"]["prompt"], GENERAL_PROMPT)
         self.assertEqual(normalize_settings({"general": {"prompt": "My custom rules"}})["general"]["prompt"], "My custom rules")
 
+    def test_stock_action_prompt_is_updated_for_text_but_custom_rules_are_preserved(self):
+        from custom_components.glow_assistant.const import (
+            LEGACY_SERVICE_PROMPT,
+            SERVICE_PROMPT,
+        )
+
+        saved = normalize_settings({"decider": {"service_prompt": LEGACY_SERVICE_PROMPT}})
+        self.assertEqual(saved["decider"]["service_prompt"], SERVICE_PROMPT)
+        self.assertIn("todo.add_item", saved["decider"]["service_prompt"])
+        self.assertEqual(saved["decider"]["text_confidence"], 0.5)
+        custom = normalize_settings({"decider": {"service_prompt": "Custom action rules", "text_prompt": "Custom extraction rules"}})
+        self.assertEqual(custom["decider"]["service_prompt"], "Custom action rules")
+        self.assertEqual(custom["decider"]["text_prompt"], "Custom extraction rules")
+
     def test_ui_numeric_selectors_produce_integer_token_limits(self):
         settings = self.local_settings()
         settings["answer"]["max_tokens"] = 512.0
@@ -552,6 +660,7 @@ class IntegrationSettingsTests(unittest.TestCase):
             ("decider", "temperature_min", 27), ("decider", "temperature_levels", 11),
             ("decider", "temperature_levels", 2.5), ("decider", "temperature_step", 0),
             ("decider", "service_confidence", 1.1), ("decider", "url", "localhost:8321"),
+            ("decider", "text_confidence", -0.1), ("decider", "text_confidence", 1.1),
             ("answer", "model", ""), ("answer", "max_tokens", 0),
             ("answer", "max_input_chars", float("inf")), ("answer", "temperature", True),
         ):
@@ -583,6 +692,28 @@ class IntegrationSettingsTests(unittest.TestCase):
         self.assertNotIn("climate.set_temperature", options)
         self.assertNotIn("climate.set_hvac_mode", options)
         self.assertNotIn("todo.get_items", options)
+
+    def test_text_catalog_is_limited_to_the_three_explicit_action_field_pairs(self):
+        services = {
+            name: {"fields": {parameter: {"required": name != "assist_satellite.announce"}}}
+            for name, (parameter, _) in TEXT_ACTIONS.items()
+        }
+        services.update({
+            "input_text.set_value": {"fields": {"value": {"required": True, "selector": {"text": {}}}}},
+            "todo.remove_item": {"fields": {"item": {"required": True}}},
+            "todo.update_item": {"fields": {"item": {"required": True}}},
+        })
+        options = action_options(services)
+        self.assertEqual(set(options), set(TEXT_ACTIONS))
+        for name, (parameter, _) in TEXT_ACTIONS.items():
+            self.assertEqual(options[name]["parameter"], parameter)
+            self.assertEqual(options[name]["parameter_type"], "text")
+
+    def test_text_action_is_not_offered_when_another_required_field_is_present(self):
+        self.assertEqual(action_options({
+            "notify.send_message": {"fields": {"message": {"required": True}, "title": {"required": True}}},
+            "todo.add_item": {"fields": {}},
+        }), {})
 
     def test_legacy_other_and_malformed_responses_are_errors(self):
         response = {"answers": {"target": {"type": "choice", "choice": "other", "confidence": 1, "probabilities": {"unsure": 1}}}}

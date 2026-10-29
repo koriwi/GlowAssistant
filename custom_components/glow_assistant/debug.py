@@ -12,6 +12,7 @@ STAGE_LABELS = {
     "target": "Choose a device or room",
     "numeric": "Choose a new value",
     "numeric_mode": "Choose a new value",
+    "text": "Extract item or message text",
     "execution": "Send the device command",
     "answer": "Generate the smart-home answer",
     "general": "Generate the general answer",
@@ -70,6 +71,9 @@ def model_failure(stage, error):
     elif "classifier" in message or message == "Malformed numeric response.":
         reason = "The decider returned an invalid decision."
         suggestion = "Check that Decider uses a native decision endpoint, such as /v1/systemone on llama.cpp."
+    elif message.startswith("Malformed text extraction response"):
+        reason = "The decider returned invalid or incomplete word selections."
+        suggestion = "Check the Decider endpoint and text extraction prompt. Review the preceding word decisions."
     elif "no spoken answer" in message:
         reason = "The model returned no text to speak."
         suggestion = f"Check the prompt and output token limit under {section}."
@@ -100,7 +104,8 @@ def decision_details(questions, answers, config):
             answer = {}
         confidence = answer.get("confidence")
         confidence = confidence if finite_number(confidence) else None
-        threshold = config[f"{name if name in ('service', 'domain', 'area', 'target') else 'numeric'}_confidence"]
+        text_word = name.startswith("word_")
+        threshold = config[f"{'text' if text_word else name if name in ('service', 'domain', 'area', 'target') else 'numeric'}_confidence"]
         info = {"type": question["type"], "confidence": confidence, "minimum_confidence": threshold}
         if question["type"] == "choice":
             choice = answer.get("choice")
@@ -112,6 +117,9 @@ def decision_details(questions, answers, config):
                 choice=choice, probability=probability if finite_number(probability) else None,
                 effective_choice=choice if confidence is not None and confidence >= threshold else "unsure",
             )
+            if text_word:
+                info["kept"] = choice == "keep" and confidence is not None and confidence > threshold
+                info["effective_choice"] = "keep" if info["kept"] else "drop"
             criteria = question["criteria"]
             if choice in criteria:
                 selected = criteria[choice]

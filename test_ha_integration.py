@@ -25,6 +25,12 @@ class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
                 continue
             api_key_selector = next(selector for field, selector in block.schema.schema.items() if field.schema == "api_key")
             self.assertEqual(api_key_selector.config["type"], "password")
+            if key.schema == "decider":
+                prompt = next(selector for field, selector in block.schema.schema.items() if field.schema == "text_prompt")
+                confidence = next(selector for field, selector in block.schema.schema.items() if field.schema == "text_confidence")
+                self.assertTrue(prompt.config["multiline"])
+                self.assertEqual(confidence.config["min"], 0)
+                self.assertEqual(confidence.config["max"], 1)
         validated = form["data_schema"](self.settings())
         self.assertEqual(set(validated) & {"decider", "answer", "general"}, {"decider", "answer", "general"})
         result = await flow.async_step_user(validated)

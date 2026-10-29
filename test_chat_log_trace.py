@@ -80,6 +80,13 @@ class ChatLogTraceTests(unittest.TestCase):
         ids = [message.tool_calls[0].id for message in self.messages if isinstance(message, AssistantContent)]
         self.assertEqual(len(set(ids)), 2)
 
+    def test_text_stage_uses_a_native_tool_card_with_word_details(self):
+        result = {"duration_ms": 40, "decisions": {"word_1": {"choice": "keep", "confidence": 0.9, "kept": True}}}
+        self.trace("text", {"words": ["Add", "Energy", "Drinks"]})
+        self.trace("text", {}, result)
+        self.assertEqual(self.messages[0].tool_calls[0].tool_name, "glow_assistant_extract_text")
+        self.assertEqual(self.messages[1].tool_result, result)
+
     def test_error_results_close_the_pending_call(self):
         self.trace("answer", {"max_tokens": 256})
         self.trace("answer", {}, {"status": "error", "error": "Token limit reached", "duration_ms": 120})
