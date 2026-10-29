@@ -137,10 +137,11 @@ class AgentEngine:
         state = {**state, "language": result["language"]}
         if self.history:
             state = {**state, "history": self.history}
-            questions = {name: {**question, "instructions": f"{question['instructions']} {HISTORY_INSTRUCTIONS}"}
-                         for name, question in questions.items()}
+            if stage != "text":
+                questions = {name: {**question, "instructions": f"{question['instructions']} {HISTORY_INSTRUCTIONS}"}
+                             for name, question in questions.items()}
         self._trace(stage, {
-            "model": config["model"], **state,
+            "model": config["model"], **{key: value for key, value in state.items() if key != "task"},
             "candidate_counts": {name: len(question["criteria"]) for name, question in questions.items()},
         })
         started = perf_counter()
@@ -323,8 +324,8 @@ class AgentEngine:
 
     async def _text(self, result):
         config = self.settings["decider"]
-        words, payload = text_request(result["request"], result["service"], config["text_prompt"])
-        payload["state"]["target"] = result["target"]
+        prompt_key = "text_prompt" if result["service"] == "todo.add_item" else "message_prompt"
+        words, payload = text_request(result["request"], result["service"], config[prompt_key])
         response = await self._decide(result, "text", payload["state"], payload["questions"])
         text = decode_text(response, words, config["text_confidence"])
         if not text:

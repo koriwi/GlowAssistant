@@ -15,6 +15,8 @@ from .const import (
 )
 from .numeric_values import INSTRUCTIONS
 from .text_values import INSTRUCTIONS as TEXT_INSTRUCTIONS
+from .text_values import LEGACY_INSTRUCTIONS as LEGACY_TEXT_INSTRUCTIONS
+from .text_values import MESSAGE_INSTRUCTIONS
 
 DEFAULTS = {
     "name": "GlowAssistant",
@@ -25,7 +27,7 @@ DEFAULTS = {
         "service_prompt": SERVICE_PROMPT, "domain_prompt": DOMAIN_PROMPT,
         "area_prompt": AREA_PROMPT, "target_prompt": TARGET_PROMPT,
         "numeric_prompt": INSTRUCTIONS, "numeric_mode_prompt": NUMERIC_MODE_PROMPT,
-        "text_prompt": TEXT_INSTRUCTIONS, "text_confidence": 0.5,
+        "text_prompt": TEXT_INSTRUCTIONS, "message_prompt": MESSAGE_INSTRUCTIONS, "text_confidence": 0.5,
         "service_confidence": 0, "domain_confidence": 0, "area_confidence": 0,
         "target_confidence": 0, "numeric_confidence": 0,
         "temperature_min": 16, "temperature_max": 26, "temperature_levels": 9,
@@ -72,6 +74,11 @@ def normalize_settings(data):
         settings["general"]["prompt"] = GENERAL_PROMPT
     if settings["decider"]["service_prompt"] == LEGACY_SERVICE_PROMPT:
         settings["decider"]["service_prompt"] = SERVICE_PROMPT
+    text_prompt = settings["decider"]["text_prompt"]
+    if text_prompt == LEGACY_TEXT_INSTRUCTIONS:
+        settings["decider"]["text_prompt"] = TEXT_INSTRUCTIONS
+    elif text_prompt != TEXT_INSTRUCTIONS and "message_prompt" not in data.get("decider", {}):
+        settings["decider"]["message_prompt"] = text_prompt
     return settings
 
 

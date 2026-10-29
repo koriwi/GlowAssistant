@@ -504,8 +504,8 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result["execution"]["status"], "completed")
                 self.assertEqual(len(models.requests), 4)
                 state = models.requests[-1][1]
-                self.assertEqual(state["service"], service)
-                self.assertEqual(state["parameter"], parameter)
+                prompt_key = "text_prompt" if service == "todo.add_item" else "message_prompt"
+                self.assertEqual(state["task"], DEFAULTS["decider"][prompt_key])
                 self.assertEqual(state["language"], "de")
                 self.assertEqual(state["words"], result["request"].split())
                 facts = json.loads(models.chat_requests[0][1][1]["content"])
@@ -534,7 +534,8 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         history = [{"role": "assistant", "content": "Previous item"}]
         _, models, _ = await self.run_text(settings=settings, trace=lambda *event: events.append(event), history=history)
         self.assertEqual(models.requests[-1][1]["history"], history)
-        self.assertTrue(all("private-text-template" in question["instructions"] for question in models.requests[-1][2].values()))
+        self.assertEqual(models.requests[-1][1]["task"], "private-text-template")
+        self.assertTrue(all("Apply state.task" in question["instructions"] for question in models.requests[-1][2].values()))
         self.assertNotIn("private-text-template", json.dumps(events))
         output = next(output for stage, _, output in events if stage == "text" and output is not None)
         self.assertGreaterEqual(output["duration_ms"], 0)
@@ -548,6 +549,24 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         execute.assert_awaited_once()
         self.assertEqual(result["execution"]["status"], "completed")
         self.assertEqual(result["failures"][0]["device_command"], "completed")
+
+    async def test_shopping_extraction_preserves_probe_questions_with_pipeline_language_and_history(self):
+        from text_probe import INSTRUCTIONS, word_request
+
+        history = [{"role": "user", "content": "Use the shopping list"}]
+        settings = normalize_settings({"history_enabled": True})
+        result, models, _ = await self.run_text(settings=settings, history=history)
+        _, probe = word_request(result["request"], INSTRUCTIONS)
+        _, state, questions = models.requests[-1]
+        self.assertEqual(questions, probe["questions"])
+        self.assertEqual(state, {**probe["state"], "language": "de", "history": history})
+
+    async def test_custom_message_prompt_is_used_for_both_message_actions(self):
+        settings = normalize_settings({"decider": {"text_prompt": "Item rules", "message_prompt": "Message rules"}})
+        for service in ("notify.send_message", "assist_satellite.announce"):
+            with self.subTest(service=service):
+                _, models, _ = await self.run_text(service=service, settings=settings)
+                self.assertEqual(models.requests[-1][1]["task"], "Message rules")
 
     async def test_incomplete_text_response_never_executes_and_has_a_debug_failure(self):
         original = ScriptedModels.decide
@@ -640,6 +659,20 @@ class IntegrationSettingsTests(unittest.TestCase):
         custom = normalize_settings({"decider": {"service_prompt": "Custom action rules", "text_prompt": "Custom extraction rules"}})
         self.assertEqual(custom["decider"]["service_prompt"], "Custom action rules")
         self.assertEqual(custom["decider"]["text_prompt"], "Custom extraction rules")
+
+    def test_text_prompt_upgrade_restores_probe_wording_and_preserves_custom_shared_prompts(self):
+        from custom_components.glow_assistant.text_values import (
+            INSTRUCTIONS,
+            LEGACY_INSTRUCTIONS,
+            MESSAGE_INSTRUCTIONS,
+        )
+
+        updated = normalize_settings({"decider": {"text_prompt": LEGACY_INSTRUCTIONS}})["decider"]
+        self.assertEqual(updated["text_prompt"], INSTRUCTIONS)
+        self.assertEqual(updated["message_prompt"], MESSAGE_INSTRUCTIONS)
+        custom = normalize_settings({"decider": {"text_prompt": "Shared custom rules"}})["decider"]
+        self.assertEqual(custom["text_prompt"], "Shared custom rules")
+        self.assertEqual(custom["message_prompt"], "Shared custom rules")
 
     def test_ui_numeric_selectors_produce_integer_token_limits(self):
         settings = self.local_settings()

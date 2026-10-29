@@ -51,8 +51,9 @@
               "brightness_step": "Brightness rounding step (%)",
               "brightness_default_change": "Default brighter/dimmer change (percentage points)",
               "test_connection": "Test connection when saving",
-              "text_prompt": "Text extraction prompt",
-              "text_confidence": "Text extraction confidence"
+              "text_prompt": "Item extraction prompt",
+              "text_confidence": "Text extraction confidence",
+              "message_prompt": "Message extraction prompt"
             },
             "data_description": {
               "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
@@ -69,8 +70,9 @@
               "target_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
               "numeric_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
               "numeric_mode_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
-              "text_prompt": "Keep/drop instructions for item or message words. Clear to restore the default. No templating.",
-              "text_confidence": "Keep a word only when the model selects keep with confidence strictly above this value."
+              "text_prompt": "Instructions for shopping or to-do item words. Sent once per extraction. Clear to restore the default. No templating.",
+              "text_confidence": "Keep a word only when the model selects keep with confidence strictly above this value.",
+              "message_prompt": "Instructions for notification or announcement words. Sent once per extraction. Clear to restore the default. No templating."
             }
           },
           "answer": {
@@ -177,8 +179,9 @@
               "brightness_step": "Brightness rounding step (%)",
               "brightness_default_change": "Default brighter/dimmer change (percentage points)",
               "test_connection": "Test connection when saving",
-              "text_prompt": "Text extraction prompt",
-              "text_confidence": "Text extraction confidence"
+              "text_prompt": "Item extraction prompt",
+              "text_confidence": "Text extraction confidence",
+              "message_prompt": "Message extraction prompt"
             },
             "data_description": {
               "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
@@ -195,8 +198,9 @@
               "target_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
               "numeric_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
               "numeric_mode_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
-              "text_prompt": "Keep/drop instructions for item or message words. Clear to restore the default. No templating.",
-              "text_confidence": "Keep a word only when the model selects keep with confidence strictly above this value."
+              "text_prompt": "Instructions for shopping or to-do item words. Sent once per extraction. Clear to restore the default. No templating.",
+              "text_confidence": "Keep a word only when the model selects keep with confidence strictly above this value.",
+              "message_prompt": "Instructions for notification or announcement words. Sent once per extraction. Clear to restore the default. No templating."
             }
           },
           "answer": {
@@ -313,8 +317,9 @@
               "brightness_step": "Brightness rounding step (%)",
               "brightness_default_change": "Default brighter/dimmer change (percentage points)",
               "test_connection": "Test connection when saving",
-              "text_prompt": "Text extraction prompt",
-              "text_confidence": "Text extraction confidence"
+              "text_prompt": "Item extraction prompt",
+              "text_confidence": "Text extraction confidence",
+              "message_prompt": "Message extraction prompt"
             },
             "data_description": {
               "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
@@ -331,8 +336,9 @@
               "target_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
               "numeric_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
               "numeric_mode_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
-              "text_prompt": "Keep/drop instructions for item or message words. Clear to restore the default. No templating.",
-              "text_confidence": "Keep a word only when the model selects keep with confidence strictly above this value."
+              "text_prompt": "Instructions for shopping or to-do item words. Sent once per extraction. Clear to restore the default. No templating.",
+              "text_confidence": "Keep a word only when the model selects keep with confidence strictly above this value.",
+              "message_prompt": "Instructions for notification or announcement words. Sent once per extraction. Clear to restore the default. No templating."
             }
           },
           "answer": {
