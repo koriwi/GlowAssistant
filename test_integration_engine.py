@@ -75,12 +75,25 @@ class ScriptedModels:
 
 
 class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
-    async def run_agent(self, choices, snapshot=SNAPSHOT, settings=None, answers=None, executor=None, trace=None, history=None):
+    async def run_agent(self, choices, snapshot=SNAPSHOT, settings=None, answers=None, executor=None, trace=None, history=None, language="de"):
         models = ScriptedModels(choices, answers)
         execute = executor or AsyncMock()
         agent = AgentEngine(settings or normalize_settings({}), models, execute, trace=trace, history=history)
-        result = await agent.process("test request", "de", snapshot)
+        result = await agent.process("test request", language, snapshot)
         return result, models, execute
+
+    async def test_pipeline_language_reaches_every_decider_and_the_answer_model(self):
+        settings = normalize_settings({"answer": {"prompt": "Custom answer rules"}})
+        _, models, _ = await self.run_agent([
+            {"service": "query_state", "domain": "light"},
+            {"area": "area:office"}, {"target": "entity:light.desk"},
+        ], settings=settings, language="fr-CH")
+        for _, state, _ in models.requests:
+            self.assertEqual(state["language"], "fr-CH")
+        system = models.chat_requests[0][1][0]["content"]
+        self.assertIn("Custom answer rules", system)
+        self.assertIn("Assist pipeline language: fr-CH", system)
+        self.assertIn("Write the spoken reply in this language", system)
 
     async def test_history_is_sent_to_every_decider_and_the_answer_model(self):
         history = [{"role": "user", "content": "Is the office lamp on?"}, {"role": "assistant", "content": "Yes, it is on."}]
@@ -126,6 +139,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(result["answer"], "Answer with tools")
         self.assertIn(json.dumps(history, ensure_ascii=False), general.await_args.args[2][0]["content"])
+        self.assertIn("Assist pipeline language: de", general.await_args.args[2][0]["content"])
         self.assertEqual(len(models.requests), 1)
         self.assertFalse(models.chat_requests)
         execute.assert_not_awaited()
@@ -232,8 +246,8 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         execute.assert_awaited_once_with("light.turn_off", {"entity_id": ["light.desk", "light.ceiling"]})
         self.assertEqual(result["domain"], "light")
         self.assertEqual(result["answer"], "Erledigt.")
-        self.assertEqual(models.requests[0][1], {"prompt": "test request"})
-        self.assertEqual(models.requests[1][1], {"prompt": "test request"})
+        self.assertEqual(models.requests[0][1], {"prompt": "test request", "language": "de"})
+        self.assertEqual(models.requests[1][1], {"prompt": "test request", "language": "de"})
         criteria = models.requests[2][2]["target"]["criteria"]
         self.assertEqual(set(criteria), {"entity:light.desk", "entity:light.ceiling", "area:office", "unsure"})
         self.assertNotIn("attributes", json.loads(criteria["entity:light.desk"]))
@@ -291,6 +305,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(models.requests), 1)
         self.assertEqual(models.chat_requests[0][0]["model"], "smart-model")
         self.assertEqual(models.chat_requests[0][1][1]["content"], "test request")
+        self.assertIn("Assist pipeline language: de", models.chat_requests[0][1][0]["content"])
         self.assertEqual(result["answer"], "330 Meter.")
         execute.assert_not_awaited()
 
@@ -363,6 +378,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         _, models, execute = await self.run_numeric(currents=(21,), settings=settings, history=history)
         numeric_state = models.requests[3][1]
         self.assertEqual(numeric_state["history"], history)
+        self.assertEqual(numeric_state["language"], "de")
         self.assertEqual(numeric_state["current"], 21)
         self.assertEqual(execute.await_args.args[1]["temperature"], 22)
 

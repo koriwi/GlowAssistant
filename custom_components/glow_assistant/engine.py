@@ -114,6 +114,7 @@ class AgentEngine:
 
     async def _decide(self, result, stage, state, questions):
         config = self.settings["decider"]
+        state = {**state, "language": result["language"]}
         if self.history:
             state = {**state, "history": self.history}
             questions = {name: {**question, "instructions": f"{question['instructions']} {HISTORY_INSTRUCTIONS}"}
@@ -160,6 +161,9 @@ class AgentEngine:
 
     async def _process(self, result, snapshot):
         prompt = result["request"]
+        language_instruction = (
+            f"Assist pipeline language: {result['language']}. Write the spoken reply in this language."
+        )
         config = self.settings["decider"]
         entities = snapshot["entities"]
         actions = action_options(snapshot["services"])
@@ -180,7 +184,7 @@ class AgentEngine:
                 raise Uncertain
             result["route"] = GENERAL
             messages = [
-                {"role": "system", "content": self.settings["general"]["prompt"]},
+                {"role": "system", "content": f"{self.settings['general']['prompt']}\n{language_instruction}"},
                 {"role": "user", "content": prompt},
             ]
             if any(server["enable"] for server in self.settings["general"]["mcp_servers"]):
@@ -257,7 +261,7 @@ class AgentEngine:
                  if key not in ("decisions", "usage", "timings_ms")}
         try:
             await self._chat(result, "answer", [
-                {"role": "system", "content": self.settings["answer"]["prompt"]},
+                {"role": "system", "content": f"{self.settings['answer']['prompt']}\n{language_instruction}"},
                 {"role": "user", "content": json.dumps(facts, ensure_ascii=False, default=str)},
             ])
         except ModelError as error:
