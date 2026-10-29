@@ -9,6 +9,7 @@ from .chat_log_trace import ChatLogTrace
 from .client import ModelClient, ModelError
 from .engine import AgentEngine
 from .ha_context import async_execute, async_snapshot
+from .history import conversation_history
 from .settings import normalize_settings
 
 _LOGGER = logging.getLogger(__name__)
@@ -50,7 +51,8 @@ class GlowConversationEntity(conversation.ConversationEntity, conversation.Abstr
             snapshot = await async_snapshot(self.hass, excluded)
             client = ModelClient(async_get_clientsession(self.hass))
             trace = ChatLogTrace(chat_log, user_input.agent_id)
-            result = await AgentEngine(self.settings, client, execute, trace=trace).process(
+            history = conversation_history(chat_log.content, self.settings["history_messages"]) if self.settings["history_enabled"] else []
+            result = await AgentEngine(self.settings, client, execute, trace=trace, history=history).process(
                 user_input.text, user_input.language, snapshot,
             )
             text = result["answer"]

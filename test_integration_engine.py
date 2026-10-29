@@ -75,12 +75,74 @@ class ScriptedModels:
 
 
 class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
-    async def run_agent(self, choices, snapshot=SNAPSHOT, settings=None, answers=None, executor=None, trace=None):
+    async def run_agent(self, choices, snapshot=SNAPSHOT, settings=None, answers=None, executor=None, trace=None, history=None):
         models = ScriptedModels(choices, answers)
         execute = executor or AsyncMock()
-        agent = AgentEngine(settings or normalize_settings({}), models, execute, trace=trace)
+        agent = AgentEngine(settings or normalize_settings({}), models, execute, trace=trace, history=history)
         result = await agent.process("test request", "de", snapshot)
         return result, models, execute
+
+    async def test_history_is_sent_to_every_decider_and_the_answer_model(self):
+        history = [{"role": "user", "content": "Is the office lamp on?"}, {"role": "assistant", "content": "Yes, it is on."}]
+        settings = normalize_settings({"history_enabled": True})
+        result, models, execute = await self.run_agent([
+            {"service": "query_state", "domain": "light"},
+            {"area": "area:office"}, {"target": "entity:light.desk"},
+        ], settings=settings, history=history)
+        self.assertEqual(result["answer"], "Erledigt.")
+        for _, state, questions in models.requests:
+            self.assertEqual(state["history"], history)
+            self.assertTrue(all("resolve references" in item["instructions"] for item in questions.values()))
+        self.assertIn(json.dumps(history, ensure_ascii=False), models.chat_requests[0][1][0]["content"])
+        self.assertEqual(len(models.requests), 3)
+        execute.assert_not_awaited()
+
+    async def test_disabled_history_is_not_forwarded_even_if_supplied(self):
+        _, models, _ = await self.run_agent([
+            {"service": "query_state", "domain": "light"},
+            {"area": "area:office"}, {"target": "entity:light.desk"},
+        ], history=[{"role": "user", "content": "private previous message"}])
+        self.assertNotIn("private previous message", json.dumps(models.requests))
+        self.assertNotIn("private previous message", json.dumps(models.chat_requests))
+
+    async def test_general_history_uses_the_same_plain_message_context(self):
+        history = [{"role": "user", "content": "How tall is the Eiffel Tower?"}, {"role": "assistant", "content": "330 metres."}]
+        settings = normalize_settings({"history_enabled": True, "general": {"enable": True}})
+        _, models, _ = await self.run_agent([{"service": "not-smarthome-related"}], settings=settings, history=history)
+        self.assertEqual(models.requests[0][1]["history"], history)
+        self.assertIn(json.dumps(history, ensure_ascii=False), models.chat_requests[0][1][0]["content"])
+
+    async def test_mcp_runs_only_on_the_enabled_general_route(self):
+        from unittest.mock import patch
+
+        settings = normalize_settings({"history_enabled": True, "general": {
+            "enable": True, "mcp_servers": [{"enable": True}],
+        }})
+        history = [{"role": "assistant", "content": "Previous reply"}]
+        with patch("custom_components.glow_assistant.engine.general_answer", new_callable=AsyncMock,
+                   return_value=("Answer with tools", [{"completion_tokens": 10}])) as general:
+            result, models, execute = await self.run_agent(
+                [{"service": "not-smarthome-related"}], settings=settings, history=history,
+            )
+        self.assertEqual(result["answer"], "Answer with tools")
+        self.assertIn(json.dumps(history, ensure_ascii=False), general.await_args.args[2][0]["content"])
+        self.assertEqual(len(models.requests), 1)
+        self.assertFalse(models.chat_requests)
+        execute.assert_not_awaited()
+
+    async def test_enabled_mcp_servers_are_not_contacted_for_smarthome_or_disabled_general(self):
+        from unittest.mock import patch
+
+        settings = normalize_settings({"general": {"enable": False, "mcp_servers": [{"enable": True}]}})
+        with patch("custom_components.glow_assistant.engine.general_answer", new_callable=AsyncMock) as general:
+            result, _, _ = await self.run_agent([
+                {"service": "query_state", "domain": "light"},
+                {"area": "area:office"}, {"target": "entity:light.desk"},
+            ], settings=settings)
+            self.assertEqual(result["route"], "smarthome")
+            result, _, _ = await self.run_agent([{"service": "not-smarthome-related"}], settings=settings)
+            self.assertEqual(result["route"], "unsure")
+        general.assert_not_awaited()
 
     async def test_trace_reports_each_decision_and_action_without_extra_requests(self):
         events = []
@@ -280,7 +342,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         facts = json.loads(models.chat_requests[0][1][1]["content"])
         self.assertIn("unconfirmed", facts["execution"]["error"])
 
-    async def run_numeric(self, currents=(21,), score=4.02, mode="relative", parameter="temperature", settings=None, trace=None):
+    async def run_numeric(self, currents=(21,), score=4.02, mode="relative", parameter="temperature", settings=None, trace=None, history=None):
         climate = parameter == "temperature"
         name = "climate.set_temperature" if climate else "light.turn_on"
         field = "temperature" if climate else "brightness_pct"
@@ -293,7 +355,16 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         return await self.run_agent([
             {"service": f"{name}:{field}"}, {"area": "area:office"}, {"target": "area:office"},
             {"numeric_mode": mode, "numeric_score": score},
-        ], snapshot=snapshot, settings=settings, trace=trace)
+        ], snapshot=snapshot, settings=settings, trace=trace, history=history)
+
+    async def test_numeric_history_does_not_replace_the_fresh_current_setting(self):
+        history = [{"role": "user", "content": "Make the office warmer"}, {"role": "assistant", "content": "Target is 25 degrees"}]
+        settings = normalize_settings({"history_enabled": True})
+        _, models, execute = await self.run_numeric(currents=(21,), settings=settings, history=history)
+        numeric_state = models.requests[3][1]
+        self.assertEqual(numeric_state["history"], history)
+        self.assertEqual(numeric_state["current"], 21)
+        self.assertEqual(execute.await_args.args[1]["temperature"], 22)
 
     async def test_numeric_trace_shows_score_confidence_and_actual_applied_value(self):
         events = []
@@ -354,6 +425,53 @@ class IntegrationSettingsTests(unittest.TestCase):
         settings = validate_settings(self.local_settings())
         self.assertFalse(settings["general"]["enable"])
         self.assertEqual(settings["decider"]["api_key"], "")
+
+    def test_http_mcp_settings_are_normalized_without_changing_model_keys(self):
+        settings = self.local_settings()
+        settings["general"]["mcp_servers"] = [{"name": " Web ", "url": "http://search:8000/mcp", "token": " server-key "}]
+        result = validate_settings(settings)
+        server = result["general"]["mcp_servers"][0]
+        self.assertEqual(server["name"], "Web")
+        self.assertEqual(server["token"], "server-key")
+        self.assertFalse(server["enable"])
+        self.assertEqual(server["timeout"], 30)
+        self.assertEqual(server["tools"], [])
+        self.assertEqual(result["general"]["api_key"], "")
+        self.assertFalse(result["history_enabled"])
+
+    def test_mcp_settings_reject_stdio_and_invalid_server_definitions(self):
+        for definition in (
+            {"name": "stdio", "url": "stdio://server"},
+            {"name": "command", "command": "run-server"},
+            {"name": "bad-url", "url": "file:///server"},
+            {"name": "credentials", "url": "https://user:password@server/mcp"},
+            {"name": "bad-timeout", "url": "http://server/mcp", "timeout": 0},
+            {"name": "bad-tools", "url": "http://server/mcp", "tools": "search"},
+        ):
+            settings = self.local_settings()
+            settings["general"]["mcp_servers"] = [definition]
+            with self.subTest(definition=definition), self.assertRaises((ValueError, TypeError)):
+                validate_settings(settings)
+
+    def test_history_window_has_no_expiry_setting_and_accepts_an_exact_message_count(self):
+        settings = self.local_settings()
+        settings.update(history_enabled=True, history_messages=3.0)
+        result = validate_settings(settings)
+        self.assertEqual(result["history_messages"], 3)
+        self.assertNotIn("history_timeout", result)
+        for size in (0, 101, 1.5):
+            settings["history_messages"] = size
+            with self.subTest(size=size), self.assertRaises(ValueError):
+                validate_settings(settings)
+
+    def test_legacy_stock_general_prompt_is_updated_but_custom_prompts_are_preserved(self):
+        from custom_components.glow_assistant.const import (
+            GENERAL_PROMPT,
+            LEGACY_GENERAL_PROMPT,
+        )
+
+        self.assertEqual(normalize_settings({"general": {"prompt": LEGACY_GENERAL_PROMPT}})["general"]["prompt"], GENERAL_PROMPT)
+        self.assertEqual(normalize_settings({"general": {"prompt": "My custom rules"}})["general"]["prompt"], "My custom rules")
 
     def test_ui_numeric_selectors_produce_integer_token_limits(self):
         settings = self.local_settings()

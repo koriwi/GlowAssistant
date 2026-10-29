@@ -7,6 +7,7 @@ from .const import (
     AREA_PROMPT,
     DOMAIN_PROMPT,
     GENERAL_PROMPT,
+    LEGACY_GENERAL_PROMPT,
     NUMERIC_MODE_PROMPT,
     SERVICE_PROMPT,
     TARGET_PROMPT,
@@ -39,7 +40,10 @@ DEFAULTS = {
         "enable": False, "url": "", "model": "", "api_key": "",
         "timeout": 60, "max_input_chars": 100000, "max_tokens": 2048,
         "temperature": 0.2, "prompt": GENERAL_PROMPT,
+        "mcp_servers": [], "mcp_max_rounds": 5, "mcp_max_calls": 10, "mcp_max_result_chars": 20000,
     },
+    "history_enabled": False,
+    "history_messages": 10,
     "excluded_entities": [],
     "unsure_reply": "ich bin mir nicht sicher",
     "error_reply": "Ich konnte die Anfrage nicht erfolgreich abschließen.",
@@ -61,6 +65,8 @@ def normalize_settings(data):
                     settings[key][field] = value
         elif key in data:
             settings[key] = data[key]
+    if settings["general"]["prompt"] == LEGACY_GENERAL_PROMPT:
+        settings["general"]["prompt"] = GENERAL_PROMPT
     return settings
 
 
@@ -96,6 +102,39 @@ def validate_settings(data):
         _range(decider, f"{parameter}_default_change", 0.01, 100, "decider")
     if decider["temperature_baseline"] not in ("target", "measured"):
         raise ValueError("decider: unknown temperature baseline.")
+    if not isinstance(settings["history_enabled"], bool):
+        raise TypeError("history_enabled must be a boolean.")
+    _range(settings, "history_messages", 1, 100, "history", integer=True)
+    general = settings["general"]
+    _range(general, "mcp_max_rounds", 1, 20, "general", integer=True)
+    _range(general, "mcp_max_calls", 1, 100, "general", integer=True)
+    _range(general, "mcp_max_result_chars", 100, 1000000, "general", integer=True)
+    if not isinstance(general["mcp_servers"], list):
+        raise TypeError("general: MCP servers must be a list.")
+    servers = []
+    names = set()
+    for raw in general["mcp_servers"]:
+        if not isinstance(raw, dict):
+            raise TypeError("general: each MCP server must be an object.")
+        server = {"name": "", "url": "", "token": "", "enable": False, "timeout": 30, "tools": [], **raw}
+        for field in ("name", "url", "token"):
+            if not isinstance(server[field], str):
+                raise TypeError(f"general: MCP {field} must be text.")
+            server[field] = server[field].strip()
+        if not server["name"] or server["name"] in names:
+            raise ValueError("general: MCP server names must be nonempty and unique.")
+        if not isinstance(server["enable"], bool):
+            raise TypeError("general: MCP server enable must be a boolean.")
+        parsed = urlsplit(server["url"])
+        if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
+            raise ValueError("general: MCP servers require HTTP(S) URLs without embedded credentials.")
+        _range(server, "timeout", 1, 600, "MCP server")
+        if not isinstance(server["tools"], list) or any(not isinstance(tool, str) or not tool.strip() for tool in server["tools"]):
+            raise ValueError("general: allowed MCP tools must be a list of nonempty names.")
+        server["tools"] = [tool.strip() for tool in server["tools"]]
+        names.add(server["name"])
+        servers.append(server)
+    general["mcp_servers"] = servers
     for field in ("name", "unsure_reply", "error_reply", "answer_error_reply"):
         if not isinstance(settings[field], str) or not settings[field].strip():
             raise ValueError(f"{field}: text must not be empty.")

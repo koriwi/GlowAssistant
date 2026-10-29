@@ -71,6 +71,29 @@ class IntegrationClientTests(unittest.IsolatedAsyncioTestCase):
                 await client.chat(normalize_settings({})["answer"], [])
             session.post.assert_called_once()
 
+    async def test_completion_supports_tool_calls_without_spoken_content(self):
+        call = {"id": "call-1", "type": "function", "function": {"name": "mcp_001_001", "arguments": "{}"}}
+        client, session, _ = self.client({"choices": [{"message": {"content": None, "tool_calls": [call]}}]})
+        config = normalize_settings({})["general"]
+        tools = [{"type": "function", "function": {"name": "mcp_001_001", "parameters": {"type": "object"}}}]
+        message, _ = await client.completion(config, [{"role": "user", "content": "Find it"}], tools)
+        self.assertEqual(message["tool_calls"], [call])
+        self.assertEqual(message["role"], "assistant")
+        payload = session.post.call_args.kwargs["json"]
+        self.assertEqual(payload["tools"], tools)
+        self.assertEqual(payload["tool_choice"], "auto")
+        self.assertFalse(payload["parallel_tool_calls"])
+
+    async def test_plain_chat_rejects_unrequested_tool_calls(self):
+        client, _, _ = self.client({"choices": [{"message": {"tool_calls": [{"id": "unexpected"}]}}]})
+        with self.assertRaisesRegex(ModelError, "Unexpected tool"):
+            await client.chat(normalize_settings({})["answer"], [])
+
+    async def test_empty_tool_call_list_can_accompany_a_normal_answer(self):
+        client, _, _ = self.client({"choices": [{"message": {"content": "Hello", "tool_calls": []}}]})
+        text, _ = await client.chat(normalize_settings({})["answer"], [])
+        self.assertEqual(text, "Hello")
+
 
 if __name__ == "__main__":
     unittest.main()

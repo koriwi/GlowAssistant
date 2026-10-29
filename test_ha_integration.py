@@ -164,6 +164,69 @@ class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result_message.tool_call_id, call_message.tool_calls[0].id)
         self.assertEqual(result_message.tool_result["duration_ms"], 42)
 
+    async def test_mcp_servers_use_structured_fields_and_mask_the_token(self):
+        from custom_components.glow_assistant.config_flow import settings_schema
+
+        schema = settings_schema(self.settings())
+        general = next(value for key, value in schema.schema.items() if key.schema == "general")
+        selector = next(value for key, value in general.schema.schema.items() if key.schema == "mcp_servers")
+        self.assertTrue(selector.config["multiple"])
+        self.assertEqual(selector.config["fields"]["token"]["selector"]["text"]["type"], "password")
+        self.assertIn("tools", selector.config["fields"])
+        values = self.settings()
+        values.update(history_enabled=True, history_messages=3)
+        values["general"]["mcp_servers"] = [{"name": "Search", "url": "http://server:8000/mcp", "enable": True}]
+        validated = schema(values)
+        self.assertEqual(validated["history_messages"], 3)
+        self.assertEqual(validated["general"]["mcp_servers"][0]["name"], "Search")
+
+    async def test_handler_supplies_only_prior_plain_messages_to_the_engine(self):
+        from homeassistant.components.conversation.chat_log import (
+            AssistantContent,
+            UserContent,
+        )
+
+        from custom_components.glow_assistant.conversation import GlowConversationEntity
+
+        settings = self.settings()
+        settings.update(history_enabled=True, history_messages=2)
+        agent = GlowConversationEntity(SimpleNamespace(data=settings, entry_id="test-history"))
+        agent.hass = Mock()
+        content = [UserContent(content="Turn on the kitchen music"),
+                   AssistantContent(agent_id="conversation.glow", content="The kitchen music is playing."),
+                   UserContent(content="now stop it")]
+        chat_log = SimpleNamespace(content=content, conversation_id="history-test",
+                                   async_add_assistant_content_without_tools=Mock())
+        user_input = SimpleNamespace(text="now stop it", language="en", agent_id="conversation.glow", context=object())
+        with patch("custom_components.glow_assistant.conversation.async_snapshot", new_callable=AsyncMock, return_value={}), \
+                patch("custom_components.glow_assistant.conversation.async_get_clientsession", return_value=Mock()), \
+                patch("custom_components.glow_assistant.conversation.AgentEngine") as engine:
+            engine.return_value.process = AsyncMock(return_value={
+                "answer": "Stopped.", "route": "smarthome", "service": "media_player.media_stop", "timings_ms": {}, "usage": {},
+            })
+            await agent._async_handle_message(user_input, chat_log)
+        self.assertEqual(engine.call_args.kwargs["history"], [
+            {"role": "user", "content": "Turn on the kitchen music"},
+            {"role": "assistant", "content": "The kitchen music is playing."},
+        ])
+
+    async def test_general_connection_test_discovers_mcp_tools_without_execution(self):
+        from custom_components.glow_assistant.config_flow import async_test_models
+
+        settings = self.settings()
+        settings["general"].update(enable=True, mcp_servers=[{"name": "Search", "enable": True}])
+        with patch("custom_components.glow_assistant.config_flow.async_get_clientsession", return_value=Mock()), \
+                patch("custom_components.glow_assistant.config_flow.ModelClient") as model, \
+                patch("custom_components.glow_assistant.config_flow.MCPTools") as tools:
+            model.return_value.chat = AsyncMock(return_value=("OK", {}))
+            tools.return_value.__aenter__ = AsyncMock(return_value=SimpleNamespace())
+            tools.return_value.__aexit__ = AsyncMock(return_value=False)
+            tools.return_value.call = AsyncMock()
+            await async_test_models(Mock(), settings, {"general": {"test_connection": True}})
+        model.return_value.chat.assert_awaited_once()
+        tools.return_value.__aenter__.assert_awaited_once()
+        tools.return_value.call.assert_not_awaited()
+
 
 if __name__ == "__main__":
     unittest.main()

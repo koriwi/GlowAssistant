@@ -7,6 +7,7 @@ from homeassistant.helpers.selector import (
     BooleanSelector,
     EntitySelector,
     NumberSelector,
+    ObjectSelector,
     SelectSelector,
     TextSelector,
 )
@@ -14,6 +15,7 @@ from homeassistant.helpers.selector import (
 from .client import ModelClient, ModelError
 from .const import DOMAIN
 from .engine import choice_question, read_choice
+from .mcp_tools import MCPTools
 from .settings import DEFAULTS, normalize_settings, validate_settings
 
 
@@ -28,6 +30,18 @@ def settings_schema(values):
         for field, value in values[group].items():
             if field in ("url", "model", "api_key"):
                 selector = TextSelector({"type": "password" if field == "api_key" else "text"})
+            elif field == "mcp_servers":
+                selector = ObjectSelector({
+                    "multiple": True, "label_field": "name", "description_field": "url",
+                    "fields": {
+                        "name": {"label": "Server name", "required": True, "selector": {"text": {}}},
+                        "url": {"label": "HTTP endpoint URL", "required": True, "selector": {"text": {}}},
+                        "token": {"label": "Bearer token", "selector": {"text": {"type": "password"}}},
+                        "enable": {"label": "Enable", "selector": {"boolean": {}}},
+                        "timeout": {"label": "Timeout (seconds)", "selector": {"number": {"min": 1, "max": 600, "mode": "box"}}},
+                        "tools": {"label": "Allowed tools (empty = all)", "selector": {"text": {"multiple": True}}},
+                    },
+                })
             elif field == "enable":
                 selector = BooleanSelector()
             elif field.endswith("_prompt") or field == "prompt":
@@ -38,6 +52,12 @@ def settings_schema(values):
                 selector = _number(100, 2000000)
             elif field == "max_tokens":
                 selector = _number(1, 100000)
+            elif field == "mcp_max_rounds":
+                selector = _number(1, 20)
+            elif field == "mcp_max_calls":
+                selector = _number(1, 100)
+            elif field == "mcp_max_result_chars":
+                selector = _number(100, 1000000)
             elif field == "temperature":
                 selector = _number(0, 2, 0.1)
             elif field.endswith("_confidence"):
@@ -55,6 +75,8 @@ def settings_schema(values):
         fields[vol.Optional("test_connection", default=False)] = BooleanSelector()
         schema[vol.Required(group)] = section(vol.Schema(fields), {"collapsed": False})
     schema[vol.Optional("excluded_entities", default=values["excluded_entities"])] = EntitySelector({"multiple": True})
+    schema[vol.Required("history_enabled", default=values["history_enabled"])] = BooleanSelector()
+    schema[vol.Required("history_messages", default=values["history_messages"])] = _number(1, 100)
     for field in ("unsure_reply", "error_reply", "answer_error_reply"):
         schema[vol.Required(field, default=values[field])] = TextSelector()
     return vol.Schema(schema)
@@ -77,6 +99,9 @@ async def async_test_models(hass, data, raw):
             read_choice(response, "connection", options, 0)
         else:
             await client.chat(data[group], [{"role": "user", "content": "Reply with OK."}])
+            if group == "general" and any(server["enable"] for server in data[group]["mcp_servers"]):
+                async with MCPTools(data[group]["mcp_servers"], data[group]["mcp_max_result_chars"]):
+                    pass
 
 
 class _SettingsForm:
@@ -88,7 +113,7 @@ class _SettingsForm:
             try:
                 settings = validate_settings(values)
                 await async_test_models(self.hass, settings, user_input)
-            except (ValueError, ModelError) as error:
+            except (TypeError, ValueError, ModelError) as error:
                 errors["base"] = "invalid_settings"
                 detail = str(error)
             else:

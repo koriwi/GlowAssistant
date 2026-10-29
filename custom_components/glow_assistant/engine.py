@@ -3,8 +3,10 @@ import math
 from time import perf_counter
 
 from .client import ModelError
-from .const import GENERAL, QUERY, UNSURE
+from .const import GENERAL, HISTORY_INSTRUCTIONS, QUERY, UNSURE
 from .debug import decision_details
+from .general import general_answer
+from .history import with_history
 from .numeric_values import decode_numeric, finite_number, numeric_request
 
 
@@ -99,11 +101,12 @@ def current_setting(entity, parameter, baseline):
 
 
 class AgentEngine:
-    def __init__(self, settings, client, execute, trace=None):
+    def __init__(self, settings, client, execute, trace=None, history=None):
         self.settings = settings
         self.client = client
         self.execute = execute
         self.trace = trace
+        self.history = list(history or []) if settings["history_enabled"] else []
 
     def _trace(self, stage, arguments, result=None):
         if self.trace:
@@ -111,6 +114,10 @@ class AgentEngine:
 
     async def _decide(self, result, stage, state, questions):
         config = self.settings["decider"]
+        if self.history:
+            state = {**state, "history": self.history}
+            questions = {name: {**question, "instructions": f"{question['instructions']} {HISTORY_INSTRUCTIONS}"}
+                         for name, question in questions.items()}
         self._trace(stage, {
             "model": config["model"], **state,
             "candidate_counts": {name: len(question["criteria"]) for name, question in questions.items()},
@@ -172,10 +179,21 @@ class AgentEngine:
             if not self.settings["general"]["enable"]:
                 raise Uncertain
             result["route"] = GENERAL
-            await self._chat(result, "general", [
+            messages = [
                 {"role": "system", "content": self.settings["general"]["prompt"]},
                 {"role": "user", "content": prompt},
-            ])
+            ]
+            if any(server["enable"] for server in self.settings["general"]["mcp_servers"]):
+                started = perf_counter()
+                try:
+                    result["answer"], rounds = await general_answer(
+                        self.client, self.settings["general"], with_history(messages, self.history), trace=self.trace,
+                    )
+                    result["usage"]["general"] = {"rounds": rounds}
+                finally:
+                    result["timings_ms"]["general"] = round((perf_counter() - started) * 1000)
+            else:
+                await self._chat(result, "general", messages)
             return
         query = service_choice == QUERY
         action = actions.get(service_choice)
@@ -253,7 +271,7 @@ class AgentEngine:
         started = perf_counter()
         details = {"status": "incomplete"}
         try:
-            result["answer"], result["usage"][stage] = await self.client.chat(config, messages)
+            result["answer"], result["usage"][stage] = await self.client.chat(config, with_history(messages, self.history))
             details.update(status="completed", answer=result["answer"], usage=result["usage"][stage])
         except ModelError as error:
             details.update(status="error", error=str(error))

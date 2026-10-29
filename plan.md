@@ -18,7 +18,9 @@ The prototype selects a tool or state query, domain, and target. State queries d
 
 - HACS integration lives in `custom_components/glow_assistant`, targeting the user's HA 2026.4.2; keep the local MCP prototype available separately.
 - Integration configuration groups all settings by model usage: Decider, Smart-home answer, General. Each block contains its own endpoint, model, key, prompts, timeout and applicable limits. General has one enable checkbox; disabled general queries use the fixed unsure reply.
-- Integration uses direct HA actions and cached registry/state data, with HA exposure settings and optional exclusions. Area actions expand to explicit allowed entity IDs. General-model MCP tools remain deferred.
+- Integration uses direct HA actions and cached registry/state data, with HA exposure settings and optional exclusions. Area actions expand to explicit allowed entity IDs.
+- General requests can use configured HTTP MCP servers. The user supplies any stdio proxy. MCP settings and limits stay under General model.
+- Optional history forwards the last N prior user/assistant text messages to every model step. Use a rolling window without additional idle expiry. Exclude intermediate records, reasoning and tool results.
 - Use HA's **built-in MCP server**, despite a third-party server also being available.
 - Endpoint: `https://assistant.gosewis.ch/api/mcp`.
 - Authenticate with a **long-lived HA token**.
@@ -34,7 +36,7 @@ The prototype selects a tool or state query, domain, and target. State queries d
 - Report the actual MCP tool name, such as `assist__HassTurnOff`, plus domain, rather than mapping it to an underlying HA service name.
 - Include an explicit `unsure` option.
 - `unsure` returns the fixed answer `ich bin mir nicht sicher`, bypassing chat models and device execution.
-- Service selection also offers `not-smarthome-related` for general questions. Route those directly to an independent smart chat endpoint (`GENERAL_URL`, `GENERAL_MODEL`, `GENERAL_API_KEY`); no MCP/tools for that model yet.
+- Prototype service selection also offers `not-smarthome-related` for general questions. Route those directly to an independent smart chat endpoint (`GENERAL_URL`, `GENERAL_MODEL`, `GENERAL_API_KEY`); the local prototype does not give that model MCP tools.
 - Resolved smart-home results can use the separate small answer model (`ANSWER_URL`, `ANSWER_MODEL`, `ANSWER_API_KEY`) to produce speech-ready text. General-model answers bypass this stage.
 - Select context entries using temporary choice IDs; exact HA entity IDs are not required for this prototype.
 - Include one choice per distinct area, grouping its aliases. Select an area for room-wide requests and an entity for specific device requests.

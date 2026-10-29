@@ -38,6 +38,21 @@ Use addresses that Home Assistant can reach.
 To answer questions about other topics, enable the **General model**.
 When you disable this model, these questions receive the configured **Unsure reply**.
 
+## MCP tools
+
+Add HTTP MCP servers under **General model → MCP servers**.
+Enable each server that you want to use.
+Set its URL and bearer token, if required.
+Use a General model with tool-call support.
+For stdio servers, supply your own HTTP proxy.
+
+## Conversation history
+
+Select **Enable conversation history** in the integration settings.
+Set **Previous messages to include** to limit the rolling window.
+All model steps receive these user inputs and final assistant replies.
+History applies to the current Assist conversation. It has no additional idle expiry.
+
 ## Debug
 
 Open **Settings → Voice assistants → your assistant → Debug**.
@@ -45,5 +60,5 @@ Expand a **Result for …** entry to see the choices, confidence, time, usage, a
 
 ## TODO
 
-- [ ] Add MCP server support for requests that do not concern the smart home.
-- [ ] Add optional conversation history. Resolve requests such as “a little bit more” and “now stop it”.
+- [x] Add MCP server support for requests that do not concern the smart home.
+- [x] Add optional conversation history. Resolve requests such as “a little bit more” and “now stop it”.

@@ -36,17 +36,30 @@ class ModelClient:
         })
 
     async def chat(self, config, messages):
-        data = await self._post(config, {
+        message, usage = await self.completion(config, messages)
+        if message.get("tool_calls"):
+            raise ModelError("Unexpected tool calls from a model without tools.")
+        return message["content"].strip(), usage
+
+    async def completion(self, config, messages, tools=None):
+        payload = {
             "model": config["model"], "messages": messages,
             "max_tokens": config["max_tokens"], "temperature": config["temperature"],
-        })
+        }
+        if tools:
+            payload.update(tools=tools, tool_choice="auto", parallel_tool_calls=False)
+        data = await self._post(config, payload)
         try:
             choice = data["choices"][0]
             if choice.get("finish_reason") == "length":
                 raise ModelError("Model reply reached its output token limit.")
-            text = choice["message"]["content"]
-            if not isinstance(text, str) or not text.strip():
+            message = choice["message"]
+            text = message.get("content")
+            calls = message.get("tool_calls")
+            if calls is not None and not isinstance(calls, list):
+                raise ModelError("Model returned malformed tool calls.")
+            if not calls and (not isinstance(text, str) or not text.strip()):
                 raise ModelError("Model returned no spoken answer.")
         except (KeyError, IndexError, TypeError, AttributeError) as error:
             raise ModelError("Model returned a malformed chat response.") from error
-        return text.strip(), data.get("usage", {})
+        return {**message, "role": "assistant"}, data.get("usage", {})

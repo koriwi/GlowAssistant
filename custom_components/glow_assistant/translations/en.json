@@ -9,11 +9,15 @@
           "excluded_entities": "Excluded entities",
           "unsure_reply": "Unsure reply",
           "error_reply": "Error reply",
-          "answer_error_reply": "Reply when the action completed but answer generation failed"
+          "answer_error_reply": "Reply when the action completed but answer generation failed",
+          "history_enabled": "Enable conversation history",
+          "history_messages": "Previous messages to include"
         },
         "data_description": {
           "excluded_entities": "Home Assistant exposed-entity settings are always respected. These entities are additionally excluded.",
-          "answer_error_reply": "Used only after an action completed; it must not imply the action failed."
+          "answer_error_reply": "Used only after an action completed; it must not imply the action failed.",
+          "history_enabled": "Use prior user inputs and final assistant replies in every model step.",
+          "history_messages": "Rolling window for this Assist conversation. Includes only user/assistant text, with no added idle expiry."
         },
         "sections": {
           "decider": {
@@ -98,15 +102,23 @@
               "max_tokens": "Maximum output tokens",
               "temperature": "Sampling temperature",
               "prompt": "System prompt",
-              "test_connection": "Test connection when saving"
+              "test_connection": "Test connection when saving",
+              "mcp_servers": "MCP servers",
+              "mcp_max_rounds": "Maximum MCP tool rounds",
+              "mcp_max_result_chars": "Maximum MCP result characters",
+              "mcp_max_calls": "Maximum MCP tool calls"
             },
             "data_description": {
               "url": "Full endpoint URL; no path is appended. Localhost refers to Home Assistant itself.",
               "api_key": "Optional for local servers without authentication. This model uses only this key.",
               "max_input_chars": "Reject larger requests without truncating candidates or state data. This counts characters, not tokens.",
-              "test_connection": "Sends a model-only test request. It never executes a Home Assistant action.",
+              "test_connection": "Test the model connection and discover tools on enabled MCP servers. No tool is executed.",
               "enable": "When disabled, unrelated requests use the fixed unsure reply. No model request is sent.",
-              "prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating."
+              "prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
+              "mcp_servers": "HTTP servers only. Enable each server you want to use. Use your own proxy for stdio servers. Empty allowed-tool lists expose all advertised tools.",
+              "mcp_max_rounds": "Maximum model rounds that may request tools for one user request.",
+              "mcp_max_result_chars": "Reject larger tool results without retrying the tool.",
+              "mcp_max_calls": "Maximum total tool calls for one user request."
             }
           }
         }
@@ -119,11 +131,15 @@
           "excluded_entities": "Excluded entities",
           "unsure_reply": "Unsure reply",
           "error_reply": "Error reply",
-          "answer_error_reply": "Reply when the action completed but answer generation failed"
+          "answer_error_reply": "Reply when the action completed but answer generation failed",
+          "history_enabled": "Enable conversation history",
+          "history_messages": "Previous messages to include"
         },
         "data_description": {
           "excluded_entities": "Home Assistant exposed-entity settings are always respected. These entities are additionally excluded.",
-          "answer_error_reply": "Used only after an action completed; it must not imply the action failed."
+          "answer_error_reply": "Used only after an action completed; it must not imply the action failed.",
+          "history_enabled": "Use prior user inputs and final assistant replies in every model step.",
+          "history_messages": "Rolling window for this Assist conversation. Includes only user/assistant text, with no added idle expiry."
         },
         "sections": {
           "decider": {
@@ -208,15 +224,23 @@
               "max_tokens": "Maximum output tokens",
               "temperature": "Sampling temperature",
               "prompt": "System prompt",
-              "test_connection": "Test connection when saving"
+              "test_connection": "Test connection when saving",
+              "mcp_servers": "MCP servers",
+              "mcp_max_rounds": "Maximum MCP tool rounds",
+              "mcp_max_result_chars": "Maximum MCP result characters",
+              "mcp_max_calls": "Maximum MCP tool calls"
             },
             "data_description": {
               "url": "Full endpoint URL; no path is appended. Localhost refers to Home Assistant itself.",
               "api_key": "Optional for local servers without authentication. This model uses only this key.",
               "max_input_chars": "Reject larger requests without truncating candidates or state data. This counts characters, not tokens.",
-              "test_connection": "Sends a model-only test request. It never executes a Home Assistant action.",
+              "test_connection": "Test the model connection and discover tools on enabled MCP servers. No tool is executed.",
               "enable": "When disabled, unrelated requests use the fixed unsure reply. No model request is sent.",
-              "prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating."
+              "prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
+              "mcp_servers": "HTTP servers only. Enable each server you want to use. Use your own proxy for stdio servers. Empty allowed-tool lists expose all advertised tools.",
+              "mcp_max_rounds": "Maximum model rounds that may request tools for one user request.",
+              "mcp_max_result_chars": "Reject larger tool results without retrying the tool.",
+              "mcp_max_calls": "Maximum total tool calls for one user request."
             }
           }
         }
@@ -239,11 +263,15 @@
           "excluded_entities": "Excluded entities",
           "unsure_reply": "Unsure reply",
           "error_reply": "Error reply",
-          "answer_error_reply": "Reply when the action completed but answer generation failed"
+          "answer_error_reply": "Reply when the action completed but answer generation failed",
+          "history_enabled": "Enable conversation history",
+          "history_messages": "Previous messages to include"
         },
         "data_description": {
           "excluded_entities": "Home Assistant exposed-entity settings are always respected. These entities are additionally excluded.",
-          "answer_error_reply": "Used only after an action completed; it must not imply the action failed."
+          "answer_error_reply": "Used only after an action completed; it must not imply the action failed.",
+          "history_enabled": "Use prior user inputs and final assistant replies in every model step.",
+          "history_messages": "Rolling window for this Assist conversation. Includes only user/assistant text, with no added idle expiry."
         },
         "sections": {
           "decider": {
@@ -328,15 +356,23 @@
               "max_tokens": "Maximum output tokens",
               "temperature": "Sampling temperature",
               "prompt": "System prompt",
-              "test_connection": "Test connection when saving"
+              "test_connection": "Test connection when saving",
+              "mcp_servers": "MCP servers",
+              "mcp_max_rounds": "Maximum MCP tool rounds",
+              "mcp_max_result_chars": "Maximum MCP result characters",
+              "mcp_max_calls": "Maximum MCP tool calls"
             },
             "data_description": {
               "url": "Full endpoint URL; no path is appended. Localhost refers to Home Assistant itself.",
               "api_key": "Optional for local servers without authentication. This model uses only this key.",
               "max_input_chars": "Reject larger requests without truncating candidates or state data. This counts characters, not tokens.",
-              "test_connection": "Sends a model-only test request. It never executes a Home Assistant action.",
+              "test_connection": "Test the model connection and discover tools on enabled MCP servers. No tool is executed.",
               "enable": "When disabled, unrelated requests use the fixed unsure reply. No model request is sent.",
-              "prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating."
+              "prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
+              "mcp_servers": "HTTP servers only. Enable each server you want to use. Use your own proxy for stdio servers. Empty allowed-tool lists expose all advertised tools.",
+              "mcp_max_rounds": "Maximum model rounds that may request tools for one user request.",
+              "mcp_max_result_chars": "Reject larger tool results without retrying the tool.",
+              "mcp_max_calls": "Maximum total tool calls for one user request."
             }
           }
         }

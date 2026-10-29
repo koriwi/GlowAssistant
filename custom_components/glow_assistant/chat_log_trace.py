@@ -12,6 +12,8 @@ STAGE_NAMES = {
     "execution": "glow_assistant_execute_action",
     "answer": "glow_assistant_generate_answer",
     "general": "glow_assistant_general_answer",
+    "mcp": "glow_assistant_mcp_tool",
+    "mcp_connect": "glow_assistant_connect_mcp_servers",
 }
 
 
