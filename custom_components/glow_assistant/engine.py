@@ -241,26 +241,48 @@ class AgentEngine:
         result["domain"] = domain
         areas = {**{f"area:{key}": value for key, value in areas_from(entities).items()},
                  "no_area": "No specific area is identified."}
+        area_prompt = config["area_prompt"]
+        if query:
+            areas["all_areas"] = "All areas: the whole home, including exposed entities without a room assignment."
+            area_prompt += (
+                " For state queries about the whole home, choose all_areas instead of a single room or no_area. "
+                "Examples: 'are there any windows open in the house?' and 'sind irgendwo im Haus Fenster offen?'. "
+                "This is one supported scope, not an ambiguous request for multiple areas."
+            )
         response = await self._decide(result, "area", {"prompt": prompt}, {
-            "area": choice_question(areas, config["area_prompt"]),
+            "area": choice_question(areas, area_prompt),
         })
         area = self._choice(response, "area", areas)
         candidates = [entity for entity in entities if (query or entity["domain"] == domain)
-                      and (area == "no_area" or entity.get("area_id") == area.removeprefix("area:"))]
+                      and (area in ("no_area", "all_areas") or entity.get("area_id") == area.removeprefix("area:"))]
         if not candidates:
             raise Uncertain("target", "No exposed devices match the selected action and room filter.",
                             "Check the device's room, Assist exposure settings, and GlowAssistant exclusions.",
                             domain=domain, area=areas[area])
         options = target_options(candidates)
+        target_prompt = config["target_prompt"]
+        if query and area == "all_areas":
+            options["all_areas"] = {
+                "type": "all_areas", "name": "All areas",
+                "description": "Query relevant states across the whole home, including entities without an area.",
+                "domains": sorted({entity["domain"] for entity in candidates}),
+            }
+            target_prompt += (
+                " For a whole-home state question about a device category, select all_areas. "
+                "It is one supported group target covering all exposed entities; the answer uses the relevant states. "
+                "Multiple matching sensors are expected. Choose an entity only when a specific device is identified."
+            )
         response = await self._decide(result, "target", {
             "prompt": prompt, "service": result["service"],
             **({"domain": domain} if not query else {}),
             "area": areas[area] if area != "no_area" else None,
-        }, {"target": choice_question(options, config["target_prompt"])})
+        }, {"target": choice_question(options, target_prompt)})
         target = self._choice(response, "target", options)
         result["target"] = options[target]
         if result["target"]["type"] == "entity":
             members = [entity for entity in candidates if entity["entity_id"] == result["target"]["entity_id"]]
+        elif result["target"]["type"] == "all_areas":
+            members = candidates
         else:
             members = [entity for entity in candidates if entity.get("area_id") == result["target"]["area_id"]]
         if not members:
@@ -270,7 +292,7 @@ class AgentEngine:
             member_domains = {entity["domain"] for entity in members}
             result["domain"] = next(iter(member_domains)) if len(member_domains) == 1 else None
             result["state_info"] = [
-                {"entity_id": entity["entity_id"], "domain": entity["domain"],
+                {"entity_id": entity["entity_id"], "domain": entity["domain"], "area": entity.get("area_name"),
                  "name": entity["name"], "state": entity["state"], "attributes":
                  entity.get("attributes", {}) if entity["state"] not in ("unknown", "unavailable") else {}}
                 for entity in members

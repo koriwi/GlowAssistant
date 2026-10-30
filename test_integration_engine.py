@@ -390,6 +390,63 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["domain"], "sensor")
         execute.assert_not_awaited()
 
+    async def test_whole_home_query_includes_all_rooms_and_unassigned_entities(self):
+        snapshot = copy.deepcopy(SNAPSHOT)
+        snapshot["entities"].extend([
+            entity("binary_sensor.office_window", "Window", device_class="window"),
+            entity("binary_sensor.bedroom_window", "Window", area="bedroom", device_class="window"),
+            entity("binary_sensor.unassigned_window", "Unassigned window", area=None, device_class="window"),
+        ])
+        settings = normalize_settings({"decider": {"area_prompt": "Custom area rules", "target_prompt": "Custom target rules"}})
+        result, models, execute = await self.run_agent([
+            {"service": "query_state"}, {"area": "all_areas"}, {"target": "all_areas"},
+        ], snapshot=snapshot, settings=settings, prompt="are there any windows open in the house?")
+        area_question = models.requests[1][2]["area"]
+        target_question = models.requests[2][2]["target"]
+        self.assertIn("all_areas", area_question["criteria"])
+        self.assertIn("Custom area rules", area_question["instructions"])
+        self.assertIn("choose all_areas", area_question["instructions"])
+        self.assertIn("Custom target rules", target_question["instructions"])
+        self.assertIn("select all_areas", target_question["instructions"])
+        self.assertIn("entity:binary_sensor.unassigned_window", target_question["criteria"])
+        self.assertEqual(result["target"]["type"], "all_areas")
+        facts = json.loads(models.chat_requests[0][1][1]["content"])
+        self.assertEqual({item["entity_id"] for item in facts["state_info"]},
+                         {item["entity_id"] for item in snapshot["entities"]})
+        windows = {item["entity_id"]: item for item in facts["state_info"] if item["domain"] == "binary_sensor"}
+        self.assertEqual(windows["binary_sensor.office_window"]["area"], "Office")
+        self.assertEqual(windows["binary_sensor.bedroom_window"]["area"], "Bedroom")
+        self.assertIsNone(windows["binary_sensor.unassigned_window"]["area"])
+        self.assertEqual(settings["decider"]["target_prompt"], "Custom target rules")
+        execute.assert_not_awaited()
+
+    async def test_whole_home_group_is_not_offered_for_named_or_unspecified_room_queries(self):
+        for area in ("area:office", "no_area"):
+            with self.subTest(area=area):
+                _, models, execute = await self.run_agent([
+                    {"service": "query_state"}, {"area": area}, {"target": "entity:sensor.office"},
+                ])
+                self.assertNotIn("all_areas", models.requests[2][2]["target"]["criteria"])
+                execute.assert_not_awaited()
+
+    async def test_whole_home_group_is_not_offered_for_actions(self):
+        _, models, execute = await self.run_agent([
+            {"service": "light.turn_off"}, {"area": "no_area"}, {"target": "entity:light.desk"},
+        ])
+        self.assertNotIn("all_areas", models.requests[1][2]["area"]["criteria"])
+        self.assertNotIn("all_areas", models.requests[2][2]["target"]["criteria"])
+        execute.assert_awaited_once_with("light.turn_off", {"entity_id": ["light.desk"]})
+
+    async def test_whole_home_query_without_exposed_entities_stops_before_target_selection(self):
+        result, models, execute = await self.run_agent([
+            {"service": "query_state"}, {"area": "all_areas"},
+        ], snapshot={"entities": [], "services": {}})
+        self.assertEqual(result["route"], "unsure")
+        self.assertEqual(result["failures"][0]["stage"], "target")
+        self.assertEqual(len(models.requests), 2)
+        self.assertFalse(models.chat_requests)
+        execute.assert_not_awaited()
+
     async def test_answer_failure_after_action_preserves_outcome_and_never_retries(self):
         result, models, execute = await self.run_agent([
             {"service": "light.turn_off"}, {"area": "no_area"}, {"target": "entity:light.desk"},
