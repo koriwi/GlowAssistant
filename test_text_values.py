@@ -53,6 +53,12 @@ class TextValuesTests(unittest.TestCase):
     def test_all_drop_returns_empty_even_at_zero_threshold(self):
         self.assertEqual(decode_text(response_for([("drop", 1)]), ["nothing"], 0), "")
 
+    def test_uncertain_words_can_be_kept_with_the_switch(self):
+        words = ["Energy", "Drinks", "please"]
+        response = response_for([("keep", 0.9), ("keep", 0.5), ("drop", 0.2)])
+        self.assertEqual(decode_text(response, words, 0.5), "Energy")
+        self.assertEqual(decode_text(response, words, 0.5, keep_uncertain=True), "Energy Drinks please")
+
     def test_partial_or_extra_word_decisions_are_rejected(self):
         for response in (None, {}, {"answers": {}}, response_for([("keep", 1), ("keep", 1)])):
             with self.subTest(response=response), self.assertRaises(ModelError):

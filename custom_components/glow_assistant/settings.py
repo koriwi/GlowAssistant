@@ -13,6 +13,7 @@ from .const import (
     TARGET_PROMPT,
 )
 from .domain_filter import INSTRUCTIONS as DOMAIN_FILTER_INSTRUCTIONS
+from .domain_filter import LEGACY_INSTRUCTIONS as LEGACY_DOMAIN_FILTER_INSTRUCTIONS
 from .numeric_values import INSTRUCTIONS
 from .target_selection import INSTRUCTIONS as TARGET_FILTER_INSTRUCTIONS
 from .text_values import INSTRUCTIONS as TEXT_INSTRUCTIONS
@@ -27,10 +28,13 @@ DEFAULTS = {
         "max_input_chars": 100000,
         "service_prompt": SERVICE_PROMPT,
         "domain_filter_prompt": DOMAIN_FILTER_INSTRUCTIONS, "domain_filter_confidence": 0.5,
+        "domain_filter_keep_uncertain": False,
         "area_prompt": AREA_PROMPT, "target_prompt": TARGET_PROMPT,
         "target_filter_prompt": TARGET_FILTER_INSTRUCTIONS, "target_filter_confidence": 0.5,
+        "query_target_keep_uncertain": False, "action_target_keep_uncertain": False,
         "numeric_prompt": INSTRUCTIONS, "numeric_mode_prompt": NUMERIC_MODE_PROMPT,
         "text_prompt": TEXT_INSTRUCTIONS, "message_prompt": MESSAGE_INSTRUCTIONS, "text_confidence": 0.5,
+        "text_keep_uncertain": False,
         "service_confidence": 0, "area_confidence": 0,
         "target_confidence": 0, "numeric_confidence": 0,
         "temperature_min": 16, "temperature_max": 26, "temperature_levels": 9,
@@ -77,6 +81,8 @@ def normalize_settings(data):
         settings["general"]["prompt"] = GENERAL_PROMPT
     if settings["decider"]["service_prompt"] == LEGACY_SERVICE_PROMPT:
         settings["decider"]["service_prompt"] = SERVICE_PROMPT
+    if settings["decider"]["domain_filter_prompt"] == LEGACY_DOMAIN_FILTER_INSTRUCTIONS:
+        settings["decider"]["domain_filter_prompt"] = DOMAIN_FILTER_INSTRUCTIONS
     text_prompt = settings["decider"]["text_prompt"]
     if text_prompt == LEGACY_TEXT_INSTRUCTIONS:
         settings["decider"]["text_prompt"] = TEXT_INSTRUCTIONS
@@ -105,6 +111,9 @@ def validate_settings(data):
     decider = settings["decider"]
     for stage in ("service", "area", "target", "numeric", "text", "domain_filter", "target_filter"):
         _range(decider, f"{stage}_confidence", 0, 1, "decider")
+    for field in ("domain_filter_keep_uncertain", "query_target_keep_uncertain", "action_target_keep_uncertain", "text_keep_uncertain"):
+        if not isinstance(decider[field], bool):
+            raise TypeError(f"decider: {field} must be a boolean.")
     for parameter in ("temperature", "brightness"):
         lower = -100 if parameter == "temperature" else 0
         upper = 200 if parameter == "temperature" else 100

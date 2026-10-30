@@ -53,9 +53,13 @@
               "text_confidence": "Text extraction confidence",
               "message_prompt": "Message extraction prompt",
               "domain_filter_prompt": "Whole-home domain filter prompt",
-              "domain_filter_confidence": "Minimum confidence to drop a whole-home domain",
+              "domain_filter_confidence": "Whole-home domain confidence threshold",
               "target_filter_prompt": "Target keep/drop prompt",
-              "target_filter_confidence": "Target keep/drop confidence"
+              "target_filter_confidence": "Target keep/drop confidence",
+              "domain_filter_keep_uncertain": "Keep uncertain domains",
+              "query_target_keep_uncertain": "Keep uncertain targets for state queries",
+              "action_target_keep_uncertain": "Keep uncertain targets for actions",
+              "text_keep_uncertain": "Keep uncertain item/message words"
             },
             "data_description": {
               "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
@@ -72,12 +76,16 @@
               "numeric_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
               "numeric_mode_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
               "text_prompt": "Instructions for shopping or to-do item words. Sent once per extraction. Clear to restore the default. No templating.",
-              "text_confidence": "Keep a word only when the model selects keep with confidence strictly above this value.",
+              "text_confidence": "Above this confidence, follow keep/drop. At or below it, use Keep uncertain item/message words.",
               "message_prompt": "Instructions for notification or announcement words. Sent once per extraction. Clear to restore the default. No templating.",
               "domain_filter_prompt": "Keep/drop instructions used only after selecting all areas for a state query. Clear to restore the default. No templating.",
-              "domain_filter_confidence": "Drop a domain only above this confidence. Uncertain decisions keep it. If all domains are dropped, keep all.",
+              "domain_filter_confidence": "Above this confidence, follow keep/drop. At or below it, use Keep uncertain domains. An empty selection stops the query.",
               "target_filter_prompt": "Instructions for selecting entities for state queries and actions that accept multiple targets. Sent once per selection. Clear to restore the default. No templating.",
-              "target_filter_confidence": "Queries keep uncertain targets and drop only above this confidence. Actions keep only a keep decision above this confidence."
+              "target_filter_confidence": "Above this confidence, follow keep/drop. At or below it, use the corresponding Keep uncertain targets switch.",
+              "domain_filter_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
+              "query_target_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
+              "action_target_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
+              "text_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled."
             }
           },
           "answer": {
@@ -186,9 +194,13 @@
               "text_confidence": "Text extraction confidence",
               "message_prompt": "Message extraction prompt",
               "domain_filter_prompt": "Whole-home domain filter prompt",
-              "domain_filter_confidence": "Minimum confidence to drop a whole-home domain",
+              "domain_filter_confidence": "Whole-home domain confidence threshold",
               "target_filter_prompt": "Target keep/drop prompt",
-              "target_filter_confidence": "Target keep/drop confidence"
+              "target_filter_confidence": "Target keep/drop confidence",
+              "domain_filter_keep_uncertain": "Keep uncertain domains",
+              "query_target_keep_uncertain": "Keep uncertain targets for state queries",
+              "action_target_keep_uncertain": "Keep uncertain targets for actions",
+              "text_keep_uncertain": "Keep uncertain item/message words"
             },
             "data_description": {
               "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
@@ -205,12 +217,16 @@
               "numeric_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
               "numeric_mode_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
               "text_prompt": "Instructions for shopping or to-do item words. Sent once per extraction. Clear to restore the default. No templating.",
-              "text_confidence": "Keep a word only when the model selects keep with confidence strictly above this value.",
+              "text_confidence": "Above this confidence, follow keep/drop. At or below it, use Keep uncertain item/message words.",
               "message_prompt": "Instructions for notification or announcement words. Sent once per extraction. Clear to restore the default. No templating.",
               "domain_filter_prompt": "Keep/drop instructions used only after selecting all areas for a state query. Clear to restore the default. No templating.",
-              "domain_filter_confidence": "Drop a domain only above this confidence. Uncertain decisions keep it. If all domains are dropped, keep all.",
+              "domain_filter_confidence": "Above this confidence, follow keep/drop. At or below it, use Keep uncertain domains. An empty selection stops the query.",
               "target_filter_prompt": "Instructions for selecting entities for state queries and actions that accept multiple targets. Sent once per selection. Clear to restore the default. No templating.",
-              "target_filter_confidence": "Queries keep uncertain targets and drop only above this confidence. Actions keep only a keep decision above this confidence."
+              "target_filter_confidence": "Above this confidence, follow keep/drop. At or below it, use the corresponding Keep uncertain targets switch.",
+              "domain_filter_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
+              "query_target_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
+              "action_target_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
+              "text_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled."
             }
           },
           "answer": {
@@ -329,9 +345,13 @@
               "text_confidence": "Text extraction confidence",
               "message_prompt": "Message extraction prompt",
               "domain_filter_prompt": "Whole-home domain filter prompt",
-              "domain_filter_confidence": "Minimum confidence to drop a whole-home domain",
+              "domain_filter_confidence": "Whole-home domain confidence threshold",
               "target_filter_prompt": "Target keep/drop prompt",
-              "target_filter_confidence": "Target keep/drop confidence"
+              "target_filter_confidence": "Target keep/drop confidence",
+              "domain_filter_keep_uncertain": "Keep uncertain domains",
+              "query_target_keep_uncertain": "Keep uncertain targets for state queries",
+              "action_target_keep_uncertain": "Keep uncertain targets for actions",
+              "text_keep_uncertain": "Keep uncertain item/message words"
             },
             "data_description": {
               "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
@@ -348,12 +368,16 @@
               "numeric_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
               "numeric_mode_prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
               "text_prompt": "Instructions for shopping or to-do item words. Sent once per extraction. Clear to restore the default. No templating.",
-              "text_confidence": "Keep a word only when the model selects keep with confidence strictly above this value.",
+              "text_confidence": "Above this confidence, follow keep/drop. At or below it, use Keep uncertain item/message words.",
               "message_prompt": "Instructions for notification or announcement words. Sent once per extraction. Clear to restore the default. No templating.",
               "domain_filter_prompt": "Keep/drop instructions used only after selecting all areas for a state query. Clear to restore the default. No templating.",
-              "domain_filter_confidence": "Drop a domain only above this confidence. Uncertain decisions keep it. If all domains are dropped, keep all.",
+              "domain_filter_confidence": "Above this confidence, follow keep/drop. At or below it, use Keep uncertain domains. An empty selection stops the query.",
               "target_filter_prompt": "Instructions for selecting entities for state queries and actions that accept multiple targets. Sent once per selection. Clear to restore the default. No templating.",
-              "target_filter_confidence": "Queries keep uncertain targets and drop only above this confidence. Actions keep only a keep decision above this confidence."
+              "target_filter_confidence": "Above this confidence, follow keep/drop. At or below it, use the corresponding Keep uncertain targets switch.",
+              "domain_filter_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
+              "query_target_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
+              "action_target_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
+              "text_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled."
             }
           },
           "answer": {

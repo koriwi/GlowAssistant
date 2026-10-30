@@ -353,7 +353,8 @@ class AgentEngine:
         payload = target_request(state, targets, config["target_filter_prompt"])
 
         def summarize(response):
-            selected = decode_targets(response, targets, config["target_filter_confidence"], query)
+            policy = "query_target_keep_uncertain" if query else "action_target_keep_uncertain"
+            selected = decode_targets(response, targets, config["target_filter_confidence"], config[policy])
             result["target_selection"] = selected
             return selected
 
@@ -375,13 +376,16 @@ class AgentEngine:
         payload = domain_request(result["request"], domains, config["domain_filter_prompt"])
 
         def summarize(response):
-            selected = decode_domains(response, domains, config["domain_filter_confidence"])
+            selected = decode_domains(response, domains, config["domain_filter_confidence"], config["domain_filter_keep_uncertain"])
             selected.update(entities_before=len(entities),
                             entities_after=sum(entity["domain"] in selected["kept_domains"] for entity in entities))
             result["domain_filter"] = selected
             return selected
 
         await self._decide(result, "domain_filter", payload["state"], payload["questions"], summarize=summarize)
+        if not result["domain_filter"]["kept_domains"]:
+            raise Uncertain("domain_filter", "No domains were retained by the whole-home domain filter.",
+                            "Review the domain decisions, confidence threshold, and Keep uncertain domains setting.")
         return [entity for entity in entities if entity["domain"] in result["domain_filter"]["kept_domains"]]
 
     async def _text(self, result):
@@ -389,7 +393,7 @@ class AgentEngine:
         prompt_key = "text_prompt" if result["service"] == "todo.add_item" else "message_prompt"
         words, payload = text_request(result["request"], result["service"], config[prompt_key])
         response = await self._decide(result, "text", payload["state"], payload["questions"])
-        text = decode_text(response, words, config["text_confidence"])
+        text = decode_text(response, words, config["text_confidence"], config["text_keep_uncertain"])
         if not text:
             raise Uncertain("text", "No payload words were selected above the text confidence threshold.",
                             "State the item or message explicitly. Review Text extraction confidence under Decider.",

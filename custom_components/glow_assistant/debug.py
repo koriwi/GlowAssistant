@@ -1,6 +1,7 @@
 import json
 import re
 
+from .keep_drop import should_keep
 from .numeric_values import finite_number
 
 STAGE_LABELS = {
@@ -118,14 +119,19 @@ def decision_details(questions, answers, config, query=False, targets=None):
         target_filter = name.startswith("target_")
         if text_word:
             confidence_stage = "text"
+            uncertain_setting = "text_keep_uncertain"
         elif domain_filter:
             confidence_stage = "domain_filter"
+            uncertain_setting = "domain_filter_keep_uncertain"
         elif target_filter:
             confidence_stage = "target_filter"
+            uncertain_setting = "query_target_keep_uncertain" if query else "action_target_keep_uncertain"
         elif name in ("service", "area", "target"):
             confidence_stage = name
+            uncertain_setting = None
         else:
             confidence_stage = "numeric"
+            uncertain_setting = None
         threshold = config[f"{confidence_stage}_confidence"]
         info = {"type": question["type"], "confidence": confidence, "minimum_confidence": threshold}
         if question["type"] == "choice":
@@ -138,20 +144,14 @@ def decision_details(questions, answers, config, query=False, targets=None):
                 choice=choice, probability=probability if finite_number(probability) else None,
                 effective_choice=choice if confidence is not None and confidence >= threshold else "unsure",
             )
-            if text_word:
-                info["kept"] = choice == "keep" and confidence is not None and confidence > threshold
-                info["effective_choice"] = "keep" if info["kept"] else "drop"
-            elif domain_filter:
-                info["kept"] = choice == "keep" or confidence is not None and confidence <= threshold
-                info["effective_choice"] = "keep" if info["kept"] else "drop"
-            elif target_filter:
-                if targets is not None:
+            if uncertain_setting:
+                if target_filter and targets is not None:
                     target = targets[int(name.removeprefix("target_"))]
                     info.update(entity_id=target["entity_id"], name=target["name"])
-                if query:
-                    info["kept"] = choice == "keep" or confidence is not None and confidence <= threshold
-                else:
-                    info["kept"] = choice == "keep" and confidence is not None and confidence > threshold
+                keep_uncertain = config[uncertain_setting]
+                info["keep_uncertain"] = keep_uncertain
+                info["uncertain"] = confidence is not None and confidence <= threshold
+                info["kept"] = confidence is not None and should_keep(choice, confidence, threshold, keep_uncertain)
                 info["effective_choice"] = "keep" if info["kept"] else "drop"
             criteria = question["criteria"]
             if choice in criteria:

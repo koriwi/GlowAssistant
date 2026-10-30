@@ -1,6 +1,7 @@
 import json
 
 from .client import ModelError
+from .keep_drop import should_keep
 from .numeric_values import finite_number
 
 TEXT_ACTIONS = {
@@ -60,7 +61,7 @@ def text_request(prompt, service, instructions):
     }
 
 
-def decode_text(response, words, threshold):
+def decode_text(response, words, threshold, keep_uncertain=False):
     answers = response.get("answers") if isinstance(response, dict) else None
     if not isinstance(answers, dict) or set(answers) != {f"word_{index}" for index in range(len(words))}:
         raise ModelError("Malformed text extraction response: missing or unexpected word decisions.")
@@ -76,6 +77,6 @@ def decode_text(response, words, threshold):
             or not isinstance(probabilities, dict) or set(probabilities) != {"keep", "drop"}
             or not all(finite_number(value) and 0 <= value <= 1 for value in probabilities.values())):
             raise ModelError("Malformed text extraction response: invalid word decision.")
-        if answer["choice"] == "keep" and confidence > threshold:
+        if should_keep(answer["choice"], confidence, threshold, keep_uncertain):
             selected.append(word)
     return " ".join(selected)

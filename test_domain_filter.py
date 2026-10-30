@@ -17,25 +17,29 @@ def response_for(choices):
 
 
 class DomainFilterTests(unittest.TestCase):
-    def test_multiple_kept_domains_and_uncertain_drops_are_retained(self):
+    def test_uncertain_domains_are_dropped_by_default_and_can_be_retained(self):
         domains = ["binary_sensor", "sensor", "light", "cover"]
         response = response_for({"binary_sensor": ("keep", 0.8), "sensor": ("keep", 0.2),
                                  "light": ("drop", 0.9), "cover": ("drop", 0.4)})
         result = decode_domains(response, domains, 0.5)
+        self.assertEqual(result["kept_domains"], ["binary_sensor"])
+        self.assertEqual(result["dropped_domains"], ["sensor", "light", "cover"])
+        result = decode_domains(response, domains, 0.5, keep_uncertain=True)
         self.assertEqual(result["kept_domains"], ["binary_sensor", "sensor", "cover"])
         self.assertEqual(result["dropped_domains"], ["light"])
-        self.assertIsNone(result["fallback"])
 
-    def test_drop_at_threshold_is_uncertain_and_kept(self):
-        result = decode_domains(response_for({"sensor": ("drop", 0.5)}), ["sensor"], 0.5)
+    def test_drop_at_threshold_follows_the_switch(self):
+        response = response_for({"sensor": ("drop", 0.5)})
+        self.assertEqual(decode_domains(response, ["sensor"], 0.5)["kept_domains"], [])
+        result = decode_domains(response, ["sensor"], 0.5, keep_uncertain=True)
         self.assertEqual(result["kept_domains"], ["sensor"])
-        self.assertIsNone(result["fallback"])
 
-    def test_all_drop_falls_back_to_all_domains(self):
-        result = decode_domains(response_for({"sensor": ("drop", 0.9), "light": ("drop", 0.9)}), ["sensor", "light"], 0.5)
-        self.assertEqual(result["kept_domains"], ["sensor", "light"])
-        self.assertEqual(result["dropped_domains"], [])
-        self.assertEqual(result["fallback"], "all_domains")
+    def test_all_confident_drops_never_restore_all_domains(self):
+        for keep_uncertain in (False, True):
+            result = decode_domains(response_for({"sensor": ("drop", 0.9), "light": ("drop", 0.9)}),
+                                    ["sensor", "light"], 0.5, keep_uncertain)
+            self.assertEqual(result["kept_domains"], [])
+            self.assertEqual(result["dropped_domains"], ["sensor", "light"])
 
     def test_missing_or_unadvertised_domain_decisions_are_rejected(self):
         for response in (None, {}, {"answers": {}}, response_for({"unknown": ("keep", 1)})):

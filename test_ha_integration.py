@@ -31,6 +31,9 @@ class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(prompt.config["multiline"])
                 self.assertEqual(confidence.config["min"], 0)
                 self.assertEqual(confidence.config["max"], 1)
+                for name in ("domain_filter_keep_uncertain", "query_target_keep_uncertain", "action_target_keep_uncertain", "text_keep_uncertain"):
+                    switch = next(selector for field, selector in block.schema.schema.items() if field.schema == name)
+                    self.assertEqual(switch.selector_type, "boolean")
         validated = form["data_schema"](self.settings())
         self.assertEqual(set(validated) & {"decider", "answer", "general"}, {"decider", "answer", "general"})
         result = await flow.async_step_user(validated)

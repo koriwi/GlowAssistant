@@ -1,4 +1,5 @@
 from .client import ModelError
+from .keep_drop import should_keep
 from .numeric_values import finite_number
 
 INSTRUCTIONS = (
@@ -28,7 +29,7 @@ def target_request(state, targets, instructions):
     }
 
 
-def decode_targets(response, targets, threshold, query):
+def decode_targets(response, targets, threshold, keep_uncertain=False):
     answers = response.get("answers") if isinstance(response, dict) else None
     if not isinstance(answers, dict) or set(answers) != {f"target_{index}" for index in range(len(targets))}:
         raise ModelError("Malformed target selection response: missing or unexpected entity decisions.")
@@ -44,10 +45,6 @@ def decode_targets(response, targets, threshold, query):
             or not isinstance(probabilities, dict) or set(probabilities) != {"keep", "drop"}
             or not all(finite_number(value) and 0 <= value <= 1 for value in probabilities.values())):
             raise ModelError("Malformed target selection response: invalid entity decision.")
-        if query:
-            keep = answer["choice"] == "keep" or confidence <= threshold
-        else:
-            keep = answer["choice"] == "keep" and confidence > threshold
-        if keep:
+        if should_keep(answer["choice"], confidence, threshold, keep_uncertain):
             selected.append(target["entity_id"])
     return {"selected_entity_ids": selected, "entities_before": len(targets), "entities_after": len(selected)}

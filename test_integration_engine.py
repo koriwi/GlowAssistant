@@ -593,7 +593,8 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_query_retains_uncertain_drops_and_uses_editable_target_filter_prompt(self):
         events = []
-        settings = normalize_settings({"decider": {"target_filter_confidence": 0.9, "target_filter_prompt": "private-target-task"}})
+        settings = normalize_settings({"decider": {"target_filter_confidence": 0.9, "target_filter_prompt": "private-target-task",
+                                                  "query_target_keep_uncertain": True}})
         result, models, execute = await self.run_agent([
             {"service": "query_state"}, {"area": "area:office"},
             {"target_0": "drop", "target_1": "drop", "target_2": "drop"},
@@ -603,7 +604,40 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["target_selection"]["entities_after"], 3)
         output = next(output for stage, _, output in events if stage == "target" and output is not None)
         self.assertEqual(output["decisions"]["target_0"]["effective_choice"], "keep")
+        self.assertTrue(output["decisions"]["target_0"]["keep_uncertain"])
         execute.assert_not_awaited()
+
+    async def test_query_uncertain_targets_are_dropped_by_default(self):
+        settings = normalize_settings({"decider": {"target_filter_confidence": 0.9}})
+        events = []
+        result, models, execute = await self.run_agent([
+            {"service": "query_state"}, {"area": "area:office"}, {"targets": "all"},
+        ], settings=settings, trace=lambda *event: events.append(event))
+        self.assertEqual(result["route"], "unsure")
+        self.assertEqual(result["target_selection"]["selected_entity_ids"], [])
+        self.assertFalse(models.chat_requests)
+        output = next(output for stage, _, output in events if stage == "target" and output is not None)
+        self.assertFalse(output["decisions"]["target_0"]["keep_uncertain"])
+        self.assertTrue(output["decisions"]["target_0"]["uncertain"])
+        self.assertEqual(output["decisions"]["target_0"]["effective_choice"], "drop")
+        execute.assert_not_awaited()
+
+    async def test_query_and_action_uncertainty_switches_are_independent(self):
+        for query_setting, action_setting, executes in ((True, False, False), (False, True, True)):
+            with self.subTest(query_setting=query_setting, action_setting=action_setting):
+                settings = normalize_settings({"decider": {
+                    "target_filter_confidence": 0.9, "query_target_keep_uncertain": query_setting,
+                    "action_target_keep_uncertain": action_setting,
+                }})
+                result, _, execute = await self.run_agent([
+                    {"service": "light.turn_off"}, {"area": "area:office"}, {"targets": "all"},
+                ], settings=settings)
+                if executes:
+                    execute.assert_awaited_once_with("light.turn_off", {"entity_id": ["light.desk", "light.ceiling"]})
+                    self.assertEqual(result["execution"]["status"], "completed")
+                else:
+                    self.assertEqual(result["route"], "unsure")
+                    execute.assert_not_awaited()
 
     async def test_malformed_target_batch_stops_before_action_or_answer(self):
         events = []
@@ -650,22 +684,31 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({item["domain"] for item in result["state_info"]}, {"binary_sensor", "sensor"})
         execute.assert_not_awaited()
 
-    async def test_whole_home_uncertain_drops_keep_domains_and_all_drop_fallback_is_visible(self):
-        for threshold, expected_fallback in ((0.5, "all_domains"), (0.9, None)):
-            with self.subTest(threshold=threshold):
-                settings = normalize_settings({"decider": {"domain_filter_confidence": threshold}})
+    async def test_whole_home_domain_uncertainty_is_configurable_without_an_all_drop_fallback(self):
+        for threshold, keep_uncertain, retained in ((0.5, False, False), (0.5, True, False), (0.9, False, False), (0.9, True, True)):
+            with self.subTest(threshold=threshold, keep_uncertain=keep_uncertain):
+                settings = normalize_settings({"decider": {"domain_filter_confidence": threshold,
+                                                          "domain_filter_keep_uncertain": keep_uncertain}})
                 events = []
                 result, models, execute = await self.run_agent([
                     {"service": "query_state"}, {"area": "all_areas"},
                     {"domain_light": "drop", "domain_sensor": "drop"}, {"target": "all_areas"},
                 ], settings=settings, trace=lambda *event: events.append(event))
-                self.assertEqual(result["domain_filter"]["kept_domains"], ["light", "sensor"])
                 output = next(output for stage, _, output in events if stage == "domain_filter" and output is not None)
-                self.assertEqual(output["fallback"], expected_fallback)
-                self.assertEqual(output["entities_before"], output["entities_after"])
-                if expected_fallback is None:
+                self.assertNotIn("fallback", output)
+                self.assertEqual(output["decisions"]["domain_light"]["keep_uncertain"], keep_uncertain)
+                self.assertEqual(output["decisions"]["domain_light"]["uncertain"], threshold == 0.9)
+                if retained:
+                    self.assertEqual(result["domain_filter"]["kept_domains"], ["light", "sensor"])
+                    self.assertEqual(output["entities_before"], output["entities_after"])
                     self.assertEqual(output["decisions"]["domain_light"]["effective_choice"], "keep")
-                self.assertIn("sensor.office", [target["entity_id"] for target in models.requests[3][1]["targets"]])
+                    self.assertIn("sensor.office", [target["entity_id"] for target in models.requests[3][1]["targets"]])
+                else:
+                    self.assertEqual(result["domain_filter"]["kept_domains"], [])
+                    self.assertEqual(output["entities_after"], 0)
+                    self.assertEqual(len(models.requests), 3)
+                    self.assertFalse(models.chat_requests)
+                    self.assertEqual(result["failures"][0]["stage"], "domain_filter")
                 execute.assert_not_awaited()
 
     async def test_malformed_domain_filter_stops_before_building_the_target_request(self):
@@ -866,6 +909,17 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(models.chat_requests)
         execute.assert_not_awaited()
 
+    async def test_text_uncertainty_switch_is_applied_and_visible_in_debug(self):
+        settings = normalize_settings({"decider": {"text_confidence": 0.9, "text_keep_uncertain": True}})
+        events = []
+        result, _, execute = await self.run_text(settings=settings, trace=lambda *event: events.append(event))
+        execute.assert_awaited_once()
+        self.assertEqual(execute.await_args.args[1]["item"], result["request"])
+        output = next(output for stage, _, output in events if stage == "text" and output is not None)
+        self.assertTrue(output["decisions"]["word_0"]["keep_uncertain"])
+        self.assertTrue(output["decisions"]["word_0"]["uncertain"])
+        self.assertEqual(output["decisions"]["word_0"]["effective_choice"], "keep")
+
     async def test_text_trace_shows_confidence_threshold_and_kept_words_without_prompt_template(self):
         events = []
         settings = normalize_settings({"history_enabled": True, "decider": {
@@ -943,6 +997,30 @@ class IntegrationSettingsTests(unittest.TestCase):
         settings = normalize_settings({"decider": {"domain_prompt": "Old rules", "domain_confidence": 0.9}})
         self.assertNotIn("domain_prompt", settings["decider"])
         self.assertNotIn("domain_confidence", settings["decider"])
+
+    def test_uncertainty_switches_default_to_false_and_reject_non_boolean_values(self):
+        fields = ("domain_filter_keep_uncertain", "query_target_keep_uncertain", "action_target_keep_uncertain", "text_keep_uncertain")
+        defaults = normalize_settings({})["decider"]
+        for field in fields:
+            self.assertIs(defaults[field], False)
+            for value in ("false", 0, None):
+                settings = self.local_settings()
+                settings["decider"][field] = value
+                with self.subTest(field=field, value=value), self.assertRaises(TypeError):
+                    validate_settings(settings)
+
+    def test_domain_prompt_upgrade_removes_the_old_keep_uncertain_instruction(self):
+        from custom_components.glow_assistant.domain_filter import (
+            INSTRUCTIONS,
+            LEGACY_INSTRUCTIONS,
+        )
+
+        settings = normalize_settings({"decider": {"domain_filter_prompt": LEGACY_INSTRUCTIONS}})
+        self.assertEqual(settings["decider"]["domain_filter_prompt"], INSTRUCTIONS)
+        self.assertNotIn("or when uncertain", settings["decider"]["domain_filter_prompt"])
+        self.assertFalse(settings["decider"]["domain_filter_keep_uncertain"])
+        custom = normalize_settings({"decider": {"domain_filter_prompt": "Custom domain rules"}})
+        self.assertEqual(custom["decider"]["domain_filter_prompt"], "Custom domain rules")
 
     def test_http_mcp_settings_are_normalized_without_changing_model_keys(self):
         settings = self.local_settings()

@@ -42,7 +42,7 @@ def settings_schema(values):
                         "tools": {"label": "Allowed tools (empty = all)", "selector": {"text": {"multiple": True}}},
                     },
                 })
-            elif field == "enable":
+            elif field == "enable" or field.endswith("_keep_uncertain"):
                 selector = BooleanSelector()
             elif field.endswith("_prompt") or field == "prompt":
                 selector = TextSelector({"multiline": True})
