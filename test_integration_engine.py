@@ -86,7 +86,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
     async def test_pipeline_language_reaches_every_decider_and_the_answer_model(self):
         settings = normalize_settings({"answer": {"prompt": "Custom answer rules"}})
         _, models, _ = await self.run_agent([
-            {"service": "query_state", "domain": "light"},
+            {"service": "query_state"},
             {"area": "area:office"}, {"target": "entity:light.desk"},
         ], settings=settings, language="fr-CH")
         for _, state, _ in models.requests:
@@ -100,7 +100,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         history = [{"role": "user", "content": "Is the office lamp on?"}, {"role": "assistant", "content": "Yes, it is on."}]
         settings = normalize_settings({"history_enabled": True})
         result, models, execute = await self.run_agent([
-            {"service": "query_state", "domain": "light"},
+            {"service": "query_state"},
             {"area": "area:office"}, {"target": "entity:light.desk"},
         ], settings=settings, history=history)
         self.assertEqual(result["answer"], "Erledigt.")
@@ -113,7 +113,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_disabled_history_is_not_forwarded_even_if_supplied(self):
         _, models, _ = await self.run_agent([
-            {"service": "query_state", "domain": "light"},
+            {"service": "query_state"},
             {"area": "area:office"}, {"target": "entity:light.desk"},
         ], history=[{"role": "user", "content": "private previous message"}])
         self.assertNotIn("private previous message", json.dumps(models.requests))
@@ -151,7 +151,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         settings = normalize_settings({"general": {"enable": False, "mcp_servers": [{"enable": True}]}})
         with patch("custom_components.glow_assistant.engine.general_answer", new_callable=AsyncMock) as general:
             result, _, _ = await self.run_agent([
-                {"service": "query_state", "domain": "light"},
+                {"service": "query_state"},
                 {"area": "area:office"}, {"target": "entity:light.desk"},
             ], settings=settings)
             self.assertEqual(result["route"], "smarthome")
@@ -164,7 +164,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         def trace(stage, arguments, result):
             events.append(copy.deepcopy((stage, arguments, result)))
         result, models, execute = await self.run_agent([
-            {"service": "light.turn_off", "domain": "unsure"},
+            {"service": "light.turn_off"},
             {"area": "area:office"}, {"target": "area:office"},
         ], trace=trace)
         expected = ["service", "area", "target", "execution", "answer"]
@@ -175,7 +175,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(choice["choice"], "light.turn_off")
         self.assertEqual(choice["confidence"], 0.9)
         self.assertEqual(choice["selected"]["service"], "light.turn_off")
-        self.assertFalse(outputs["service"]["decisions"]["domain"]["used"])
+        self.assertEqual(set(outputs["service"]["decisions"]), {"service"})
         self.assertEqual(outputs["target"]["decisions"]["target"]["selected"]["name"], "Office")
         for stage in expected:
             self.assertGreaterEqual(outputs[stage]["duration_ms"], 0)
@@ -211,7 +211,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
     async def test_trace_retains_failed_answer_timing_and_cause(self):
         events = []
         result, _, execute = await self.run_agent([
-            {"service": "query_state", "domain": "light"},
+            {"service": "query_state"},
             {"area": "area:office"}, {"target": "area:office"},
         ], answers=[ModelError("Model endpoint returned HTTP 401.")], trace=lambda *event: events.append(event))
         output = next(output for stage, _, output in events if stage == "answer" and output is not None)
@@ -244,7 +244,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         settings = normalize_settings({"decider": {"api_key": "secret-decider", "service_prompt": "private-template"},
                                        "answer": {"api_key": "secret-answer"}})
         await self.run_agent([
-            {"service": "query_state", "domain": "light"},
+            {"service": "query_state"},
             {"area": "area:office"}, {"target": "area:office"},
         ], settings=settings, trace=lambda *event: events.append(event))
         serialized = json.dumps(events)
@@ -253,7 +253,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_direct_action_uses_its_domain_and_filtered_room_targets(self):
         result, models, execute = await self.run_agent([
-            {"service": "light.turn_off", "domain": "unsure"},
+            {"service": "light.turn_off"},
             {"area": "area:office"}, {"target": "area:office"},
         ])
         execute.assert_awaited_once_with("light.turn_off", {"entity_id": ["light.desk", "light.ceiling"]})
@@ -270,7 +270,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_query_uses_cached_state_and_does_not_execute(self):
         result, models, execute = await self.run_agent([
-            {"service": "query_state", "domain": "sensor"},
+            {"service": "query_state"},
             {"area": "area:office"}, {"target": "entity:sensor.office"},
         ], answers=["Es sind 22 Grad."])
         execute.assert_not_awaited()
@@ -283,7 +283,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         snapshot = copy.deepcopy(SNAPSHOT)
         snapshot["entities"][-1]["state"] = "unavailable"
         result, _, _ = await self.run_agent([
-            {"service": "query_state", "domain": "sensor"},
+            {"service": "query_state"},
             {"area": "no_area"}, {"target": "entity:sensor.office"},
         ], snapshot=snapshot)
         self.assertEqual(result["state_info"][0]["attributes"], {})
@@ -291,11 +291,10 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
     async def test_unsure_at_each_stage_bypasses_chat_and_execution(self):
         cases = [
             [{"service": "unsure"}],
-            [{"service": "query_state", "domain": "unsure"}],
             [{"service": "light.turn_off"}, {"area": "unsure"}],
             [{"service": "light.turn_off"}, {"area": "no_area"}, {"target": "unsure"}],
         ]
-        for choices, expected_stage in zip(cases, ("service", "domain", "area", "target")):
+        for choices, expected_stage in zip(cases, ("service", "area", "target")):
             with self.subTest(choices=choices):
                 result, models, execute = await self.run_agent(choices)
                 self.assertEqual(result["answer"], "ich bin mir nicht sicher")
@@ -332,14 +331,63 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(models.requests), 1)
         execute.assert_not_awaited()
 
-    async def test_no_matching_domain_in_area_stops_selection(self):
+    async def test_no_action_compatible_entities_in_area_stops_selection(self):
+        snapshot = copy.deepcopy(SNAPSHOT)
+        snapshot["entities"].append(entity("sensor.kitchen", "Kitchen temperature", area="kitchen"))
         result, models, execute = await self.run_agent([
-            {"service": "query_state", "domain": "sensor"}, {"area": "area:bedroom"},
-        ])
+            {"service": "light.turn_off"}, {"area": "area:kitchen"},
+        ], snapshot=snapshot)
         self.assertEqual(result["route"], "unsure")
         self.assertEqual(len(models.requests), 2)
         self.assertEqual(result["failures"][0]["stage"], "target")
         self.assertIn("No exposed devices", result["failures"][0]["reason"])
+        execute.assert_not_awaited()
+
+    async def test_state_query_sees_all_domains_in_the_selected_area(self):
+        snapshot = copy.deepcopy(SNAPSHOT)
+        snapshot["entities"].extend([
+            entity("binary_sensor.office_window", "Office window", device_class="window"),
+            entity("binary_sensor.other_window", "Other window", area="bedroom", device_class="window"),
+        ])
+        result, models, execute = await self.run_agent([
+            {"service": "query_state"}, {"area": "area:office"},
+            {"target": "entity:binary_sensor.office_window"},
+        ], snapshot=snapshot, prompt="sind fenster im buero offen?")
+        self.assertEqual(set(models.requests[0][2]), {"service"})
+        self.assertNotIn("domain", result["decisions"]["service"])
+        self.assertNotIn("domain", models.requests[2][1])
+        criteria = models.requests[2][2]["target"]["criteria"]
+        self.assertEqual(set(criteria), {
+            "entity:light.desk", "entity:light.ceiling", "entity:sensor.office",
+            "entity:binary_sensor.office_window", "area:office", "unsure",
+        })
+        self.assertEqual(json.loads(criteria["entity:binary_sensor.office_window"])["domain"], "binary_sensor")
+        self.assertEqual(json.loads(criteria["area:office"])["domains"], ["binary_sensor", "light", "sensor"])
+        self.assertEqual(result["domain"], "binary_sensor")
+        self.assertEqual(result["state_info"][0]["entity_id"], "binary_sensor.office_window")
+        execute.assert_not_awaited()
+
+    async def test_area_query_passes_states_from_all_domains_in_that_area_to_the_answer_model(self):
+        snapshot = copy.deepcopy(SNAPSHOT)
+        snapshot["entities"].append(entity("binary_sensor.office_window", "Window", device_class="window"))
+        result, models, execute = await self.run_agent([
+            {"service": "query_state"}, {"area": "area:office"}, {"target": "area:office"},
+        ], snapshot=snapshot)
+        expected = {item["entity_id"] for item in snapshot["entities"] if item["area_id"] == "office"}
+        facts = json.loads(models.chat_requests[0][1][1]["content"])
+        self.assertEqual({item["entity_id"] for item in facts["state_info"]}, expected)
+        self.assertEqual({item["domain"] for item in facts["state_info"]}, {"sensor", "binary_sensor", "light"})
+        self.assertIsNone(result["domain"])
+        execute.assert_not_awaited()
+
+    async def test_no_area_state_query_can_select_any_exposed_domain(self):
+        result, models, execute = await self.run_agent([
+            {"service": "query_state"}, {"area": "no_area"}, {"target": "entity:sensor.office"},
+        ])
+        criteria = models.requests[2][2]["target"]["criteria"]
+        self.assertIn("entity:light.bed", criteria)
+        self.assertIn("entity:sensor.office", criteria)
+        self.assertEqual(result["domain"], "sensor")
         execute.assert_not_awaited()
 
     async def test_answer_failure_after_action_preserves_outcome_and_never_retries(self):
@@ -356,7 +404,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_query_answer_failure_preserves_state_and_error_details(self):
         result, models, execute = await self.run_agent([
-            {"service": "query_state", "domain": "light"},
+            {"service": "query_state"},
             {"area": "area:office"}, {"target": "entity:light.desk"},
         ], answers=[ModelError("Model reply reached its output token limit.")])
         self.assertEqual(result["answer"], DEFAULTS["error_reply"])
@@ -598,6 +646,11 @@ class IntegrationSettingsTests(unittest.TestCase):
         settings = validate_settings(self.local_settings())
         self.assertFalse(settings["general"]["enable"])
         self.assertEqual(settings["decider"]["api_key"], "")
+
+    def test_old_domain_classifier_settings_are_ignored(self):
+        settings = normalize_settings({"decider": {"domain_prompt": "Old rules", "domain_confidence": 0.9}})
+        self.assertNotIn("domain_prompt", settings["decider"])
+        self.assertNotIn("domain_confidence", settings["decider"])
 
     def test_http_mcp_settings_are_normalized_without_changing_model_keys(self):
         settings = self.local_settings()

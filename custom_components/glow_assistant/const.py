@@ -23,12 +23,6 @@ SERVICE_PROMPT = LEGACY_SERVICE_PROMPT.replace(
     "For these text actions, requests requiring extra fields such as due dates, titles, descriptions or media IDs mean unsure. "
     "Do not silently discard requested extra fields. Text is copied verbatim from the request, without formatting or conversion.",
 )
-DOMAIN_PROMPT = (
-    "Which single Home Assistant domain is needed for the state query? Use sensor for measurements, "
-    "light for lights, climate for thermostats. For action requests select the domain of the action. "
-    "Unqualified warmer/colder means climate; lighting color temperature requires an explicit lighting "
-    "reference. Choose unsure for ambiguous or non-smart-home requests. Do not invent a domain."
-)
 AREA_PROMPT = (
     "Select the single area explicitly referred to by the request, using names and aliases and "
     "allowing plausible speech recognition errors. Choose no_area when no room is identified. "

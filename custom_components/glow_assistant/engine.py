@@ -86,12 +86,16 @@ def target_options(entities):
         attributes = entity.get("attributes", {})
         options[f"entity:{entity['entity_id']}"] = {
             "type": "entity", "entity_id": entity["entity_id"], "name": entity["name"],
+            "domain": entity["domain"],
             "aliases": entity.get("aliases", []), "area": entity.get("area_name"),
             "device_class": attributes.get("device_class"),
             "unit": attributes.get("unit_of_measurement"),
         }
     for area_id, area in areas_from(entities).items():
-        options[f"area:{area_id}"] = {"type": "area", "area_id": area_id, **area}
+        options[f"area:{area_id}"] = {
+            "type": "area", "area_id": area_id, **area,
+            "domains": sorted({entity["domain"] for entity in entities if entity.get("area_id") == area_id}),
+        }
     return options
 
 
@@ -205,10 +209,8 @@ class AgentEngine:
             **actions, QUERY: "Query current home states or measurements, no action.",
             GENERAL: "General knowledge or conversation unrelated to the home.",
         }
-        domains = {entity["domain"]: entity["domain"] for entity in entities}
         response = await self._decide(result, "service", {"prompt": prompt}, {
             "service": choice_question(services, config["service_prompt"]),
-            "domain": choice_question(domains, config["domain_prompt"]),
         })
         service_choice = self._choice(response, "service", services)
         if service_choice == GENERAL:
@@ -234,7 +236,7 @@ class AgentEngine:
             return
         query = service_choice == QUERY
         action = actions.get(service_choice)
-        domain = self._choice(response, "domain", domains) if query else action["service"].split(".", 1)[0]
+        domain = None if query else action["service"].split(".", 1)[0]
         result["service"] = QUERY if query else action["service"]
         result["domain"] = domain
         areas = {**{f"area:{key}": value for key, value in areas_from(entities).items()},
@@ -243,15 +245,16 @@ class AgentEngine:
             "area": choice_question(areas, config["area_prompt"]),
         })
         area = self._choice(response, "area", areas)
-        candidates = [entity for entity in entities if entity["domain"] == domain
+        candidates = [entity for entity in entities if (query or entity["domain"] == domain)
                       and (area == "no_area" or entity.get("area_id") == area.removeprefix("area:"))]
         if not candidates:
-            raise Uncertain("target", "No exposed devices match the selected device type and room filter.",
+            raise Uncertain("target", "No exposed devices match the selected action and room filter.",
                             "Check the device's room, Assist exposure settings, and GlowAssistant exclusions.",
                             domain=domain, area=areas[area])
         options = target_options(candidates)
         response = await self._decide(result, "target", {
-            "prompt": prompt, "service": result["service"], "domain": domain,
+            "prompt": prompt, "service": result["service"],
+            **({"domain": domain} if not query else {}),
             "area": areas[area] if area != "no_area" else None,
         }, {"target": choice_question(options, config["target_prompt"])})
         target = self._choice(response, "target", options)
@@ -264,8 +267,11 @@ class AgentEngine:
             raise Uncertain("target", "The selected target contains no matching exposed devices.",
                             "Check Assist exposure settings and the device's room assignment.")
         if query:
+            member_domains = {entity["domain"] for entity in members}
+            result["domain"] = next(iter(member_domains)) if len(member_domains) == 1 else None
             result["state_info"] = [
-                {"name": entity["name"], "state": entity["state"], "attributes":
+                {"entity_id": entity["entity_id"], "domain": entity["domain"],
+                 "name": entity["name"], "state": entity["state"], "attributes":
                  entity.get("attributes", {}) if entity["state"] not in ("unknown", "unavailable") else {}}
                 for entity in members
             ]

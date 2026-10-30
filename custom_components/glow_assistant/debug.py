@@ -1,13 +1,11 @@
 import json
 import re
 
-from .const import QUERY
 from .numeric_values import finite_number
 
 STAGE_LABELS = {
     "context": "Read Home Assistant devices",
     "service": "Choose an action",
-    "domain": "Choose a device type",
     "area": "Choose a room",
     "target": "Choose a device or room",
     "numeric": "Choose a new value",
@@ -105,7 +103,7 @@ def decision_details(questions, answers, config):
         confidence = answer.get("confidence")
         confidence = confidence if finite_number(confidence) else None
         text_word = name.startswith("word_")
-        threshold = config[f"{'text' if text_word else name if name in ('service', 'domain', 'area', 'target') else 'numeric'}_confidence"]
+        threshold = config[f"{'text' if text_word else name if name in ('service', 'area', 'target') else 'numeric'}_confidence"]
         info = {"type": question["type"], "confidence": confidence, "minimum_confidence": threshold}
         if question["type"] == "choice":
             choice = answer.get("choice")
@@ -137,6 +135,4 @@ def decision_details(questions, answers, config):
             score = answer.get("score")
             info["score"] = score if finite_number(score) else None
         details[name] = info
-    if "service" in details and "domain" in details:
-        details["domain"]["used"] = details["service"].get("effective_choice") == QUERY
     return details

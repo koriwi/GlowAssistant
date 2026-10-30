@@ -7,7 +7,7 @@ from homeassistant.helpers.llm import ToolInput
 from .debug import failure_text
 
 STAGE_NAMES = {
-    "service": "glow_assistant_select_service_and_domain",
+    "service": "glow_assistant_select_service",
     "area": "glow_assistant_select_area",
     "target": "glow_assistant_select_target",
     "numeric": "glow_assistant_extract_numeric_value",

@@ -5,7 +5,6 @@ from urllib.parse import urlsplit
 from .const import (
     ANSWER_PROMPT,
     AREA_PROMPT,
-    DOMAIN_PROMPT,
     GENERAL_PROMPT,
     LEGACY_GENERAL_PROMPT,
     LEGACY_SERVICE_PROMPT,
@@ -24,11 +23,11 @@ DEFAULTS = {
         "url": "https://openrouter.ai/api/alpha/decisions",
         "model": "typesafe/jev-1.14", "api_key": "", "timeout": 60,
         "max_input_chars": 100000,
-        "service_prompt": SERVICE_PROMPT, "domain_prompt": DOMAIN_PROMPT,
+        "service_prompt": SERVICE_PROMPT,
         "area_prompt": AREA_PROMPT, "target_prompt": TARGET_PROMPT,
         "numeric_prompt": INSTRUCTIONS, "numeric_mode_prompt": NUMERIC_MODE_PROMPT,
         "text_prompt": TEXT_INSTRUCTIONS, "message_prompt": MESSAGE_INSTRUCTIONS, "text_confidence": 0.5,
-        "service_confidence": 0, "domain_confidence": 0, "area_confidence": 0,
+        "service_confidence": 0, "area_confidence": 0,
         "target_confidence": 0, "numeric_confidence": 0,
         "temperature_min": 16, "temperature_max": 26, "temperature_levels": 9,
         "temperature_step": 1, "temperature_default_change": 0.5,
@@ -100,7 +99,7 @@ def validate_settings(data):
             _range(config, "max_tokens", 1, 100000, group, integer=True)
             _range(config, "temperature", 0, 2, group)
     decider = settings["decider"]
-    for stage in ("service", "domain", "area", "target", "numeric", "text"):
+    for stage in ("service", "area", "target", "numeric", "text"):
         _range(decider, f"{stage}_confidence", 0, 1, "decider")
     for parameter in ("temperature", "brightness"):
         lower = -100 if parameter == "temperature" else 0
