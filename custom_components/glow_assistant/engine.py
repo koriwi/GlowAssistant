@@ -5,6 +5,7 @@ from time import perf_counter
 from .client import ModelError
 from .const import GENERAL, HISTORY_INSTRUCTIONS, QUERY, UNSURE
 from .debug import STAGE_LABELS, decision_details, failure_details, model_failure
+from .domain_filter import decode_domains, domain_request
 from .general import general_answer
 from .history import with_history
 from .numeric_values import decode_numeric, finite_number, numeric_request
@@ -136,12 +137,12 @@ class AgentEngine:
         self._trace("failure", details)
         self._trace("failure", {}, details)
 
-    async def _decide(self, result, stage, state, questions):
+    async def _decide(self, result, stage, state, questions, summarize=None):
         config = self.settings["decider"]
         state = {**state, "language": result["language"]}
         if self.history:
             state = {**state, "history": self.history}
-            if stage != "text":
+            if stage not in ("text", "domain_filter"):
                 questions = {name: {**question, "instructions": f"{question['instructions']} {HISTORY_INSTRUCTIONS}"}
                              for name, question in questions.items()}
         self._trace(stage, {
@@ -159,6 +160,8 @@ class AgentEngine:
                 decisions=decision_details(questions, result["decisions"][stage], config),
                 usage=result["usage"][stage],
             )
+            if summarize:
+                details.update(summarize(response))
             return response
         except ModelError as error:
             details.update(status="error", error=str(error), **error.details)
@@ -259,6 +262,8 @@ class AgentEngine:
             raise Uncertain("target", "No exposed devices match the selected action and room filter.",
                             "Check the device's room, Assist exposure settings, and GlowAssistant exclusions.",
                             domain=domain, area=areas[area])
+        if query and area == "all_areas":
+            candidates = await self._filter_domains(result, candidates)
         options = target_options(candidates)
         target_prompt = config["target_prompt"]
         if query and area == "all_areas":
@@ -269,7 +274,7 @@ class AgentEngine:
             }
             target_prompt += (
                 " For a whole-home state question about a device category, select all_areas. "
-                "It is one supported group target covering all exposed entities; the answer uses the relevant states. "
+                "It is one supported group target covering the supplied entities across all areas; the answer uses the relevant states. "
                 "Multiple matching sensors are expected. Choose an entity only when a specific device is identified."
             )
         response = await self._decide(result, "target", {
@@ -322,7 +327,7 @@ class AgentEngine:
                 self._failure(result, failure_details("execution", "Home Assistant could not confirm the device command.",
                                                      "Check the device's availability, Assist exposure, and Home Assistant logs."))
         facts = {key: value for key, value in result.items()
-                 if key not in ("decisions", "usage", "timings_ms", "failures")}
+                 if key not in ("decisions", "usage", "timings_ms", "failures", "domain_filter")}
         try:
             await self._chat(result, "answer", [
                 {"role": "system", "content": f"{self.settings['answer']['prompt']}\n{language_instruction}"},
@@ -349,6 +354,21 @@ class AgentEngine:
             result["timings_ms"][stage] = round((perf_counter() - started) * 1000)
             details["duration_ms"] = result["timings_ms"][stage]
             self._trace(stage, {}, details)
+
+    async def _filter_domains(self, result, entities):
+        config = self.settings["decider"]
+        domains = sorted({entity["domain"] for entity in entities})
+        payload = domain_request(result["request"], domains, config["domain_filter_prompt"])
+
+        def summarize(response):
+            selected = decode_domains(response, domains, config["domain_filter_confidence"])
+            selected.update(entities_before=len(entities),
+                            entities_after=sum(entity["domain"] in selected["kept_domains"] for entity in entities))
+            result["domain_filter"] = selected
+            return selected
+
+        await self._decide(result, "domain_filter", payload["state"], payload["questions"], summarize=summarize)
+        return [entity for entity in entities if entity["domain"] in result["domain_filter"]["kept_domains"]]
 
     async def _text(self, result):
         config = self.settings["decider"]

@@ -88,6 +88,13 @@ class ChatLogTraceTests(unittest.TestCase):
         self.assertEqual(self.messages[0].tool_calls[0].tool_name, "glow_assistant_extract_text")
         self.assertEqual(self.messages[1].tool_result, result)
 
+    def test_domain_filter_stage_uses_a_native_tool_card_with_counts(self):
+        result = {"kept_domains": ["sensor", "binary_sensor"], "entities_before": 100, "entities_after": 20}
+        self.trace("domain_filter", {"domains": ["sensor", "binary_sensor", "light"]})
+        self.trace("domain_filter", {}, result)
+        self.assertEqual(self.messages[0].tool_calls[0].tool_name, "glow_assistant_filter_domains")
+        self.assertEqual(self.messages[1].tool_result, result)
+
     def test_error_results_close_the_pending_call(self):
         self.trace("answer", {"max_tokens": 256})
         self.trace("answer", {}, {"status": "error", "error": "Token limit reached", "duration_ms": 120})

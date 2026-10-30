@@ -7,6 +7,7 @@ STAGE_LABELS = {
     "context": "Read Home Assistant devices",
     "service": "Choose an action",
     "area": "Choose a room",
+    "domain_filter": "Filter whole-home entity domains",
     "target": "Choose a device or room",
     "numeric": "Choose a new value",
     "numeric_mode": "Choose a new value",
@@ -76,6 +77,9 @@ def model_failure(stage, error):
     elif message.startswith("Malformed text extraction response"):
         reason = "The decider returned invalid or incomplete word selections."
         suggestion = "Check the Decider endpoint and text extraction prompt. Review the preceding word decisions."
+    elif message.startswith("Malformed domain filter response"):
+        reason = "The decider returned invalid or incomplete domain selections."
+        suggestion = "Check the Decider endpoint and whole-home domain filter prompt. Review the preceding domain decisions."
     elif "no spoken answer" in message:
         reason = "The model returned no text to speak."
         suggestion = f"Check the prompt and output token limit under {section}."
@@ -107,7 +111,16 @@ def decision_details(questions, answers, config):
         confidence = answer.get("confidence")
         confidence = confidence if finite_number(confidence) else None
         text_word = name.startswith("word_")
-        threshold = config[f"{'text' if text_word else name if name in ('service', 'area', 'target') else 'numeric'}_confidence"]
+        domain_filter = name.startswith("domain_")
+        if text_word:
+            confidence_stage = "text"
+        elif domain_filter:
+            confidence_stage = "domain_filter"
+        elif name in ("service", "area", "target"):
+            confidence_stage = name
+        else:
+            confidence_stage = "numeric"
+        threshold = config[f"{confidence_stage}_confidence"]
         info = {"type": question["type"], "confidence": confidence, "minimum_confidence": threshold}
         if question["type"] == "choice":
             choice = answer.get("choice")
@@ -121,6 +134,9 @@ def decision_details(questions, answers, config):
             )
             if text_word:
                 info["kept"] = choice == "keep" and confidence is not None and confidence > threshold
+                info["effective_choice"] = "keep" if info["kept"] else "drop"
+            elif domain_filter:
+                info["kept"] = choice == "keep" or confidence is not None and confidence <= threshold
                 info["effective_choice"] = "keep" if info["kept"] else "drop"
             criteria = question["criteria"]
             if choice in criteria:

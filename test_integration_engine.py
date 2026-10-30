@@ -247,7 +247,8 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         events = []
         session = Mock()
         models = ScriptedModels([
-            {"service": "query_state"}, {"area": "all_areas"}, {"target": "all_areas"},
+            {"service": "query_state"}, {"area": "all_areas"},
+            {"domain_light": "keep", "domain_sensor": "keep"}, {"target": "all_areas"},
         ])
         models.chat = ModelClient(session).chat
         execute = AsyncMock()
@@ -444,20 +445,29 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         ])
         settings = normalize_settings({"decider": {"area_prompt": "Custom area rules", "target_prompt": "Custom target rules"}})
         result, models, execute = await self.run_agent([
-            {"service": "query_state"}, {"area": "all_areas"}, {"target": "all_areas"},
+            {"service": "query_state"}, {"area": "all_areas"},
+            {"domain_binary_sensor": "keep", "domain_light": "drop", "domain_sensor": "drop"},
+            {"target": "all_areas"},
         ], snapshot=snapshot, settings=settings, prompt="are there any windows open in the house?")
         area_question = models.requests[1][2]["area"]
-        target_question = models.requests[2][2]["target"]
+        target_question = models.requests[3][2]["target"]
         self.assertIn("all_areas", area_question["criteria"])
         self.assertIn("Custom area rules", area_question["instructions"])
         self.assertIn("choose all_areas", area_question["instructions"])
         self.assertIn("Custom target rules", target_question["instructions"])
         self.assertIn("select all_areas", target_question["instructions"])
         self.assertIn("entity:binary_sensor.unassigned_window", target_question["criteria"])
+        self.assertNotIn("entity:light.desk", target_question["criteria"])
+        self.assertNotIn("entity:sensor.office", target_question["criteria"])
+        self.assertEqual(json.loads(target_question["criteria"]["all_areas"])["domains"], ["binary_sensor"])
+        self.assertEqual(result["domain_filter"]["kept_domains"], ["binary_sensor"])
+        self.assertEqual(result["domain_filter"]["entities_before"], len(snapshot["entities"]))
+        self.assertEqual(result["domain_filter"]["entities_after"], 3)
         self.assertEqual(result["target"]["type"], "all_areas")
         facts = json.loads(models.chat_requests[0][1][1]["content"])
         self.assertEqual({item["entity_id"] for item in facts["state_info"]},
-                         {item["entity_id"] for item in snapshot["entities"]})
+                         {item["entity_id"] for item in snapshot["entities"] if item["domain"] == "binary_sensor"})
+        self.assertNotIn("domain_filter", facts)
         windows = {item["entity_id"]: item for item in facts["state_info"] if item["domain"] == "binary_sensor"}
         self.assertEqual(windows["binary_sensor.office_window"]["area"], "Office")
         self.assertEqual(windows["binary_sensor.bedroom_window"]["area"], "Bedroom")
@@ -468,18 +478,22 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
     async def test_whole_home_group_is_not_offered_for_named_or_unspecified_room_queries(self):
         for area in ("area:office", "no_area"):
             with self.subTest(area=area):
-                _, models, execute = await self.run_agent([
+                result, models, execute = await self.run_agent([
                     {"service": "query_state"}, {"area": area}, {"target": "entity:sensor.office"},
                 ])
                 self.assertNotIn("all_areas", models.requests[2][2]["target"]["criteria"])
+                self.assertEqual(len(models.requests), 3)
+                self.assertNotIn("domain_filter", result["decisions"])
                 execute.assert_not_awaited()
 
     async def test_whole_home_group_is_not_offered_for_actions(self):
-        _, models, execute = await self.run_agent([
+        result, models, execute = await self.run_agent([
             {"service": "light.turn_off"}, {"area": "no_area"}, {"target": "entity:light.desk"},
         ])
         self.assertNotIn("all_areas", models.requests[1][2]["area"]["criteria"])
         self.assertNotIn("all_areas", models.requests[2][2]["target"]["criteria"])
+        self.assertNotIn("domain_filter", result["decisions"])
+        self.assertEqual(len(models.requests), 3)
         execute.assert_awaited_once_with("light.turn_off", {"entity_id": ["light.desk"]})
 
     async def test_whole_home_query_without_exposed_entities_stops_before_target_selection(self):
@@ -490,6 +504,70 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["failures"][0]["stage"], "target")
         self.assertEqual(len(models.requests), 2)
         self.assertFalse(models.chat_requests)
+        execute.assert_not_awaited()
+
+    async def test_whole_home_domain_filter_retains_multiple_domains_and_reports_reduction(self):
+        snapshot = copy.deepcopy(SNAPSHOT)
+        snapshot["entities"].append(entity("binary_sensor.window", "Window", device_class="window"))
+        history = [{"role": "user", "content": "What about the windows and temperature?"}]
+        settings = normalize_settings({"history_enabled": True, "decider": {"domain_filter_prompt": "private-domain-prompt"}})
+        events = []
+        result, models, execute = await self.run_agent([
+            {"service": "query_state"}, {"area": "all_areas"},
+            {"domain_binary_sensor": "keep", "domain_sensor": "keep", "domain_light": "drop"},
+            {"target": "all_areas"},
+        ], snapshot=snapshot, settings=settings, history=history, trace=lambda *event: events.append(event))
+        _, state, questions = models.requests[2]
+        self.assertEqual(state, {"prompt": "test request", "task": "private-domain-prompt",
+                                 "domains": ["binary_sensor", "light", "sensor"], "language": "de", "history": history})
+        self.assertEqual(set(questions), {"domain_binary_sensor", "domain_sensor", "domain_light"})
+        self.assertTrue(all(set(question["criteria"]) == {"keep", "drop"} for question in questions.values()))
+        self.assertNotIn("private-domain-prompt", json.dumps(events))
+        criteria = models.requests[3][2]["target"]["criteria"]
+        self.assertIn("entity:binary_sensor.window", criteria)
+        self.assertIn("entity:sensor.office", criteria)
+        self.assertNotIn("entity:light.desk", criteria)
+        output = next(output for stage, _, output in events if stage == "domain_filter" and output is not None)
+        self.assertEqual(output["kept_domains"], ["binary_sensor", "sensor"])
+        self.assertEqual(output["entities_before"], 5)
+        self.assertEqual(output["entities_after"], 2)
+        self.assertEqual(output["decisions"]["domain_light"]["effective_choice"], "drop")
+        self.assertEqual(output["decisions"]["domain_sensor"]["minimum_confidence"], 0.5)
+        self.assertIn("duration_ms", output)
+        self.assertIn("domain_filter", result["usage"])
+        self.assertEqual({item["domain"] for item in result["state_info"]}, {"binary_sensor", "sensor"})
+        execute.assert_not_awaited()
+
+    async def test_whole_home_uncertain_drops_keep_domains_and_all_drop_fallback_is_visible(self):
+        for threshold, expected_fallback in ((0.5, "all_domains"), (0.9, None)):
+            with self.subTest(threshold=threshold):
+                settings = normalize_settings({"decider": {"domain_filter_confidence": threshold}})
+                events = []
+                result, models, execute = await self.run_agent([
+                    {"service": "query_state"}, {"area": "all_areas"},
+                    {"domain_light": "drop", "domain_sensor": "drop"}, {"target": "all_areas"},
+                ], settings=settings, trace=lambda *event: events.append(event))
+                self.assertEqual(result["domain_filter"]["kept_domains"], ["light", "sensor"])
+                output = next(output for stage, _, output in events if stage == "domain_filter" and output is not None)
+                self.assertEqual(output["fallback"], expected_fallback)
+                self.assertEqual(output["entities_before"], output["entities_after"])
+                if expected_fallback is None:
+                    self.assertEqual(output["decisions"]["domain_light"]["effective_choice"], "keep")
+                self.assertIn("entity:sensor.office", models.requests[3][2]["target"]["criteria"])
+                execute.assert_not_awaited()
+
+    async def test_malformed_domain_filter_stops_before_building_the_target_request(self):
+        events = []
+        execute = AsyncMock()
+        with self.assertRaises(ModelError):
+            await self.run_agent([
+                {"service": "query_state"}, {"area": "all_areas"},
+                {"domain_light": "keep", "domain_sensor": "unsure"},
+            ], executor=execute, trace=lambda *event: events.append(event))
+        self.assertFalse(any(stage == "target" for stage, _, _ in events))
+        output = next(output for stage, _, output in events if stage == "domain_filter" and output is not None)
+        self.assertEqual(output["status"], "error")
+        self.assertEqual(events[-1][2]["stage"], "domain_filter")
         execute.assert_not_awaited()
 
     async def test_answer_failure_after_action_preserves_outcome_and_never_retries(self):
@@ -849,6 +927,7 @@ class IntegrationSettingsTests(unittest.TestCase):
             ("decider", "temperature_levels", 2.5), ("decider", "temperature_step", 0),
             ("decider", "service_confidence", 1.1), ("decider", "url", "localhost:8321"),
             ("decider", "text_confidence", -0.1), ("decider", "text_confidence", 1.1),
+            ("decider", "domain_filter_confidence", -0.1), ("decider", "domain_filter_confidence", 1.1),
             ("answer", "model", ""), ("answer", "max_tokens", 0),
             ("answer", "max_input_chars", float("inf")), ("answer", "temperature", True),
         ):
