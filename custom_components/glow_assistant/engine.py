@@ -161,7 +161,7 @@ class AgentEngine:
             )
             return response
         except ModelError as error:
-            details.update(status="error", error=str(error))
+            details.update(status="error", error=str(error), **error.details)
             raise
         finally:
             result["timings_ms"][stage] = round((perf_counter() - started) * 1000)
@@ -343,7 +343,7 @@ class AgentEngine:
             result["answer"], result["usage"][stage] = await self.client.chat(config, with_history(messages, self.history))
             details.update(status="completed", answer=result["answer"], usage=result["usage"][stage])
         except ModelError as error:
-            details.update(status="error", error=str(error))
+            details.update(status="error", error=str(error), **error.details)
             raise
         finally:
             result["timings_ms"][stage] = round((perf_counter() - started) * 1000)

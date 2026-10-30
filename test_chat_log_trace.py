@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
+from custom_components.glow_assistant.client import ModelError
 from custom_components.glow_assistant.debug import failure_details, model_failure
 from custom_components.glow_assistant.history import conversation_history
 
@@ -105,6 +106,18 @@ class ChatLogTraceTests(unittest.TestCase):
         self.assertEqual(conversation_history(self.messages, 10), [])
         self.assertTrue(self.trace.failure_reported)
         self.assertFalse(self.trace.calls)
+
+    def test_character_count_and_effective_limit_are_visible_in_both_bubble_and_details(self):
+        error = ModelError("Model input exceeds its configured character limit.",
+                           input_chars=123456, max_input_chars=100000, model="small-answer-model")
+        self.trace.failure(model_failure("answer", error))
+        bubble, result = self.messages
+        self.assertIn("123,456 characters", bubble.content)
+        self.assertIn("100,000 characters", bubble.content)
+        self.assertIn("Smart-home answer", bubble.content)
+        self.assertEqual(result.tool_result["input_chars"], 123456)
+        self.assertEqual(result.tool_result["max_input_chars"], 100000)
+        self.assertEqual(result.tool_result["model"], "small-answer-model")
 
     def test_unexpected_failure_closes_pending_calls_and_retains_command_uncertainty(self):
         self.trace("execution", {"service": "light.turn_off"})

@@ -1,3 +1,4 @@
+import json
 import unittest
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
@@ -54,6 +55,25 @@ class IntegrationClientTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ModelError, "character limit"):
             await client.chat(config, [{"role": "user", "content": "x" * 101}])
         session.post.assert_not_called()
+
+    async def test_character_limit_error_contains_the_exact_unicode_count_limit_and_model(self):
+        client, session, _ = self.client({"answers": {}})
+        config = normalize_settings({"decider": {"model": "local-decider", "api_key": "private-api-key"}})["decider"]
+        state = {"prompt": "Fenster im Büro offen? 🪟"}
+        questions = {"target": {"type": "choice", "criteria": {"unsure": "Unknown"}}}
+        expected = len(json.dumps({"model": config["model"], "state": state, "questions": questions}, ensure_ascii=False))
+        config["max_input_chars"] = expected - 1
+        with self.assertRaises(ModelError) as caught:
+            await client.decide(config, state, questions)
+        error = caught.exception
+        self.assertEqual(error.details, {"input_chars": expected, "max_input_chars": expected - 1, "model": "local-decider"})
+        self.assertIn(f"{expected:,} characters", str(error))
+        self.assertIn(f"configured limit: {expected - 1:,}", str(error))
+        self.assertNotIn("private-api-key", str(error.details))
+        session.post.assert_not_called()
+        config["max_input_chars"] = expected
+        await client.decide(config, state, questions)
+        session.post.assert_called_once()
 
     async def test_http_errors_and_redirects_are_not_retried(self):
         for status in (302, 401, 429, 500):

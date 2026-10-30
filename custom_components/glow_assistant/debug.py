@@ -37,6 +37,7 @@ def failure_text(details):
 
 def model_failure(stage, error):
     message = str(error)
+    details = getattr(error, "details", {})
     section = "Smart-home answer" if stage == "answer" else "General model" if stage in ("general", "mcp", "mcp_connect") else "Decider"
     http = re.fullmatch(r"Model endpoint returned HTTP (\d{3})\.", message)
     if http:
@@ -56,6 +57,9 @@ def model_failure(stage, error):
         suggestion = f"Increase Maximum output tokens under {section}."
     elif "input exceeds" in message:
         reason = "The request is larger than the configured input limit."
+        if "input_chars" in details and "max_input_chars" in details:
+            reason = (f"The request contains {details['input_chars']:,} characters; "
+                      f"the configured limit is {details['max_input_chars']:,} characters ({section}).")
         suggestion = f"Increase Maximum input characters under {section}, or reduce the history window."
     elif message == "Model request timed out.":
         reason = "The model server did not reply within the configured time."
@@ -91,7 +95,7 @@ def model_failure(stage, error):
     else:
         reason = "The model request failed or returned an unsupported response."
         suggestion = f"Check the endpoint, model, and prompt under {section}. See the Home Assistant logs for details."
-    return failure_details(stage, reason, suggestion)
+    return failure_details(stage, reason, suggestion, settings_section=section, **details)
 
 
 def decision_details(questions, answers, config):

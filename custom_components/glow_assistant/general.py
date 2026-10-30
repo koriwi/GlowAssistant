@@ -84,7 +84,7 @@ async def general_answer(client, config, messages, trace=None, tools_factory=MCP
                     parsed.append((identifier, name, arguments))
                 outcome["tool_calls"] = [{**mcp.describe(name), "arguments": arguments} for _, name, arguments in parsed]
             except ModelError as error:
-                outcome.update(status="error", error=str(error))
+                outcome.update(status="error", error=str(error), **error.details)
                 raise
             finally:
                 outcome["duration_ms"] = round((perf_counter() - started) * 1000)

@@ -75,6 +75,17 @@ class GeneralTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(answer, "Hello.")
         tools.call.assert_not_awaited()
 
+    async def test_input_limit_failure_preserves_character_counts_in_general_model_debug(self):
+        events = []
+        error = ModelError("Model input exceeds its configured character limit.",
+                           input_chars=2500, max_input_chars=2000, model="general-model")
+        with self.assertRaises(ModelError):
+            await self.run_loop([error], trace=lambda *event: events.append(copy.deepcopy(event)))
+        output = next(output for stage, _, output in events if stage == "general" and output is not None)
+        self.assertEqual(output["input_chars"], 2500)
+        self.assertEqual(output["max_input_chars"], 2000)
+        self.assertEqual(output["model"], "general-model")
+
     async def test_unknown_tool_prevents_every_tool_in_the_batch(self):
         tools = FakeTools()
         with self.assertRaisesRegex(ModelError, "Unknown MCP"):

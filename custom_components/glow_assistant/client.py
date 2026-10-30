@@ -4,7 +4,9 @@ import aiohttp
 
 
 class ModelError(Exception):
-    pass
+    def __init__(self, message, **details):
+        super().__init__(message)
+        self.details = details
 
 
 class ModelClient:
@@ -13,8 +15,13 @@ class ModelClient:
 
     async def _post(self, config, payload):
         body = json.dumps(payload, ensure_ascii=False)
-        if len(body) > config["max_input_chars"]:
-            raise ModelError("Model input exceeds its configured character limit.")
+        input_chars = len(body)
+        limit = config["max_input_chars"]
+        if input_chars > limit:
+            raise ModelError(
+                f"Model input exceeds its configured character limit: {input_chars:,} characters; configured limit: {limit:,}.",
+                input_chars=input_chars, max_input_chars=limit, model=config["model"],
+            )
         headers = {"Authorization": f"Bearer {config['api_key']}"} if config["api_key"] else {}
         try:
             async with self.session.post(

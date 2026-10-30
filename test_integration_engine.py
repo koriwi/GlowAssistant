@@ -2,9 +2,9 @@ import copy
 import json
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
-from custom_components.glow_assistant.client import ModelError
+from custom_components.glow_assistant.client import ModelClient, ModelError
 from custom_components.glow_assistant.engine import (
     ActionError,
     AgentEngine,
@@ -237,6 +237,51 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[1][2]["status"], "error")
         self.assertIn("duration_ms", events[1][2])
         self.assertIn("could not be reached", events[-1][2]["reason"])
+        execute.assert_not_awaited()
+
+    async def test_answer_character_limit_reaches_stage_debug_and_failure_summary_with_effective_settings(self):
+        settings = normalize_settings({
+            "decider": {"model": "decider", "max_input_chars": 150000},
+            "answer": {"model": "answer-model", "max_input_chars": 100},
+        })
+        events = []
+        session = Mock()
+        models = ScriptedModels([
+            {"service": "query_state"}, {"area": "all_areas"}, {"target": "all_areas"},
+        ])
+        models.chat = ModelClient(session).chat
+        execute = AsyncMock()
+        result = await AgentEngine(settings, models, execute, trace=lambda *event: events.append(event)).process(
+            "sind noch fenster im haus offen?", "de", SNAPSHOT,
+        )
+        output = next(output for stage, _, output in events if stage == "answer" and output is not None)
+        failure = result["failures"][0]
+        self.assertEqual(output["max_input_chars"], 100)
+        self.assertEqual(failure["max_input_chars"], 100)
+        self.assertEqual(failure["input_chars"], output["input_chars"])
+        self.assertGreater(failure["input_chars"], 100)
+        self.assertEqual(failure["settings_section"], "Smart-home answer")
+        self.assertEqual(failure["model"], "answer-model")
+        self.assertIn(f"{failure['input_chars']:,} characters", failure["reason"])
+        self.assertIn("100 characters", failure["reason"])
+        session.post.assert_not_called()
+        execute.assert_not_awaited()
+
+    async def test_decider_character_limit_reaches_the_stage_and_final_failure_summary(self):
+        settings = normalize_settings({"decider": {"model": "local-decider", "max_input_chars": 100}})
+        session = Mock()
+        events = []
+        execute = AsyncMock()
+        agent = AgentEngine(settings, ModelClient(session), execute, trace=lambda *event: events.append(event))
+        with self.assertRaises(ModelError):
+            await agent.process("sind fenster im haus offen?", "de", SNAPSHOT)
+        output = next(output for stage, _, output in events if stage == "service" and output is not None)
+        failure = events[-1][2]
+        self.assertEqual(failure["settings_section"], "Decider")
+        self.assertEqual(failure["model"], "local-decider")
+        self.assertEqual(failure["input_chars"], output["input_chars"])
+        self.assertEqual(failure["max_input_chars"], 100)
+        session.post.assert_not_called()
         execute.assert_not_awaited()
 
     async def test_trace_does_not_include_model_credentials_or_prompt_templates(self):
