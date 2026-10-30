@@ -30,7 +30,7 @@
               "max_input_chars": "Maximum input characters",
               "service_prompt": "Action selection prompt",
               "area_prompt": "Area selection prompt",
-              "target_prompt": "Target selection prompt",
+              "target_prompt": "Single-target selection prompt",
               "numeric_prompt": "Numeric value prompt",
               "numeric_mode_prompt": "Absolute/relative selection prompt",
               "service_confidence": "Minimum action confidence",
@@ -53,7 +53,9 @@
               "text_confidence": "Text extraction confidence",
               "message_prompt": "Message extraction prompt",
               "domain_filter_prompt": "Whole-home domain filter prompt",
-              "domain_filter_confidence": "Minimum confidence to drop a whole-home domain"
+              "domain_filter_confidence": "Minimum confidence to drop a whole-home domain",
+              "target_filter_prompt": "Target keep/drop prompt",
+              "target_filter_confidence": "Target keep/drop confidence"
             },
             "data_description": {
               "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
@@ -73,7 +75,9 @@
               "text_confidence": "Keep a word only when the model selects keep with confidence strictly above this value.",
               "message_prompt": "Instructions for notification or announcement words. Sent once per extraction. Clear to restore the default. No templating.",
               "domain_filter_prompt": "Keep/drop instructions used only after selecting all areas for a state query. Clear to restore the default. No templating.",
-              "domain_filter_confidence": "Drop a domain only above this confidence. Uncertain decisions keep it. If all domains are dropped, keep all."
+              "domain_filter_confidence": "Drop a domain only above this confidence. Uncertain decisions keep it. If all domains are dropped, keep all.",
+              "target_filter_prompt": "Instructions for selecting entities for state queries and actions that accept multiple targets. Sent once per selection. Clear to restore the default. No templating.",
+              "target_filter_confidence": "Queries keep uncertain targets and drop only above this confidence. Actions keep only a keep decision above this confidence."
             }
           },
           "answer": {
@@ -159,7 +163,7 @@
               "max_input_chars": "Maximum input characters",
               "service_prompt": "Action selection prompt",
               "area_prompt": "Area selection prompt",
-              "target_prompt": "Target selection prompt",
+              "target_prompt": "Single-target selection prompt",
               "numeric_prompt": "Numeric value prompt",
               "numeric_mode_prompt": "Absolute/relative selection prompt",
               "service_confidence": "Minimum action confidence",
@@ -182,7 +186,9 @@
               "text_confidence": "Text extraction confidence",
               "message_prompt": "Message extraction prompt",
               "domain_filter_prompt": "Whole-home domain filter prompt",
-              "domain_filter_confidence": "Minimum confidence to drop a whole-home domain"
+              "domain_filter_confidence": "Minimum confidence to drop a whole-home domain",
+              "target_filter_prompt": "Target keep/drop prompt",
+              "target_filter_confidence": "Target keep/drop confidence"
             },
             "data_description": {
               "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
@@ -202,7 +208,9 @@
               "text_confidence": "Keep a word only when the model selects keep with confidence strictly above this value.",
               "message_prompt": "Instructions for notification or announcement words. Sent once per extraction. Clear to restore the default. No templating.",
               "domain_filter_prompt": "Keep/drop instructions used only after selecting all areas for a state query. Clear to restore the default. No templating.",
-              "domain_filter_confidence": "Drop a domain only above this confidence. Uncertain decisions keep it. If all domains are dropped, keep all."
+              "domain_filter_confidence": "Drop a domain only above this confidence. Uncertain decisions keep it. If all domains are dropped, keep all.",
+              "target_filter_prompt": "Instructions for selecting entities for state queries and actions that accept multiple targets. Sent once per selection. Clear to restore the default. No templating.",
+              "target_filter_confidence": "Queries keep uncertain targets and drop only above this confidence. Actions keep only a keep decision above this confidence."
             }
           },
           "answer": {
@@ -298,7 +306,7 @@
               "max_input_chars": "Maximum input characters",
               "service_prompt": "Action selection prompt",
               "area_prompt": "Area selection prompt",
-              "target_prompt": "Target selection prompt",
+              "target_prompt": "Single-target selection prompt",
               "numeric_prompt": "Numeric value prompt",
               "numeric_mode_prompt": "Absolute/relative selection prompt",
               "service_confidence": "Minimum action confidence",
@@ -321,7 +329,9 @@
               "text_confidence": "Text extraction confidence",
               "message_prompt": "Message extraction prompt",
               "domain_filter_prompt": "Whole-home domain filter prompt",
-              "domain_filter_confidence": "Minimum confidence to drop a whole-home domain"
+              "domain_filter_confidence": "Minimum confidence to drop a whole-home domain",
+              "target_filter_prompt": "Target keep/drop prompt",
+              "target_filter_confidence": "Target keep/drop confidence"
             },
             "data_description": {
               "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
@@ -341,7 +351,9 @@
               "text_confidence": "Keep a word only when the model selects keep with confidence strictly above this value.",
               "message_prompt": "Instructions for notification or announcement words. Sent once per extraction. Clear to restore the default. No templating.",
               "domain_filter_prompt": "Keep/drop instructions used only after selecting all areas for a state query. Clear to restore the default. No templating.",
-              "domain_filter_confidence": "Drop a domain only above this confidence. Uncertain decisions keep it. If all domains are dropped, keep all."
+              "domain_filter_confidence": "Drop a domain only above this confidence. Uncertain decisions keep it. If all domains are dropped, keep all.",
+              "target_filter_prompt": "Instructions for selecting entities for state queries and actions that accept multiple targets. Sent once per selection. Clear to restore the default. No templating.",
+              "target_filter_confidence": "Queries keep uncertain targets and drop only above this confidence. Actions keep only a keep decision above this confidence."
             }
           },
           "answer": {

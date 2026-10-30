@@ -115,6 +115,13 @@ class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
             "light", "turn_off", {"entity_id": ["light.allowed"]}, blocking=True, context=context,
         )
 
+    async def test_native_target_selector_accepts_multiple_entity_ids(self):
+        from homeassistant.helpers.selector import TargetSelector
+
+        selector = TargetSelector({"entity": {"domain": "light"}})
+        self.assertEqual(selector({"entity_id": ["light.desk", "light.ceiling"]}),
+                         {"entity_id": ["light.desk", "light.ceiling"]})
+
     async def test_conversation_returns_speech_and_preserves_conversation_id(self):
         from custom_components.glow_assistant.conversation import GlowConversationEntity
 

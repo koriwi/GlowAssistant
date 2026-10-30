@@ -9,6 +9,7 @@ from .domain_filter import decode_domains, domain_request
 from .general import general_answer
 from .history import with_history
 from .numeric_values import decode_numeric, finite_number, numeric_request
+from .target_selection import decode_targets, target_request
 from .text_values import TEXT_ACTIONS, decode_text, text_request
 
 
@@ -92,11 +93,6 @@ def target_options(entities):
             "device_class": attributes.get("device_class"),
             "unit": attributes.get("unit_of_measurement"),
         }
-    for area_id, area in areas_from(entities).items():
-        options[f"area:{area_id}"] = {
-            "type": "area", "area_id": area_id, **area,
-            "domains": sorted({entity["domain"] for entity in entities if entity.get("area_id") == area_id}),
-        }
     return options
 
 
@@ -142,7 +138,7 @@ class AgentEngine:
         state = {**state, "language": result["language"]}
         if self.history:
             state = {**state, "history": self.history}
-            if stage not in ("text", "domain_filter"):
+            if "task" not in state:
                 questions = {name: {**question, "instructions": f"{question['instructions']} {HISTORY_INSTRUCTIONS}"}
                              for name, question in questions.items()}
         self._trace(stage, {
@@ -157,7 +153,8 @@ class AgentEngine:
             result["decisions"][stage] = response.get("answers", {})
             details.update(
                 status="completed",
-                decisions=decision_details(questions, result["decisions"][stage], config),
+                decisions=decision_details(questions, result["decisions"][stage], config,
+                                           query=result["service"] == QUERY, targets=state.get("targets")),
                 usage=result["usage"][stage],
             )
             if summarize:
@@ -264,32 +261,23 @@ class AgentEngine:
                             domain=domain, area=areas[area])
         if query and area == "all_areas":
             candidates = await self._filter_domains(result, candidates)
-        options = target_options(candidates)
-        target_prompt = config["target_prompt"]
-        if query and area == "all_areas":
-            options["all_areas"] = {
-                "type": "all_areas", "name": "All areas",
-                "description": "Query relevant states across the whole home, including entities without an area.",
-                "domains": sorted({entity["domain"] for entity in candidates}),
-            }
-            target_prompt += (
-                " For a whole-home state question about a device category, select all_areas. "
-                "It is one supported group target covering the supplied entities across all areas; the answer uses the relevant states. "
-                "Multiple matching sensors are expected. Choose an entity only when a specific device is identified."
-            )
-        response = await self._decide(result, "target", {
+        target_state = {
             "prompt": prompt, "service": result["service"],
             **({"domain": domain} if not query else {}),
             "area": areas[area] if area != "no_area" else None,
-        }, {"target": choice_question(options, target_prompt)})
-        target = self._choice(response, "target", options)
-        result["target"] = options[target]
-        if result["target"]["type"] == "entity":
-            members = [entity for entity in candidates if entity["entity_id"] == result["target"]["entity_id"]]
-        elif result["target"]["type"] == "all_areas":
-            members = candidates
+        }
+        # Native HA target selectors accept entity lists
+        multiple_targets = query or snapshot["services"][action["service"]].get("target") is not None
+        if multiple_targets:
+            members = await self._select_targets(result, candidates, target_state, query)
         else:
-            members = [entity for entity in candidates if entity.get("area_id") == result["target"]["area_id"]]
+            options = target_options(candidates)
+            response = await self._decide(result, "target", target_state, {
+                "target": choice_question(options, config["target_prompt"]),
+            })
+            target = self._choice(response, "target", options)
+            result["target"] = options[target]
+            members = [entity for entity in candidates if entity["entity_id"] == result["target"]["entity_id"]]
         if not members:
             raise Uncertain("target", "The selected target contains no matching exposed devices.",
                             "Check Assist exposure settings and the device's room assignment.")
@@ -327,7 +315,7 @@ class AgentEngine:
                 self._failure(result, failure_details("execution", "Home Assistant could not confirm the device command.",
                                                      "Check the device's availability, Assist exposure, and Home Assistant logs."))
         facts = {key: value for key, value in result.items()
-                 if key not in ("decisions", "usage", "timings_ms", "failures", "domain_filter")}
+                 if key not in ("decisions", "usage", "timings_ms", "failures", "domain_filter", "target_selection")}
         try:
             await self._chat(result, "answer", [
                 {"role": "system", "content": f"{self.settings['answer']['prompt']}\n{language_instruction}"},
@@ -341,11 +329,15 @@ class AgentEngine:
 
     async def _chat(self, result, stage, messages):
         config = self.settings[stage]
-        self._trace(stage, {"model": config["model"], "max_tokens": config["max_tokens"]})
+        messages = with_history(messages, self.history)
+        arguments = {"model": config["model"], "max_tokens": config["max_tokens"]}
+        if stage == "answer":
+            arguments.update(messages=messages, temperature=config["temperature"], max_input_chars=config["max_input_chars"])
+        self._trace(stage, arguments)
         started = perf_counter()
         details = {"status": "incomplete"}
         try:
-            result["answer"], result["usage"][stage] = await self.client.chat(config, with_history(messages, self.history))
+            result["answer"], result["usage"][stage] = await self.client.chat(config, messages)
             details.update(status="completed", answer=result["answer"], usage=result["usage"][stage])
         except ModelError as error:
             details.update(status="error", error=str(error), **error.details)
@@ -354,6 +346,28 @@ class AgentEngine:
             result["timings_ms"][stage] = round((perf_counter() - started) * 1000)
             details["duration_ms"] = result["timings_ms"][stage]
             self._trace(stage, {}, details)
+
+    async def _select_targets(self, result, entities, state, query):
+        config = self.settings["decider"]
+        targets = list(target_options(entities).values())
+        payload = target_request(state, targets, config["target_filter_prompt"])
+
+        def summarize(response):
+            selected = decode_targets(response, targets, config["target_filter_confidence"], query)
+            result["target_selection"] = selected
+            return selected
+
+        await self._decide(result, "target", payload["state"], payload["questions"], summarize=summarize)
+        selected = result["target_selection"]["selected_entity_ids"]
+        if not selected:
+            raise Uncertain("target", "No matching entities were retained by target selection.",
+                            "Name the requested devices explicitly. Review the target keep/drop decisions and confidence threshold.")
+        members = [entity for entity in entities if entity["entity_id"] in selected]
+        if len(members) == 1:
+            result["target"] = next(target for target in targets if target["entity_id"] == selected[0])
+        else:
+            result["target"] = {"type": "entities", "entity_ids": selected, "names": [entity["name"] for entity in members]}
+        return members
 
     async def _filter_domains(self, result, entities):
         config = self.settings["decider"]

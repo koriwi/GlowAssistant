@@ -60,7 +60,16 @@ class ScriptedModels:
                     probabilities[str(lower + 1)] = score - lower
                 answers[name] = {"type": "score", "score": score, "confidence": self.confidence, "probabilities": probabilities}
             else:
-                choice = choices.get(name, "unsure")
+                if name.startswith("target_"):
+                    target = state["targets"][int(name.removeprefix("target_"))]
+                    selected = choices.get("targets")
+                    if selected is None:
+                        legacy = choices.get("target", "unsure")
+                        selected = ([legacy.removeprefix("entity:")] if legacy.startswith("entity:")
+                                    else "all" if legacy.startswith("area:") or legacy == "all_areas" else [])
+                    choice = choices.get(name, "keep" if selected == "all" or target["entity_id"] in selected else "drop")
+                else:
+                    choice = choices.get(name, "unsure")
                 probabilities = dict.fromkeys(question["criteria"], 0)
                 if choice in probabilities:
                     probabilities[choice] = 1
@@ -106,7 +115,10 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["answer"], "Erledigt.")
         for _, state, questions in models.requests:
             self.assertEqual(state["history"], history)
-            self.assertTrue(all("resolve references" in item["instructions"] for item in questions.values()))
+            if "task" in state:
+                self.assertIn("resolve references", state["task"])
+            else:
+                self.assertTrue(all("resolve references" in item["instructions"] for item in questions.values()))
         self.assertIn(json.dumps(history, ensure_ascii=False), models.chat_requests[0][1][0]["content"])
         self.assertEqual(len(models.requests), 3)
         execute.assert_not_awaited()
@@ -176,7 +188,8 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(choice["confidence"], 0.9)
         self.assertEqual(choice["selected"]["service"], "light.turn_off")
         self.assertEqual(set(outputs["service"]["decisions"]), {"service"})
-        self.assertEqual(outputs["target"]["decisions"]["target"]["selected"]["name"], "Office")
+        self.assertEqual(outputs["target"]["selected_entity_ids"], ["light.desk", "light.ceiling"])
+        self.assertTrue(outputs["target"]["decisions"]["target_0"]["kept"])
         for stage in expected:
             self.assertGreaterEqual(outputs[stage]["duration_ms"], 0)
             self.assertEqual(outputs[stage]["status"], "completed")
@@ -265,6 +278,9 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(failure["model"], "answer-model")
         self.assertIn(f"{failure['input_chars']:,} characters", failure["reason"])
         self.assertIn("100 characters", failure["reason"])
+        arguments = next(arguments for stage, arguments, output in events if stage == "answer" and output is None)
+        payload = {key: arguments[key] for key in ("model", "messages", "max_tokens", "temperature")}
+        self.assertEqual(len(json.dumps(payload, ensure_ascii=False)), failure["input_chars"])
         session.post.assert_not_called()
         execute.assert_not_awaited()
 
@@ -297,6 +313,23 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         for secret in ("secret-decider", "secret-answer", "private-template"):
             self.assertNotIn(secret, serialized)
 
+    async def test_answer_debug_shows_the_exact_messages_and_settings_sent_to_the_model(self):
+        history = [{"role": "user", "content": "Previous question"}, {"role": "assistant", "content": "Previous answer"}]
+        settings = normalize_settings({"history_enabled": True, "answer": {
+            "prompt": "Answer rules", "api_key": "private-api-key", "temperature": 0.3,
+        }})
+        events = []
+        _, models, _ = await self.run_agent([
+            {"service": "query_state"}, {"area": "area:office"}, {"target": "entity:light.desk"},
+        ], settings=settings, history=history, trace=lambda *event: events.append(event))
+        arguments = next(arguments for stage, arguments, output in events if stage == "answer" and output is None)
+        self.assertEqual(arguments["messages"], models.chat_requests[0][1])
+        self.assertIn("Answer rules", arguments["messages"][0]["content"])
+        self.assertIn("Previous answer", arguments["messages"][0]["content"])
+        self.assertEqual(arguments["temperature"], 0.3)
+        self.assertEqual(arguments["max_input_chars"], settings["answer"]["max_input_chars"])
+        self.assertNotIn("private-api-key", json.dumps(arguments))
+
     async def test_direct_action_uses_its_domain_and_filtered_room_targets(self):
         result, models, execute = await self.run_agent([
             {"service": "light.turn_off"},
@@ -307,9 +340,10 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["answer"], "Erledigt.")
         self.assertEqual(models.requests[0][1], {"prompt": "test request", "language": "de"})
         self.assertEqual(models.requests[1][1], {"prompt": "test request", "language": "de"})
-        criteria = models.requests[2][2]["target"]["criteria"]
-        self.assertEqual(set(criteria), {"entity:light.desk", "entity:light.ceiling", "area:office", "unsure"})
-        self.assertNotIn("attributes", json.loads(criteria["entity:light.desk"]))
+        targets = models.requests[2][1]["targets"]
+        self.assertEqual([target["entity_id"] for target in targets], ["light.desk", "light.ceiling"])
+        self.assertTrue(all(set(question["criteria"]) == {"keep", "drop"} for question in models.requests[2][2].values()))
+        self.assertNotIn("attributes", targets[0])
         facts = json.loads(models.chat_requests[0][1][1]["content"])
         self.assertEqual(facts["execution"]["status"], "completed")
         self.assertNotIn("decisions", facts)
@@ -346,7 +380,8 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result["answer"], "ich bin mir nicht sicher")
                 self.assertEqual(result["route"], "unsure")
                 self.assertEqual(result["failures"][0]["stage"], expected_stage)
-                self.assertIn("selected unsure", result["failures"][0]["reason"])
+                reason = "No matching entities" if expected_stage == "target" else "selected unsure"
+                self.assertIn(reason, result["failures"][0]["reason"])
                 self.assertFalse(models.chat_requests)
                 execute.assert_not_awaited()
 
@@ -402,13 +437,11 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(models.requests[0][2]), {"service"})
         self.assertNotIn("domain", result["decisions"]["service"])
         self.assertNotIn("domain", models.requests[2][1])
-        criteria = models.requests[2][2]["target"]["criteria"]
-        self.assertEqual(set(criteria), {
-            "entity:light.desk", "entity:light.ceiling", "entity:sensor.office",
-            "entity:binary_sensor.office_window", "area:office", "unsure",
+        targets = models.requests[2][1]["targets"]
+        self.assertEqual({target["entity_id"] for target in targets}, {
+            "light.desk", "light.ceiling", "sensor.office", "binary_sensor.office_window",
         })
-        self.assertEqual(json.loads(criteria["entity:binary_sensor.office_window"])["domain"], "binary_sensor")
-        self.assertEqual(json.loads(criteria["area:office"])["domains"], ["binary_sensor", "light", "sensor"])
+        self.assertEqual({target["domain"] for target in targets}, {"binary_sensor", "light", "sensor"})
         self.assertEqual(result["domain"], "binary_sensor")
         self.assertEqual(result["state_info"][0]["entity_id"], "binary_sensor.office_window")
         execute.assert_not_awaited()
@@ -430,9 +463,9 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         result, models, execute = await self.run_agent([
             {"service": "query_state"}, {"area": "no_area"}, {"target": "entity:sensor.office"},
         ])
-        criteria = models.requests[2][2]["target"]["criteria"]
-        self.assertIn("entity:light.bed", criteria)
-        self.assertIn("entity:sensor.office", criteria)
+        targets = {target["entity_id"] for target in models.requests[2][1]["targets"]}
+        self.assertIn("light.bed", targets)
+        self.assertIn("sensor.office", targets)
         self.assertEqual(result["domain"], "sensor")
         execute.assert_not_awaited()
 
@@ -450,20 +483,19 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
             {"target": "all_areas"},
         ], snapshot=snapshot, settings=settings, prompt="are there any windows open in the house?")
         area_question = models.requests[1][2]["area"]
-        target_question = models.requests[3][2]["target"]
+        target_state = models.requests[3][1]
+        targets = {target["entity_id"] for target in target_state["targets"]}
         self.assertIn("all_areas", area_question["criteria"])
         self.assertIn("Custom area rules", area_question["instructions"])
         self.assertIn("choose all_areas", area_question["instructions"])
-        self.assertIn("Custom target rules", target_question["instructions"])
-        self.assertIn("select all_areas", target_question["instructions"])
-        self.assertIn("entity:binary_sensor.unassigned_window", target_question["criteria"])
-        self.assertNotIn("entity:light.desk", target_question["criteria"])
-        self.assertNotIn("entity:sensor.office", target_question["criteria"])
-        self.assertEqual(json.loads(target_question["criteria"]["all_areas"])["domains"], ["binary_sensor"])
+        self.assertEqual(target_state["task"], settings["decider"]["target_filter_prompt"])
+        self.assertIn("binary_sensor.unassigned_window", targets)
+        self.assertNotIn("light.desk", targets)
+        self.assertNotIn("sensor.office", targets)
         self.assertEqual(result["domain_filter"]["kept_domains"], ["binary_sensor"])
         self.assertEqual(result["domain_filter"]["entities_before"], len(snapshot["entities"]))
         self.assertEqual(result["domain_filter"]["entities_after"], 3)
-        self.assertEqual(result["target"]["type"], "all_areas")
+        self.assertEqual(result["target"]["type"], "entities")
         facts = json.loads(models.chat_requests[0][1][1]["content"])
         self.assertEqual({item["entity_id"] for item in facts["state_info"]},
                          {item["entity_id"] for item in snapshot["entities"] if item["domain"] == "binary_sensor"})
@@ -481,7 +513,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
                 result, models, execute = await self.run_agent([
                     {"service": "query_state"}, {"area": area}, {"target": "entity:sensor.office"},
                 ])
-                self.assertNotIn("all_areas", models.requests[2][2]["target"]["criteria"])
+                self.assertTrue(all(target["type"] == "entity" for target in models.requests[2][1]["targets"]))
                 self.assertEqual(len(models.requests), 3)
                 self.assertNotIn("domain_filter", result["decisions"])
                 execute.assert_not_awaited()
@@ -491,7 +523,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
             {"service": "light.turn_off"}, {"area": "no_area"}, {"target": "entity:light.desk"},
         ])
         self.assertNotIn("all_areas", models.requests[1][2]["area"]["criteria"])
-        self.assertNotIn("all_areas", models.requests[2][2]["target"]["criteria"])
+        self.assertTrue(all(target["type"] == "entity" for target in models.requests[2][1]["targets"]))
         self.assertNotIn("domain_filter", result["decisions"])
         self.assertEqual(len(models.requests), 3)
         execute.assert_awaited_once_with("light.turn_off", {"entity_id": ["light.desk"]})
@@ -504,6 +536,86 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["failures"][0]["stage"], "target")
         self.assertEqual(len(models.requests), 2)
         self.assertFalse(models.chat_requests)
+        execute.assert_not_awaited()
+
+    async def test_query_keeps_multiple_window_contacts_and_excludes_other_entity_states_from_answer(self):
+        snapshot = copy.deepcopy(SNAPSHOT)
+        snapshot["entities"].extend([
+            entity("binary_sensor.left_window", "Left window", state="on", device_class="window"),
+            entity("binary_sensor.right_window", "Right window", state="off", device_class="window"),
+            entity("binary_sensor.motion", "Motion", device_class="motion"),
+        ])
+        events = []
+        result, _, execute = await self.run_agent([
+            {"service": "query_state"}, {"area": "area:office"},
+            {"targets": ["binary_sensor.left_window", "binary_sensor.right_window"]},
+        ], snapshot=snapshot, trace=lambda *event: events.append(event), prompt="Sind Fenster im Büro offen?")
+        self.assertEqual(result["target"]["type"], "entities")
+        arguments = next(arguments for stage, arguments, output in events if stage == "answer" and output is None)
+        states = json.loads(arguments["messages"][1]["content"])["state_info"]
+        self.assertEqual([state["entity_id"] for state in states], ["binary_sensor.left_window", "binary_sensor.right_window"])
+        self.assertEqual([state["state"] for state in states], ["on", "off"])
+        output = next(output for stage, _, output in events if stage == "target" and output is not None)
+        self.assertEqual(output["entities_before"], 6)
+        self.assertEqual(output["entities_after"], 2)
+        self.assertEqual(output["decisions"]["target_3"]["entity_id"], "binary_sensor.left_window")
+        execute.assert_not_awaited()
+
+    async def test_native_multi_target_action_calls_only_retained_entities_once(self):
+        result, models, execute = await self.run_agent([
+            {"service": "light.turn_off"}, {"area": "no_area"}, {"targets": ["light.desk", "light.bed"]},
+        ], prompt="Turn off the desk and bed lamps")
+        execute.assert_awaited_once_with("light.turn_off", {"entity_id": ["light.desk", "light.bed"]})
+        self.assertEqual(result["target"]["entity_ids"], ["light.desk", "light.bed"])
+        self.assertTrue(all(target["domain"] == "light" for target in models.requests[2][1]["targets"]))
+
+    async def test_single_target_action_keeps_its_single_choice_path(self):
+        snapshot = copy.deepcopy(SNAPSHOT)
+        snapshot["services"]["light.turn_off"].pop("target")
+        result, models, execute = await self.run_agent([
+            {"service": "light.turn_off"}, {"area": "area:office"}, {"target": "entity:light.desk"},
+        ], snapshot=snapshot)
+        self.assertEqual(set(models.requests[2][2]), {"target"})
+        self.assertNotIn("targets", models.requests[2][1])
+        self.assertNotIn("target_selection", result)
+        self.assertNotIn("area:office", models.requests[2][2]["target"]["criteria"])
+        execute.assert_awaited_once_with("light.turn_off", {"entity_id": ["light.desk"]})
+
+    async def test_action_keep_at_confidence_threshold_cannot_execute(self):
+        settings = normalize_settings({"decider": {"target_filter_confidence": 0.9}})
+        result, models, execute = await self.run_agent([
+            {"service": "light.turn_off"}, {"area": "area:office"}, {"targets": "all"},
+        ], settings=settings)
+        self.assertEqual(result["route"], "unsure")
+        self.assertEqual(result["target_selection"]["selected_entity_ids"], [])
+        self.assertFalse(models.chat_requests)
+        execute.assert_not_awaited()
+
+    async def test_query_retains_uncertain_drops_and_uses_editable_target_filter_prompt(self):
+        events = []
+        settings = normalize_settings({"decider": {"target_filter_confidence": 0.9, "target_filter_prompt": "private-target-task"}})
+        result, models, execute = await self.run_agent([
+            {"service": "query_state"}, {"area": "area:office"},
+            {"target_0": "drop", "target_1": "drop", "target_2": "drop"},
+        ], settings=settings, trace=lambda *event: events.append(event))
+        self.assertEqual(models.requests[2][1]["task"], "private-target-task")
+        self.assertNotIn("private-target-task", json.dumps(events))
+        self.assertEqual(result["target_selection"]["entities_after"], 3)
+        output = next(output for stage, _, output in events if stage == "target" and output is not None)
+        self.assertEqual(output["decisions"]["target_0"]["effective_choice"], "keep")
+        execute.assert_not_awaited()
+
+    async def test_malformed_target_batch_stops_before_action_or_answer(self):
+        events = []
+        execute = AsyncMock()
+        with self.assertRaises(ModelError):
+            await self.run_agent([
+                {"service": "light.turn_off"}, {"area": "area:office"},
+                {"target_0": "keep", "target_1": "unsure"},
+            ], executor=execute, trace=lambda *event: events.append(event))
+        self.assertFalse(any(stage in ("execution", "answer") for stage, _, _ in events))
+        self.assertEqual(events[-1][2]["stage"], "target")
+        self.assertIn("invalid or incomplete target", events[-1][2]["reason"])
         execute.assert_not_awaited()
 
     async def test_whole_home_domain_filter_retains_multiple_domains_and_reports_reduction(self):
@@ -523,10 +635,10 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(questions), {"domain_binary_sensor", "domain_sensor", "domain_light"})
         self.assertTrue(all(set(question["criteria"]) == {"keep", "drop"} for question in questions.values()))
         self.assertNotIn("private-domain-prompt", json.dumps(events))
-        criteria = models.requests[3][2]["target"]["criteria"]
-        self.assertIn("entity:binary_sensor.window", criteria)
-        self.assertIn("entity:sensor.office", criteria)
-        self.assertNotIn("entity:light.desk", criteria)
+        targets = {target["entity_id"] for target in models.requests[3][1]["targets"]}
+        self.assertIn("binary_sensor.window", targets)
+        self.assertIn("sensor.office", targets)
+        self.assertNotIn("light.desk", targets)
         output = next(output for stage, _, output in events if stage == "domain_filter" and output is not None)
         self.assertEqual(output["kept_domains"], ["binary_sensor", "sensor"])
         self.assertEqual(output["entities_before"], 5)
@@ -553,7 +665,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(output["entities_before"], output["entities_after"])
                 if expected_fallback is None:
                     self.assertEqual(output["decisions"]["domain_light"]["effective_choice"], "keep")
-                self.assertIn("entity:sensor.office", models.requests[3][2]["target"]["criteria"])
+                self.assertIn("sensor.office", [target["entity_id"] for target in models.requests[3][1]["targets"]])
                 execute.assert_not_awaited()
 
     async def test_malformed_domain_filter_stops_before_building_the_target_request(self):
@@ -928,6 +1040,7 @@ class IntegrationSettingsTests(unittest.TestCase):
             ("decider", "service_confidence", 1.1), ("decider", "url", "localhost:8321"),
             ("decider", "text_confidence", -0.1), ("decider", "text_confidence", 1.1),
             ("decider", "domain_filter_confidence", -0.1), ("decider", "domain_filter_confidence", 1.1),
+            ("decider", "target_filter_confidence", -0.1), ("decider", "target_filter_confidence", 1.1),
             ("answer", "model", ""), ("answer", "max_tokens", 0),
             ("answer", "max_input_chars", float("inf")), ("answer", "temperature", True),
         ):

@@ -80,6 +80,9 @@ def model_failure(stage, error):
     elif message.startswith("Malformed domain filter response"):
         reason = "The decider returned invalid or incomplete domain selections."
         suggestion = "Check the Decider endpoint and whole-home domain filter prompt. Review the preceding domain decisions."
+    elif message.startswith("Malformed target selection response"):
+        reason = "The decider returned invalid or incomplete target selections."
+        suggestion = "Check the Decider endpoint and target keep/drop prompt. Review the preceding entity decisions."
     elif "no spoken answer" in message:
         reason = "The model returned no text to speak."
         suggestion = f"Check the prompt and output token limit under {section}."
@@ -102,7 +105,7 @@ def model_failure(stage, error):
     return failure_details(stage, reason, suggestion, settings_section=section, **details)
 
 
-def decision_details(questions, answers, config):
+def decision_details(questions, answers, config, query=False, targets=None):
     details = {}
     for name, question in questions.items():
         answer = answers.get(name, {}) if isinstance(answers, dict) else {}
@@ -112,10 +115,13 @@ def decision_details(questions, answers, config):
         confidence = confidence if finite_number(confidence) else None
         text_word = name.startswith("word_")
         domain_filter = name.startswith("domain_")
+        target_filter = name.startswith("target_")
         if text_word:
             confidence_stage = "text"
         elif domain_filter:
             confidence_stage = "domain_filter"
+        elif target_filter:
+            confidence_stage = "target_filter"
         elif name in ("service", "area", "target"):
             confidence_stage = name
         else:
@@ -137,6 +143,15 @@ def decision_details(questions, answers, config):
                 info["effective_choice"] = "keep" if info["kept"] else "drop"
             elif domain_filter:
                 info["kept"] = choice == "keep" or confidence is not None and confidence <= threshold
+                info["effective_choice"] = "keep" if info["kept"] else "drop"
+            elif target_filter:
+                if targets is not None:
+                    target = targets[int(name.removeprefix("target_"))]
+                    info.update(entity_id=target["entity_id"], name=target["name"])
+                if query:
+                    info["kept"] = choice == "keep" or confidence is not None and confidence <= threshold
+                else:
+                    info["kept"] = choice == "keep" and confidence is not None and confidence > threshold
                 info["effective_choice"] = "keep" if info["kept"] else "drop"
             criteria = question["criteria"]
             if choice in criteria:
