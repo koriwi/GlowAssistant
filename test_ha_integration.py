@@ -8,6 +8,13 @@ from custom_components.glow_assistant.settings import normalize_settings
 
 @unittest.skipUnless(importlib.util.find_spec("homeassistant"), "Home Assistant is not installed; run the HA CI suite")
 class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cover_position_feature_matches_ha(self):
+        from homeassistant.components.cover import CoverEntityFeature
+
+        from custom_components.glow_assistant.const import COVER_SET_POSITION
+
+        self.assertEqual(COVER_SET_POSITION, CoverEntityFeature.SET_POSITION)
+
     def settings(self):
         return normalize_settings({
             "decider": {"url": "http://server:8321/v1/systemone"},

@@ -59,7 +59,14 @@
               "domain_filter_keep_uncertain": "Keep uncertain domains",
               "query_target_keep_uncertain": "Keep uncertain targets for state queries",
               "action_target_keep_uncertain": "Keep uncertain targets for actions",
-              "text_keep_uncertain": "Keep uncertain item/message words"
+              "text_keep_uncertain": "Keep uncertain item/message words",
+              "target_scope_prompt": "Area or entities prompt",
+              "target_scope_confidence": "Minimum area or entities confidence",
+              "position_min": "Minimum cover position (% open)",
+              "position_max": "Maximum cover position (% open)",
+              "position_levels": "Cover position anchor levels",
+              "position_step": "Cover position rounding step (%)",
+              "position_default_change": "Default opening/closing change (percentage points)"
             },
             "data_description": {
               "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
@@ -85,7 +92,13 @@
               "domain_filter_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
               "query_target_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
               "action_target_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
-              "text_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled."
+              "text_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
+              "target_scope_prompt": "Choose the whole selected room or continue with entity keep/drop for actions. State queries always use entity selection. Clear to restore the default. No templating.",
+              "target_scope_confidence": "Stop when the area-or-entities decision falls below this confidence. Uncertain decisions never broaden the target.",
+              "position_min": "0% is fully closed; 100% is fully open.",
+              "position_max": "0% is fully closed; 100% is fully open.",
+              "position_step": "Whole percentage points.",
+              "position_default_change": "Used for vague requests such as open a little more or close a little further."
             }
           },
           "answer": {
@@ -200,7 +213,14 @@
               "domain_filter_keep_uncertain": "Keep uncertain domains",
               "query_target_keep_uncertain": "Keep uncertain targets for state queries",
               "action_target_keep_uncertain": "Keep uncertain targets for actions",
-              "text_keep_uncertain": "Keep uncertain item/message words"
+              "text_keep_uncertain": "Keep uncertain item/message words",
+              "target_scope_prompt": "Area or entities prompt",
+              "target_scope_confidence": "Minimum area or entities confidence",
+              "position_min": "Minimum cover position (% open)",
+              "position_max": "Maximum cover position (% open)",
+              "position_levels": "Cover position anchor levels",
+              "position_step": "Cover position rounding step (%)",
+              "position_default_change": "Default opening/closing change (percentage points)"
             },
             "data_description": {
               "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
@@ -226,7 +246,13 @@
               "domain_filter_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
               "query_target_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
               "action_target_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
-              "text_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled."
+              "text_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
+              "target_scope_prompt": "Choose the whole selected room or continue with entity keep/drop for actions. State queries always use entity selection. Clear to restore the default. No templating.",
+              "target_scope_confidence": "Stop when the area-or-entities decision falls below this confidence. Uncertain decisions never broaden the target.",
+              "position_min": "0% is fully closed; 100% is fully open.",
+              "position_max": "0% is fully closed; 100% is fully open.",
+              "position_step": "Whole percentage points.",
+              "position_default_change": "Used for vague requests such as open a little more or close a little further."
             }
           },
           "answer": {
@@ -351,7 +377,14 @@
               "domain_filter_keep_uncertain": "Keep uncertain domains",
               "query_target_keep_uncertain": "Keep uncertain targets for state queries",
               "action_target_keep_uncertain": "Keep uncertain targets for actions",
-              "text_keep_uncertain": "Keep uncertain item/message words"
+              "text_keep_uncertain": "Keep uncertain item/message words",
+              "target_scope_prompt": "Area or entities prompt",
+              "target_scope_confidence": "Minimum area or entities confidence",
+              "position_min": "Minimum cover position (% open)",
+              "position_max": "Maximum cover position (% open)",
+              "position_levels": "Cover position anchor levels",
+              "position_step": "Cover position rounding step (%)",
+              "position_default_change": "Default opening/closing change (percentage points)"
             },
             "data_description": {
               "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
@@ -377,7 +410,13 @@
               "domain_filter_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
               "query_target_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
               "action_target_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
-              "text_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled."
+              "text_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
+              "target_scope_prompt": "Choose the whole selected room or continue with entity keep/drop for actions. State queries always use entity selection. Clear to restore the default. No templating.",
+              "target_scope_confidence": "Stop when the area-or-entities decision falls below this confidence. Uncertain decisions never broaden the target.",
+              "position_min": "0% is fully closed; 100% is fully open.",
+              "position_max": "0% is fully closed; 100% is fully open.",
+              "position_step": "Whole percentage points.",
+              "position_default_change": "Used for vague requests such as open a little more or close a little further."
             }
           },
           "answer": {

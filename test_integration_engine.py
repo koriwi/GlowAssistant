@@ -48,7 +48,8 @@ class ScriptedModels:
 
     async def decide(self, config, state, questions):
         self.requests.append(copy.deepcopy((config, state, questions)))
-        choices = self.choices.pop(0)
+        choices = ({"target_scope": "entities"} if set(questions) == {"target_scope"}
+                   and "target_scope" not in self.choices[0] else self.choices.pop(0))
         answers = {}
         for name, question in questions.items():
             if question["type"] == "score":
@@ -60,7 +61,7 @@ class ScriptedModels:
                     probabilities[str(lower + 1)] = score - lower
                 answers[name] = {"type": "score", "score": score, "confidence": self.confidence, "probabilities": probabilities}
             else:
-                if name.startswith("target_"):
+                if name.startswith("target_") and name.removeprefix("target_").isdigit():
                     target = state["targets"][int(name.removeprefix("target_"))]
                     selected = choices.get("targets")
                     if selected is None:
@@ -179,7 +180,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
             {"service": "light.turn_off"},
             {"area": "area:office"}, {"target": "area:office"},
         ], trace=trace)
-        expected = ["service", "area", "target", "execution", "answer"]
+        expected = ["service", "area", "target_scope", "target", "execution", "answer"]
         self.assertEqual([stage for stage, _, output in events if output is None], expected)
         self.assertEqual([stage for stage, _, output in events if output is not None], expected)
         outputs = {stage: output for stage, _, output in events if output is not None}
@@ -196,7 +197,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(outputs["service"]["usage"], {"input_tokens": 5})
         self.assertEqual(outputs["execution"]["arguments"]["entity_id"], ["light.desk", "light.ceiling"])
         self.assertEqual(outputs["answer"]["answer"], result["answer"])
-        self.assertEqual(len(models.requests), 3)
+        self.assertEqual(len(models.requests), 4)
         self.assertEqual(len(models.chat_requests), 1)
         execute.assert_awaited_once()
 
@@ -340,13 +341,80 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["answer"], "Erledigt.")
         self.assertEqual(models.requests[0][1], {"prompt": "test request", "language": "de"})
         self.assertEqual(models.requests[1][1], {"prompt": "test request", "language": "de"})
-        targets = models.requests[2][1]["targets"]
+        targets = models.requests[3][1]["targets"]
         self.assertEqual([target["entity_id"] for target in targets], ["light.desk", "light.ceiling"])
-        self.assertTrue(all(set(question["criteria"]) == {"keep", "drop"} for question in models.requests[2][2].values()))
+        self.assertTrue(all(set(question["criteria"]) == {"keep", "drop"} for question in models.requests[3][2].values()))
         self.assertNotIn("attributes", targets[0])
         facts = json.loads(models.chat_requests[0][1][1]["content"])
         self.assertEqual(facts["execution"]["status"], "completed")
         self.assertNotIn("decisions", facts)
+
+    async def test_area_action_skips_entity_selection_and_controls_all_matching_exposed_devices(self):
+        events = []
+        result, models, execute = await self.run_agent([
+            {"service": "light.turn_on"}, {"area": "area:office"}, {"target_scope": "area"},
+        ], prompt="Mach das Licht im Büro an", trace=lambda *event: events.append(event))
+        execute.assert_awaited_once_with("light.turn_on", {"entity_id": ["light.desk", "light.ceiling"]})
+        self.assertEqual(result["target"]["type"], "area")
+        self.assertEqual(result["target"]["area_id"], "office")
+        self.assertEqual(result["target"]["name"], "Office")
+        self.assertEqual(len(models.requests), 3)
+        self.assertNotIn("target", result["decisions"])
+        self.assertNotIn("target", result["timings_ms"])
+        self.assertNotIn("targets", models.requests[2][1])
+        self.assertNotIn("entities", models.requests[2][1])
+        output = next(output for stage, _, output in events if stage == "target_scope" and output is not None)
+        decision = output["decisions"]["target_scope"]
+        self.assertEqual(decision["effective_choice"], "area")
+        self.assertEqual(decision["minimum_confidence"], 0)
+        self.assertNotIn("keep_uncertain", decision)
+
+    async def test_named_device_action_continues_to_entity_keep_drop(self):
+        result, models, execute = await self.run_agent([
+            {"service": "light.turn_on"}, {"area": "area:office"}, {"target_scope": "entities"},
+            {"targets": ["light.desk"]},
+        ], prompt="Turn on the desk lamp in the office")
+        execute.assert_awaited_once_with("light.turn_on", {"entity_id": ["light.desk"]})
+        self.assertEqual(result["target"]["type"], "entity")
+        self.assertEqual(len(models.requests), 4)
+        self.assertIn("target_0", models.requests[3][2])
+
+    async def test_unclear_or_low_confidence_scope_stops_without_broadening(self):
+        for choice, threshold in (("unsure", 0), ("area", 0.95), ("entities", 0.95)):
+            with self.subTest(choice=choice, threshold=threshold):
+                settings = normalize_settings({"decider": {"target_scope_confidence": threshold}})
+                result, models, execute = await self.run_agent([
+                    {"service": "light.turn_on"}, {"area": "area:office"}, {"target_scope": choice},
+                ], settings=settings)
+                execute.assert_not_awaited()
+                self.assertEqual(result["route"], "unsure")
+                self.assertEqual(result["failures"][0]["stage"], "target_scope")
+                self.assertEqual(len(models.requests), 3)
+                self.assertFalse(models.chat_requests)
+
+    async def test_state_query_and_no_area_action_bypass_area_or_entities_decision(self):
+        for service, area in (("query_state", "area:office"), ("light.turn_on", "no_area")):
+            with self.subTest(service=service, area=area):
+                result, models, _ = await self.run_agent([
+                    {"service": service}, {"area": area}, {"targets": ["light.desk"]},
+                ])
+                self.assertNotIn("target_scope", result["decisions"])
+                self.assertEqual(len(models.requests), 3)
+                self.assertIn("target_0", models.requests[2][2])
+
+    async def test_area_or_entities_call_receives_language_history_and_editable_prompt(self):
+        history = [{"role": "user", "content": "Turn on all office lights"}, {"role": "assistant", "content": "Done"}]
+        settings = normalize_settings({"history_enabled": True, "decider": {"target_scope_prompt": "Custom scope rules"}})
+        _, models, _ = await self.run_agent([
+            {"service": "light.turn_off"}, {"area": "area:office"}, {"target_scope": "area"},
+        ], settings=settings, history=history, language="de-DE", prompt="Jetzt wieder aus")
+        _, state, questions = models.requests[2]
+        self.assertEqual(state["history"], history)
+        self.assertEqual(state["language"], "de-DE")
+        self.assertEqual(state["domain"], "light")
+        self.assertEqual(state["area"], {"name": "Office", "aliases": []})
+        self.assertIn("Custom scope rules", questions["target_scope"]["instructions"])
+        self.assertIn("resolve references", questions["target_scope"]["instructions"])
 
     async def test_query_uses_cached_state_and_does_not_execute(self):
         result, models, execute = await self.run_agent([
@@ -763,17 +831,20 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("failures", facts)
 
     async def run_numeric(self, currents=(21,), score=4.02, mode="relative", parameter="temperature", settings=None, trace=None, history=None):
-        climate = parameter == "temperature"
-        name = "climate.set_temperature" if climate else "light.turn_on"
-        field = "temperature" if climate else "brightness_pct"
+        domain, name, field = {
+            "temperature": ("climate", "climate.set_temperature", "temperature"),
+            "brightness": ("light", "light.turn_on", "brightness_pct"),
+            "position": ("cover", "cover.set_cover_position", "position"),
+        }[parameter]
         snapshot = {
-            "entities": [entity(f"{'climate' if climate else 'light'}.device_{index}", f"Device {index}",
-                                temperature=current, brightness=current, min_temp=5, max_temp=45, target_temp_step=1)
+            "entities": [entity(f"{domain}.device_{index}", f"Device {index}",
+                                temperature=current, brightness=current, current_position=current,
+                                supported_features=15, min_temp=5, max_temp=45, target_temp_step=1)
                          for index, current in enumerate(currents)],
-            "services": {name: {"target": {}, "fields": {field: {"required": climate}}}},
+            "services": {name: {"target": {}, "fields": {field: {"required": parameter != "brightness"}}}},
         }
         return await self.run_agent([
-            {"service": f"{name}:{field}"}, {"area": "area:office"}, {"target": "area:office"},
+            {"service": f"{name}:{field}"}, {"area": "area:office"}, {"target_scope": "area"},
             {"numeric_mode": mode, "numeric_score": score},
         ], snapshot=snapshot, settings=settings, trace=trace, history=history)
 
@@ -850,6 +921,55 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(models.requests[3][1]["current"], 50)
         self.assertEqual(models.requests[3][1]["default_step"], 10)
         execute.assert_awaited_once_with("light.turn_on", {"entity_id": ["light.device_0"], "brightness_pct": 60})
+
+    async def test_cover_relative_changes_use_current_position_and_whole_percentages(self):
+        for score, expected in ((3, 60), (2, 40), (2.51, 51)):
+            with self.subTest(score=score):
+                _, models, execute = await self.run_numeric(currents=(50,), score=score, parameter="position")
+                execute.assert_awaited_once_with("cover.set_cover_position", {
+                    "entity_id": ["cover.device_0"], "position": expected,
+                })
+                self.assertIsInstance(execute.await_args.args[1]["position"], int)
+                state = models.requests[-1][1]
+                self.assertEqual((state["minimum"], state["maximum"], state["current"], state["default_step"]), (0, 100, 50, 10))
+                self.assertIn("0 = fully closed", state["position_semantics"])
+                self.assertIn("100 = fully open", state["position_semantics"])
+
+    async def test_cover_absolute_positions_allow_endpoints_and_different_current_positions(self):
+        for score, expected in ((0, 0), (2.5, 50), (5, 100)):
+            with self.subTest(score=score):
+                _, _, execute = await self.run_numeric(currents=(20, 80), score=score, mode="absolute", parameter="position")
+                execute.assert_awaited_once_with("cover.set_cover_position", {
+                    "entity_id": ["cover.device_0", "cover.device_1"], "position": expected,
+                })
+
+    async def test_cover_relative_changes_require_known_common_current_positions(self):
+        for currents in ((None,), (20, 80), (-1,), (101,)):
+            with self.subTest(currents=currents):
+                result, _, execute = await self.run_numeric(currents=currents, score=3, parameter="position")
+                self.assertEqual(result["route"], "unsure")
+                execute.assert_not_awaited()
+
+    async def test_cover_position_uses_fresh_state_despite_history(self):
+        history = [{"role": "user", "content": "Set the blinds to 90% open"}, {"role": "assistant", "content": "Done"}]
+        _, models, execute = await self.run_numeric(currents=(40,), score=2.5, parameter="position", history=history,
+                                                    settings=normalize_settings({"history_enabled": True}))
+        self.assertEqual(models.requests[-1][1]["current"], 40)
+        self.assertEqual(models.requests[-1][1]["history"], history)
+        self.assertEqual(execute.await_args.args[1]["position"], 50)
+
+    async def test_cover_without_position_support_stops_before_numeric_call(self):
+        snapshot = {
+            "entities": [entity("cover.blind", "Blind", current_position=50, supported_features=3)],
+            "services": {"cover.set_cover_position": {"target": {}, "fields": {"position": {"required": True}}}},
+        }
+        result, models, execute = await self.run_agent([
+            {"service": "cover.set_cover_position:position"}, {"area": "area:office"}, {"target_scope": "area"},
+        ], snapshot=snapshot)
+        self.assertEqual(result["route"], "unsure")
+        self.assertIn("does not support", result["failures"][0]["reason"])
+        self.assertEqual(len(models.requests), 3)
+        execute.assert_not_awaited()
 
     async def test_numeric_unsure_skips_action_and_answer_model(self):
         result, models, execute = await self.run_numeric(mode="unsure")
@@ -1131,9 +1251,10 @@ class IntegrationSettingsTests(unittest.TestCase):
         self.assertIsInstance(saved["decider"]["max_input_chars"], int)
 
     def test_prompt_reset_and_customization_survive_normalization(self):
-        settings = normalize_settings({"decider": {"target_prompt": "My rules", "area_prompt": " "}})
+        settings = normalize_settings({"decider": {"target_prompt": "My rules", "area_prompt": " ", "target_scope_prompt": " "}})
         self.assertEqual(settings["decider"]["target_prompt"], "My rules")
         self.assertEqual(settings["decider"]["area_prompt"], DEFAULTS["decider"]["area_prompt"])
+        self.assertEqual(settings["decider"]["target_scope_prompt"], DEFAULTS["decider"]["target_scope_prompt"])
         self.assertNotEqual(id(settings["decider"]), id(DEFAULTS["decider"]))
 
     def test_invalid_ranges_and_models_are_rejected(self):
@@ -1144,6 +1265,10 @@ class IntegrationSettingsTests(unittest.TestCase):
             ("decider", "text_confidence", -0.1), ("decider", "text_confidence", 1.1),
             ("decider", "domain_filter_confidence", -0.1), ("decider", "domain_filter_confidence", 1.1),
             ("decider", "target_filter_confidence", -0.1), ("decider", "target_filter_confidence", 1.1),
+            ("decider", "target_scope_confidence", -0.1), ("decider", "target_scope_confidence", 1.1),
+            ("decider", "position_min", -1), ("decider", "position_max", 101),
+            ("decider", "position_min", 100), ("decider", "position_levels", 11),
+            ("decider", "position_step", 0.5), ("decider", "position_default_change", 0),
             ("answer", "model", ""), ("answer", "max_tokens", 0),
             ("answer", "max_input_chars", float("inf")), ("answer", "temperature", True),
         ):
@@ -1168,6 +1293,7 @@ class IntegrationSettingsTests(unittest.TestCase):
             "light.turn_on": {"fields": {}}, "climate.set_temperature": {"fields": {}},
             "climate.set_hvac_mode": {"fields": {"hvac_mode": {"required": True}}},
             "todo.get_items": {"fields": {}, "response": {"optional": False}},
+            "cover.set_cover_position": {"fields": {"position": {"required": True}}},
         })
         self.assertIn("light.turn_on", options)
         self.assertIn("light.turn_on:brightness_pct", options)
@@ -1175,6 +1301,8 @@ class IntegrationSettingsTests(unittest.TestCase):
         self.assertNotIn("climate.set_temperature", options)
         self.assertNotIn("climate.set_hvac_mode", options)
         self.assertNotIn("todo.get_items", options)
+        self.assertIn("cover.set_cover_position:position", options)
+        self.assertNotIn("cover.set_cover_position", options)
 
     def test_text_catalog_is_limited_to_the_three_explicit_action_field_pairs(self):
         services = {

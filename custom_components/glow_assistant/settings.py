@@ -11,6 +11,7 @@ from .const import (
     NUMERIC_MODE_PROMPT,
     SERVICE_PROMPT,
     TARGET_PROMPT,
+    TARGET_SCOPE_PROMPT,
 )
 from .domain_filter import INSTRUCTIONS as DOMAIN_FILTER_INSTRUCTIONS
 from .domain_filter import LEGACY_INSTRUCTIONS as LEGACY_DOMAIN_FILTER_INSTRUCTIONS
@@ -30,6 +31,7 @@ DEFAULTS = {
         "domain_filter_prompt": DOMAIN_FILTER_INSTRUCTIONS, "domain_filter_confidence": 0.5,
         "domain_filter_keep_uncertain": False,
         "area_prompt": AREA_PROMPT, "target_prompt": TARGET_PROMPT,
+        "target_scope_prompt": TARGET_SCOPE_PROMPT, "target_scope_confidence": 0,
         "target_filter_prompt": TARGET_FILTER_INSTRUCTIONS, "target_filter_confidence": 0.5,
         "query_target_keep_uncertain": False, "action_target_keep_uncertain": False,
         "numeric_prompt": INSTRUCTIONS, "numeric_mode_prompt": NUMERIC_MODE_PROMPT,
@@ -42,6 +44,8 @@ DEFAULTS = {
         "temperature_baseline": "target",
         "brightness_min": 0, "brightness_max": 100, "brightness_levels": 6,
         "brightness_step": 1, "brightness_default_change": 10,
+        "position_min": 0, "position_max": 100, "position_levels": 6,
+        "position_step": 1, "position_default_change": 10,
     },
     "answer": {
         "url": "https://openrouter.ai/api/v1/chat/completions",
@@ -109,12 +113,12 @@ def validate_settings(data):
             _range(config, "max_tokens", 1, 100000, group, integer=True)
             _range(config, "temperature", 0, 2, group)
     decider = settings["decider"]
-    for stage in ("service", "area", "target", "numeric", "text", "domain_filter", "target_filter"):
+    for stage in ("service", "area", "target_scope", "target", "numeric", "text", "domain_filter", "target_filter"):
         _range(decider, f"{stage}_confidence", 0, 1, "decider")
     for field in ("domain_filter_keep_uncertain", "query_target_keep_uncertain", "action_target_keep_uncertain", "text_keep_uncertain"):
         if not isinstance(decider[field], bool):
             raise TypeError(f"decider: {field} must be a boolean.")
-    for parameter in ("temperature", "brightness"):
+    for parameter in ("temperature", "brightness", "position"):
         lower = -100 if parameter == "temperature" else 0
         upper = 200 if parameter == "temperature" else 100
         for field in ("min", "max"):
@@ -122,7 +126,8 @@ def validate_settings(data):
         if decider[f"{parameter}_min"] >= decider[f"{parameter}_max"]:
             raise ValueError(f"decider: {parameter} minimum must be smaller than maximum.")
         _range(decider, f"{parameter}_levels", 2, 10, "decider", integer=True)
-        _range(decider, f"{parameter}_step", 0.01, 100, "decider")
+        _range(decider, f"{parameter}_step", 1 if parameter == "position" else 0.01, 100, "decider",
+               integer=parameter == "position")
         _range(decider, f"{parameter}_default_change", 0.01, 100, "decider")
     if decider["temperature_baseline"] not in ("target", "measured"):
         raise ValueError("decider: unknown temperature baseline.")

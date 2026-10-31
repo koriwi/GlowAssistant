@@ -95,6 +95,13 @@ class ChatLogTraceTests(unittest.TestCase):
         self.assertEqual(self.messages[0].tool_calls[0].tool_name, "glow_assistant_filter_domains")
         self.assertEqual(self.messages[1].tool_result, result)
 
+    def test_target_scope_has_its_own_native_tool_card(self):
+        result = {"decisions": {"target_scope": {"choice": "area", "confidence": 0.9}}, "duration_ms": 20}
+        self.trace("target_scope", {"candidate_counts": {"target_scope": 3}})
+        self.trace("target_scope", {}, result)
+        self.assertEqual(self.messages[0].tool_calls[0].tool_name, "glow_assistant_select_target_scope")
+        self.assertEqual(self.messages[1].tool_result, result)
+
     def test_error_results_close_the_pending_call(self):
         self.trace("answer", {"max_tokens": 256})
         self.trace("answer", {}, {"status": "error", "error": "Token limit reached", "duration_ms": 120})

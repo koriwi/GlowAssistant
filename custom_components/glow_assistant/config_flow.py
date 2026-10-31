@@ -66,6 +66,8 @@ def settings_schema(values):
                 selector = _number(2, 10)
             elif field == "temperature_baseline":
                 selector = SelectSelector({"options": ["target", "measured"], "translation_key": "temperature_baseline"})
+            elif field == "position_step":
+                selector = _number(1, 100)
             elif field.endswith(("_step", "_default_change")):
                 selector = _number(0.01, 100, 0.01)
             else:

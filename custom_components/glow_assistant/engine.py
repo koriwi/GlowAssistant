@@ -3,7 +3,14 @@ import math
 from time import perf_counter
 
 from .client import ModelError
-from .const import GENERAL, HISTORY_INSTRUCTIONS, QUERY, UNSURE
+from .const import (
+    COVER_SET_POSITION,
+    GENERAL,
+    HISTORY_INSTRUCTIONS,
+    QUERY,
+    TARGET_SCOPES,
+    UNSURE,
+)
 from .debug import STAGE_LABELS, decision_details, failure_details, model_failure
 from .domain_filter import decode_domains, domain_request
 from .general import general_answer
@@ -64,10 +71,11 @@ def action_options(services):
                 options[name] = {**base, "parameter": parameter, "parameter_type": "text",
                                  "parameter_description": explanation, "mode": "Only the named free-text parameter; no extra fields."}
             continue
-        if not required and name != "climate.set_temperature":
+        if not required and name not in ("climate.set_temperature", "cover.set_cover_position"):
             options[name] = {**base, "parameter": None, "mode": "target-only; no extra values"}
-        parameter = {"climate.set_temperature": "temperature", "light.turn_on": "brightness_pct"}.get(name)
-        allowed = {"temperature"} if parameter == "temperature" else {"brightness", "brightness_pct"}
+        parameter = {"climate.set_temperature": "temperature", "light.turn_on": "brightness_pct",
+                     "cover.set_cover_position": "position"}.get(name)
+        allowed = {"brightness", "brightness_pct"} if parameter == "brightness_pct" else {parameter}
         if parameter and required <= allowed:
             options[f"{name}:{parameter}"] = {**base, "parameter": parameter}
     return options
@@ -102,6 +110,10 @@ def current_setting(entity, parameter, baseline):
     attributes = entity.get("attributes", {})
     if parameter == "temperature":
         value = attributes.get("temperature" if baseline == "target" else "current_temperature")
+    elif parameter == "position":
+        value = attributes.get("current_position")
+        if not finite_number(value) or not 0 <= value <= 100:
+            return None
     elif entity["state"] == "off":
         value = 0
     else:
@@ -270,7 +282,17 @@ class AgentEngine:
         }
         # Native HA target selectors accept entity lists
         multiple_targets = query or snapshot["services"][action["service"]].get("target") is not None
-        if multiple_targets:
+        scope = "entities"
+        if not query and multiple_targets and area.startswith("area:"):
+            response = await self._decide(result, "target_scope", target_state, {
+                "target_scope": choice_question(TARGET_SCOPES, config["target_scope_prompt"]),
+            })
+            scope = self._choice(response, "target_scope", TARGET_SCOPES)
+        if scope == "area":
+            members = candidates
+            result["target"] = {"type": "area", "area_id": area.removeprefix("area:"),
+                                **areas[area], "domain": domain}
+        elif multiple_targets:
             members = await self._select_targets(result, candidates, target_state, query)
         else:
             options = target_options(candidates)
@@ -404,7 +426,7 @@ class AgentEngine:
 
     async def _numeric(self, result, members, service_parameter):
         self.stage = "numeric"
-        parameter = "temperature" if service_parameter == "temperature" else "brightness"
+        parameter = "brightness" if service_parameter == "brightness_pct" else service_parameter
         config = self.settings["decider"]
         values = [current_setting(entity, parameter, config["temperature_baseline"]) for entity in members]
         current = values[0] if None not in values and len(set(values)) == 1 else None
@@ -422,6 +444,11 @@ class AgentEngine:
                 minimum = max(minimum, attributes.get("min_temp", minimum))
                 maximum = min(maximum, attributes.get("max_temp", maximum))
                 step = max(step, attributes.get("target_temp_step", step))
+        elif parameter == "position":
+            if any(not entity.get("attributes", {}).get("supported_features", COVER_SET_POSITION) & COVER_SET_POSITION
+                   for entity in members):
+                raise Uncertain("numeric", "A selected cover does not support setting its position.",
+                                "Select a position-capable blind or shutter, or ask to open or close it.")
         elif any(set(entity.get("attributes", {}).get("supported_color_modes", [])) == {"onoff"} for entity in members):
             raise Uncertain("numeric", "A selected light supports only on/off, not brightness changes.",
                             "Select a dimmable light, or ask to turn the light on or off.")

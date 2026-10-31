@@ -61,6 +61,10 @@ def numeric_request(prompt, parameter, current, minimum, maximum, levels, unit,
             "prompt": prompt, "parameter": parameter, "current": current,
             "unit": unit, "minimum": minimum, "maximum": maximum,
             "default_step": default_step,
+            **({"position_semantics": "Percentage open: 0 = fully closed, 100 = fully open. "
+                "Opening/raising increases position; closing/lowering decreases it. "
+                "A percentage explicitly described as closed is 100 minus that percentage open."}
+               if parameter == "position" else {}),
         },
         "questions": questions,
     }

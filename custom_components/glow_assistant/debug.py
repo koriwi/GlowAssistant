@@ -8,6 +8,7 @@ STAGE_LABELS = {
     "context": "Read Home Assistant devices",
     "service": "Choose an action",
     "area": "Choose a room",
+    "target_scope": "Choose the room or individual devices",
     "domain_filter": "Filter whole-home entity domains",
     "target": "Choose a device or room",
     "numeric": "Choose a new value",
@@ -116,7 +117,7 @@ def decision_details(questions, answers, config, query=False, targets=None):
         confidence = confidence if finite_number(confidence) else None
         text_word = name.startswith("word_")
         domain_filter = name.startswith("domain_")
-        target_filter = name.startswith("target_")
+        target_filter = name.startswith("target_") and name.removeprefix("target_").isdigit()
         if text_word:
             confidence_stage = "text"
             uncertain_setting = "text_keep_uncertain"
@@ -126,7 +127,7 @@ def decision_details(questions, answers, config, query=False, targets=None):
         elif target_filter:
             confidence_stage = "target_filter"
             uncertain_setting = "query_target_keep_uncertain" if query else "action_target_keep_uncertain"
-        elif name in ("service", "area", "target"):
+        elif name in ("service", "area", "target_scope", "target"):
             confidence_stage = name
             uncertain_setting = None
         else:
