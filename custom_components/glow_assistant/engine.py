@@ -249,10 +249,12 @@ class AgentEngine:
                 "Examples: 'are there any windows open in the house?' and 'sind irgendwo im Haus Fenster offen?'. "
                 "This is one supported scope, not an ambiguous request for multiple areas."
             )
-        response = await self._decide(result, "area", {"prompt": prompt}, {
-            "area": choice_question(areas, area_prompt),
-        })
-        area = self._choice(response, "area", areas)
+        area = "no_area"
+        if result["service"] != "todo.add_item":
+            response = await self._decide(result, "area", {"prompt": prompt}, {
+                "area": choice_question(areas, area_prompt),
+            })
+            area = self._choice(response, "area", areas)
         candidates = [entity for entity in entities if (query or entity["domain"] == domain)
                       and (area in ("no_area", "all_areas") or entity.get("area_id") == area.removeprefix("area:"))]
         if not candidates:

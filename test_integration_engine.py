@@ -862,7 +862,8 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         parameter = TEXT_ACTIONS[service][0]
         prompt = "Schreibe Energy Energy Drinks auf die Einkaufsliste"
         choices = [
-            {"service": service}, {"area": "no_area"},
+            {"service": service},
+            *([{"area": "no_area"}] if service != "todo.add_item" else []),
             {"target": "area:office" if target_area else f"entity:{domain}.destination"},
             {f"word_{index}": "keep" if index in (1, 2, 3) else "drop" for index in range(len(prompt.split()))},
         ]
@@ -885,7 +886,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
                 domain = service.split(".")[0]
                 execute.assert_awaited_once_with(service, {"entity_id": [f"{domain}.destination"], parameter: "Energy Energy Drinks"})
                 self.assertEqual(result["execution"]["status"], "completed")
-                self.assertEqual(len(models.requests), 4)
+                self.assertEqual(len(models.requests), 3 if service == "todo.add_item" else 4)
                 state = models.requests[-1][1]
                 prompt_key = "text_prompt" if service == "todo.add_item" else "message_prompt"
                 self.assertEqual(state["task"], DEFAULTS["decider"][prompt_key])
@@ -893,6 +894,30 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(state["words"], result["request"].split())
                 facts = json.loads(models.chat_requests[0][1][1]["content"])
                 self.assertEqual(facts["execution"]["arguments"][parameter], "Energy Energy Drinks")
+
+    async def test_shopping_addition_skips_area_selection_and_finds_lists_in_any_room(self):
+        for shopping_area in (None, "office"):
+            with self.subTest(shopping_area=shopping_area):
+                snapshot = {
+                    "entities": [
+                        entity("todo.shopping", "Einkaufsliste", area=shopping_area),
+                        entity("todo.tasks", "Aufgaben", area="bedroom"),
+                        entity("light.kitchen", "Kitchen light", area="kitchen"),
+                    ],
+                    "services": {"todo.add_item": {"target": {}, "fields": {"item": {"required": True}}}},
+                }
+                events = []
+                result, models, execute = await self.run_agent([
+                    {"service": "todo.add_item"}, {"targets": ["todo.shopping"]},
+                    {"word_0": "drop", "word_1": "keep", "word_2": "drop", "word_3": "drop", "word_4": "drop"},
+                ], snapshot=snapshot, prompt="Setze Zwiebeln auf die Einkaufsliste!", trace=lambda *event: events.append(event))
+                execute.assert_awaited_once_with("todo.add_item", {"entity_id": ["todo.shopping"], "item": "Zwiebeln"})
+                self.assertEqual(len(models.requests), 3)
+                self.assertNotIn("area", result["decisions"])
+                self.assertNotIn("area", result["timings_ms"])
+                self.assertFalse(any(stage == "area" for stage, _, _ in events))
+                self.assertIsNone(models.requests[1][1]["area"])
+                self.assertEqual({target["entity_id"] for target in models.requests[1][1]["targets"]}, {"todo.shopping", "todo.tasks"})
 
     async def test_announcement_area_target_keeps_the_existing_entity_scope(self):
         _, _, execute = await self.run_text("assist_satellite.announce", target_area=True)
