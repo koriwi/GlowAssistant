@@ -12,7 +12,7 @@ STAGE_LABELS = {
     "domain": "Choose a state-query domain",
     "query_type": "Choose a yes/no or detailed answer",
     "binary_answer": "Answer the yes/no state question",
-    "target_scope": "Choose the room or individual devices",
+    "target_scope": "Classify entity targets and explicit or implied areas",
     "domain_filter": "Filter whole-home entity domains",
     "target": "Choose a device or room",
     "numeric": "Choose a new value",

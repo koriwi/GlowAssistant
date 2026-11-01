@@ -8,8 +8,10 @@ from .const import (
     BINARY_ANSWER_PROMPT,
     DOMAIN_PROMPT,
     GENERAL_PROMPT,
+    LEGACY_ACTION_TARGET_SCOPE_PROMPT,
     LEGACY_GENERAL_PROMPT,
     LEGACY_SERVICE_PROMPT,
+    LEGACY_TARGET_SCOPE_PROMPT,
     NUMERIC_MODE_PROMPT,
     QUERY_TYPE_PROMPT,
     SERVICE_PROMPT,
@@ -93,6 +95,8 @@ def normalize_settings(data):
     decider = data.get("decider", {})
     if settings["decider"]["target_filter_prompt"] == LEGACY_TARGET_FILTER_INSTRUCTIONS:
         settings["decider"]["target_filter_prompt"] = TARGET_FILTER_INSTRUCTIONS
+    if settings["decider"]["target_scope_prompt"] in (LEGACY_TARGET_SCOPE_PROMPT, LEGACY_ACTION_TARGET_SCOPE_PROMPT):
+        settings["decider"]["target_scope_prompt"] = TARGET_SCOPE_PROMPT
     if "domain_confidence" not in decider and "domain_filter_confidence" in decider:
         settings["decider"]["domain_confidence"] = decider["domain_filter_confidence"]
     text_prompt = settings["decider"]["text_prompt"]

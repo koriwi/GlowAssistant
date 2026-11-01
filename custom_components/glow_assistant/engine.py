@@ -6,6 +6,7 @@ from .const import (
     GENERAL,
     HISTORY_INSTRUCTIONS,
     QUERY,
+    TARGET_SCOPES,
     UNSURE,
 )
 from .debug import STAGE_LABELS, decision_details, failure_details, model_failure
@@ -173,14 +174,14 @@ class AgentEngine:
                             confidence=confidence, minimum_confidence=threshold)
         return choice
 
-    async def process(self, prompt, language, snapshot):
+    async def process(self, prompt, language, snapshot, speaker_area=None):
         result = {
             "request": prompt, "language": language, "route": "smarthome",
             "service": None, "domain": None, "target": None,
             "decisions": {}, "usage": {}, "timings_ms": {},
         }
         try:
-            await self._process(result, snapshot)
+            await self._process(result, snapshot, (speaker_area or "").strip() or None)
         except Uncertain as error:
             result.update(route=UNSURE, answer=self.settings["unsure_reply"])
             self._failure(result, error.details)
@@ -189,7 +190,7 @@ class AgentEngine:
             raise
         return result
 
-    async def _process(self, result, snapshot):
+    async def _process(self, result, snapshot, speaker_area):
         prompt = result["request"]
         language_instruction = (
             f"Assist pipeline language: {result['language']}. Write the spoken reply in this language."
@@ -244,7 +245,13 @@ class AgentEngine:
                 service=action["service"], domain=action["service"].split(".", 1)[0],
                 answer=f"Selected action: {action['service']}. No action was executed.",
             )
-            await self._select_parameters(result)
+            result["speaker_area"] = speaker_area
+            scopes = {key: value for key, value in TARGET_SCOPES.items()
+                      if key not in ("entities_implied_area", "implied_area") or speaker_area}
+            response = await self._decide(result, "target_scope", {
+                "prompt": prompt, "service": result["service"], "speaker_area": speaker_area,
+            }, {"target_scope": choice_question(scopes, config["target_scope_prompt"])})
+            result["target_scope"] = self._choice(response, "target_scope", scopes)
             return
 
         result["service"] = QUERY

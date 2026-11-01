@@ -124,7 +124,7 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
             "fields": {"brightness_pct": {"required": False, "description": "Brightness percentage", "example": 50,
                                           "selector": {"number": {"min": 0, "max": 100, "step": 1}}}},
         }
-        models = ScriptedModels([{"service": "light.turn_on:brightness_pct"}, {"optional_parameters": "brightness_pct"}])
+        models = ScriptedModels([{"service": "light.turn_on:brightness_pct"}, {"target_scope": "areas"}])
         with (patch("benchmark.fetch_snapshot", new=AsyncMock(return_value=exported)),
               patch("benchmark.aiohttp.ClientSession", return_value=AsyncMock()),
               patch("benchmark.ModelClient", return_value=models)):
@@ -135,20 +135,36 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("execution", report["result"])
         self.assertEqual(len(models.requests), 2)
         self.assertFalse(models.chat_requests)
-        self.assertEqual({event["stage"] for event in report["trace"]}, {"service", "optional_parameters"})
+        self.assertEqual({event["stage"] for event in report["trace"]}, {"service", "target_scope"})
         output = io.StringIO()
         with redirect_stdout(output):
             benchmark.print_report(report, show_answer_input=True)
         printed = output.getvalue()
-        self.assertIn("Selected action metadata", printed)
-        self.assertIn("Selected optional parameters: brightness_pct", printed)
-        self.assertIn("Probability threshold: 0.15", printed)
-        for text in ('"brightness_pct"', '"required": false', '"number"', '"max": 100', '"example": 50'):
-            self.assertIn(text, printed)
+        self.assertRegex(printed, r"target scope\s+Explicit area\(s\); no specific entities")
+        self.assertRegex(printed, r"speaker area\s+unknown")
+        self.assertNotIn('"brightness_pct"', printed)
+        self.assertNotIn("Selected optional parameters", printed)
         self.assertIn("Answer model was not called.", printed)
         self.assertNotIn("private-key", printed)
         self.assertNotIn("private-key", json.dumps(report))
         self.assertIsNone(benchmark.answer_input(report))
+
+    async def test_speaker_area_flag_reaches_scope_decision_and_concise_console_output(self):
+        args = benchmark.parser().parse_args(["-q", "Mach das Licht aus", "--speaker-area", "Küche"])
+        models = ScriptedModels([{"service": "light.turn_off"}, {"target_scope": "implied_area"}])
+        with (patch("benchmark.fetch_snapshot", new=AsyncMock(return_value=self.exported())),
+              patch("benchmark.aiohttp.ClientSession", return_value=AsyncMock()),
+              patch("benchmark.ModelClient", return_value=models)):
+            report = await benchmark.run(args, {})
+        self.assertEqual(models.requests[-1][1]["speaker_area"], "Küche")
+        self.assertEqual(report["result"]["target_scope"], "implied_area")
+        self.assertIn("action_metadata", report["result"])
+        output = io.StringIO()
+        with redirect_stdout(output):
+            benchmark.print_report(report)
+        self.assertRegex(output.getvalue(), r"speaker area\s+Küche")
+        self.assertRegex(output.getvalue(), r"target scope\s+Implied area; no specific entities")
+        self.assertNotIn("parameter_selection", report["result"])
 
     async def test_query_answer_input_remains_readable_without_mutating_the_api_messages(self):
         args = benchmark.parser().parse_args(["--query", "Which lights are on?"])

@@ -25,6 +25,11 @@ class EntityContextTests(unittest.TestCase):
             device_registry=SimpleNamespace(async_get=lambda _: None),
             entity_registry=SimpleNamespace(async_get=lambda _: registry),
         )
+        module = self.load_context(helpers)
+        hass = SimpleNamespace(states=SimpleNamespace(async_all=lambda: [state]))
+        return module.entity_context(hass, set())
+
+    def load_context(self, helpers):
         dependencies = {
             "homeassistant.components.homeassistant": SimpleNamespace(async_should_expose=lambda *args: True),
             "homeassistant.exceptions": SimpleNamespace(HomeAssistantError=Exception),
@@ -36,8 +41,22 @@ class EntityContextTests(unittest.TestCase):
         module = importlib.util.module_from_spec(spec)
         with patch.dict(sys.modules, dependencies):
             spec.loader.exec_module(module)
-        hass = SimpleNamespace(states=SimpleNamespace(async_all=lambda: [state]))
-        return module.entity_context(hass, set())
+        return module
+
+    def test_speaker_area_uses_device_room_and_returns_none_for_missing_context(self):
+        devices = {"speaker": SimpleNamespace(area_id="kitchen"),
+                   "no_room": SimpleNamespace(area_id=None), "deleted_room": SimpleNamespace(area_id="deleted")}
+        areas = {"kitchen": SimpleNamespace(name="Küche")}
+        helpers = SimpleNamespace(
+            device_registry=SimpleNamespace(async_get=lambda _: SimpleNamespace(async_get=devices.get)),
+            area_registry=SimpleNamespace(async_get=lambda _: SimpleNamespace(async_get_area=areas.get)),
+            entity_registry=Mock(),
+        )
+        module = self.load_context(helpers)
+        for device_id, expected in ((None, None), ("missing", None), ("no_room", None),
+                                    ("deleted_room", None), ("speaker", "Küche")):
+            with self.subTest(device_id=device_id):
+                self.assertEqual(module.speaker_area(Mock(), device_id), expected)
 
     def test_mixed_computed_markers_and_text_aliases_remain_json_serializable(self):
         result = self.snapshot(

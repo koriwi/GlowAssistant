@@ -43,6 +43,7 @@ def parser():
             flags.append("--domain-filter-confidence")
         result.add_argument(*flags, type=confidence)
     result.add_argument("--language", help="Assist pipeline language to simulate; defaults to BENCHMARK_LANGUAGE or de.")
+    result.add_argument("--speaker-area", help="Optional speaker room, e.g. Küche; omitted means location unknown.")
     result.add_argument("--json", action="store_true", help="Print complete decisions, trace and timings.")
     result.add_argument("--show-answer-input", action="store_true", help="Print the exact smart-home answer request, including messages.")
     return result
@@ -122,7 +123,7 @@ async def run(args, env):
         engine = AgentEngine(settings, ModelClient(session), no_execution, trace=record, dry_run=True)
         engine_started = perf_counter()
         try:
-            result = await engine.process(args.query, language, exported["snapshot"])
+            result = await engine.process(args.query, language, exported["snapshot"], speaker_area=args.speaker_area)
         except ModelError as error:
             result = {"request": args.query, "error": str(error), "details": error.details}
         engine_ms = round((perf_counter() - engine_started) * 1000)
@@ -178,6 +179,14 @@ def print_report(report, show_answer_input=False):
     for field in ("route", "service", "domain"):
         if field in result:
             summary.append((field, result[field] if result[field] is not None else "-"))
+    if "action_metadata" in result:
+        summary.append(("speaker area", result.get("speaker_area") or "unknown"))
+        scopes = {"entities": "Specific entities; no area filter",
+                  "entities_implied_area": "Specific entities + implied area",
+                  "entities_explicit_area": "Specific entities + explicit area",
+                  "areas": "Explicit area(s); no specific entities",
+                  "implied_area": "Implied area; no specific entities"}
+        summary.append(("target scope", scopes.get(result.get("target_scope"), "Unsure")))
     if result.get("target"):
         target = result["target"]
         name = target.get("name") or ", ".join(target.get("names", []))
@@ -189,10 +198,6 @@ def print_report(report, show_answer_input=False):
         summary.append(("arguments", json.dumps(execution.get("arguments", {}), ensure_ascii=False)))
     print_table(["Result", "Value"], summary, [14, max(24, columns - 16)])
     print()
-    if result.get("action_metadata") is not None:
-        print("Selected action metadata (fields are optional unless required is true):")
-        print(json.dumps(result["action_metadata"], ensure_ascii=False, indent=2, default=str))
-        print()
     if "parameter_selection" in result:
         selection = result["parameter_selection"]
         selected = selection["selected_parameters"]

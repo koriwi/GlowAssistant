@@ -6,6 +6,16 @@ from homeassistant.helpers.service import async_get_all_descriptions
 from .engine import ActionError
 
 
+def speaker_area(hass, device_id):
+    if not device_id:
+        return None
+    device = device_registry.async_get(hass).async_get(device_id)
+    if not device or not device.area_id:
+        return None
+    area = area_registry.async_get(hass).async_get_area(device.area_id)
+    return area.name if area else None
+
+
 def entity_context(hass, excluded):
     areas = area_registry.async_get(hass)
     devices = device_registry.async_get(hass)

@@ -37,6 +37,29 @@ Output shows stage timings and decisions. `--json` includes the full engine resu
 
 Add `--show-answer-input` to print the smart-home answer request: model, messages, temperature and output token limit. Messages include the system prompt, pipeline language, history and final state facts. For detailed queries, selected entities appear in one `entities` array, with each entity's ID, name, room and query state together. For yes/no replies, only `state_answer` is sent for translation. Nested JSON in `content` is expanded for display; the chat API still receives text. With `--json`, this readable view is available under `answer_input`, and the original messages remain in `trace`. API keys and headers are excluded.
 
-Action requests select the service, then use one Choice question to select optional parameters. The console prints the selected action's complete HA metadata, including its target selector, fields, required flags, field selectors, descriptions and examples when supplied by HA. Fields are optional unless `required` is true. `--json` includes this under `result.action_metadata` and the service trace result. Optional parameter selection uses every optional HA field (including fields in nested UI groups) plus a `none` choice. Required fields are listed separately. Each actual field with probability strictly above `parameter_probability_threshold` is retained; overall confidence is not used, and `none` never overrides retained fields. The default threshold is 0.15; set it under Decider or override it with `--parameter-threshold 0.2`. `--confidence` does not change this probability threshold. With no optional fields, the extra call is skipped. Console output lists every option probability and the retained fields; JSON includes `parameter_selection` and `required_parameters`. No area/target selection, value extraction, device execution or answer-model call follows. The existing supported action choices remain in use. General requests with enabled MCP servers stop before connecting or calling tools in plan-only mode.
+Action requests currently run only **service → target type → stop**. Target types:
 
-This is an experimental use of Choice: [its probabilities sum to one](https://docs.typesafe.ai/primitives/choice), so the scores compete with one another rather than representing independent inclusion probabilities.
+| Choice | Meaning |
+| --- | --- |
+| `entities` | Specific entities, without an explicit or implied area restriction |
+| `entities_implied_area` | Specific entities within one implied speaker area |
+| `entities_explicit_area` | Specific entities within exactly one explicit area |
+| `areas` | One or more explicit areas, without specific entities |
+| `implied_area` | Implied speaker area only, without specific entities |
+| `unsure` | Unclear target type or an unsupported combination |
+
+Specific entity targets tied to multiple explicit areas return unsure. Globally named devices and logical targets do not inherit a speaker-area restriction automatically. Local roles such as desk/ceiling lamps can imply the supplied speaker area.
+
+No actual devices or rooms are selected. Optional parameter selection remains paused; its helper/settings remain available. No values are extracted and no device or answer-model call runs.
+
+Supply speaker context explicitly when benchmarking:
+
+```bash
+python benchmark.py -q "Mach das Licht aus" --speaker-area "Küche"
+python benchmark.py -q "Mach das Licht im Büro aus"
+python benchmark.py -q "Schalte die Schreibtischlampe aus"
+```
+
+Without `--speaker-area`, the speaker location is unknown and neither `entities_implied_area` nor `implied_area` is offered. HA obtains the room from the requesting device's area assignment when available. Text chat and unassigned devices provide no default room. The editable prompt and confidence threshold are under Decider; `--target-scope-confidence` overrides that threshold locally. The saved stock scope prompt upgrades automatically; custom prompts are preserved.
+
+The default output is compact: selected action, speaker room, target type, confidence and timings. `--json` retains full action field metadata and stage inputs/results. Existing supported action choices remain in use. General requests with enabled MCP servers stop before connecting or calling tools in plan-only mode.

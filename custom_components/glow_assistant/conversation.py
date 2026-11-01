@@ -10,7 +10,7 @@ from .chat_log_trace import ChatLogTrace
 from .client import ModelClient, ModelError
 from .debug import failure_details, model_failure
 from .engine import AgentEngine
-from .ha_context import async_execute, async_snapshot
+from .ha_context import async_execute, async_snapshot, speaker_area
 from .history import conversation_history
 from .settings import normalize_settings
 
@@ -56,11 +56,12 @@ class GlowConversationEntity(conversation.ConversationEntity, conversation.Abstr
             history = conversation_history(chat_log.content, self.settings["history_messages"]) if self.settings["history_enabled"] else []
             result = await AgentEngine(self.settings, client, execute, trace=trace, history=history).process(
                 user_input.text, user_input.language, snapshot,
+                speaker_area=speaker_area(self.hass, getattr(user_input, "device_id", None)),
             )
             text = result["answer"]
             if "action_metadata" in result:
-                _LOGGER.info("Selected action metadata: %s", json.dumps(result["action_metadata"], ensure_ascii=False, default=str))
-                _LOGGER.info("Optional parameter selection: %s", result.get("parameter_selection"))
+                _LOGGER.debug("Selected action metadata: %s", json.dumps(result["action_metadata"], ensure_ascii=False, default=str))
+                _LOGGER.info("Target scope: %s; speaker area: %s", result.get("target_scope"), result.get("speaker_area"))
             if result.get("answer_error"):
                 _LOGGER.warning("Smart-home answer generation failed: %s", result["answer_error"])
             _LOGGER.debug("route=%s service=%s timings_ms=%s usage=%s",

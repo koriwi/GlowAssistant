@@ -24,10 +24,11 @@ flowchart TD
     States --> Answer["Smart-home answer model"]
     Answer --> Reply
 
-    Service -->|HA action| Metadata["Read selected action field metadata"]
-    Metadata --> Optional{"Optional fields available?"}
-    Optional -->|Yes| Parameters["Decider: one Choice with optional fields + none"]
-    Parameters --> Probability["Keep actual parameters strictly above probability threshold"]
-    Probability --> Console["Print metadata, all probabilities and retained parameters"]
-    Optional -->|No| Console
-    Console --> Stop["Stop: no value extraction or device actions"]
+    Service -->|HA action| Scope{"Decider: intended target type"}
+    Scope -->|"Specific entities: no area"| Console["Print action, speaker room, target type and timing"]
+    Scope -->|"Specific entities + one explicit area"| Console
+    Scope -->|"Specific entities + one implied speaker area"| Console
+    Scope -->|"Explicit area(s): no specific entities"| Console
+    Scope -->|"Implied speaker area: no specific entities"| Console
+    Scope -->|unsure| Unsure
+    Console --> Stop["Stop: no actual target selection, parameter calls or execution"]

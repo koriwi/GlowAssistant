@@ -150,14 +150,17 @@ class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
         agent = GlowConversationEntity(entry)
         agent.hass = Mock()
         chat_log = Mock(conversation_id="conversation-123")
-        user_input = SimpleNamespace(text="test", language="de", agent_id="conversation.glow", context=object())
+        user_input = SimpleNamespace(text="test", language="de", agent_id="conversation.glow", context=object(), device_id="speaker")
         with patch("custom_components.glow_assistant.conversation.async_snapshot", new_callable=AsyncMock, return_value={}), \
                 patch("custom_components.glow_assistant.conversation.async_get_clientsession", return_value=Mock()), \
+                patch("custom_components.glow_assistant.conversation.speaker_area", return_value="Küche") as location, \
                 patch("custom_components.glow_assistant.conversation.AgentEngine") as engine:
             engine.return_value.process = AsyncMock(return_value={
                 "answer": "ich bin mir nicht sicher", "route": "unsure", "service": None, "timings_ms": {}, "usage": {},
             })
             result = await agent._async_handle_message(user_input, chat_log)
+            self.assertEqual(engine.return_value.process.call_args.kwargs["speaker_area"], "Küche")
+            location.assert_called_once_with(agent.hass, "speaker")
         self.assertEqual(result.conversation_id, "conversation-123")
         self.assertEqual(result.response.speech["plain"]["speech"], "ich bin mir nicht sicher")
         chat_log.async_add_assistant_content_without_tools.assert_called_once()
