@@ -2,3 +2,4 @@ mcp>=1.26,<2
 httpx>=0.28,<1
 python-dotenv>=1,<2
 PyYAML>=6,<7
+aiohttp>=3.9,<4

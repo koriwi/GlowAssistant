@@ -86,10 +86,10 @@ class ScriptedModels:
 
 
 class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
-    async def run_agent(self, choices, snapshot=SNAPSHOT, settings=None, answers=None, executor=None, trace=None, history=None, language="de", prompt="test request"):
+    async def run_agent(self, choices, snapshot=SNAPSHOT, settings=None, answers=None, executor=None, trace=None, history=None, language="de", prompt="test request", dry_run=False):
         models = ScriptedModels(choices, answers)
         execute = executor or AsyncMock()
-        agent = AgentEngine(settings or normalize_settings({}), models, execute, trace=trace, history=history)
+        agent = AgentEngine(settings or normalize_settings({}), models, execute, trace=trace, history=history, dry_run=dry_run)
         result = await agent.process(prompt, language, snapshot)
         return result, models, execute
 
@@ -105,6 +105,40 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Custom answer rules", system)
         self.assertIn("Assist pipeline language: fr-CH", system)
         self.assertIn("Write the spoken reply in this language", system)
+
+    async def test_plan_only_action_uses_normal_decisions_but_never_executes_or_claims_completion(self):
+        events = []
+        result, models, execute = await self.run_agent([
+            {"service": "light.turn_on"}, {"area": "area:office"}, {"target_scope": "area"},
+        ], dry_run=True, trace=lambda *event: events.append(event))
+        execute.assert_not_awaited()
+        self.assertEqual(len(models.requests), 3)
+        self.assertEqual(result["execution"], {
+            "status": "planned", "arguments": {"entity_id": ["light.desk", "light.ceiling"]},
+        })
+        self.assertNotIn("failures", result)
+        self.assertIn("No device command was sent", models.chat_requests[0][1][0]["content"])
+        facts = json.loads(models.chat_requests[0][1][1]["content"])
+        self.assertEqual(facts["execution"]["status"], "planned")
+        self.assertTrue(any(stage == "execution" and output and output["status"] == "planned"
+                            for stage, _, output in events))
+
+    async def test_plan_only_query_reads_states_without_an_execution_step(self):
+        result, _, execute = await self.run_agent([
+            {"service": "query_state"}, {"area": "area:office"}, {"targets": ["light.desk"]},
+        ], dry_run=True)
+        execute.assert_not_awaited()
+        self.assertEqual(result["state_info"][0]["entity_id"], "light.desk")
+        self.assertNotIn("execution", result)
+
+    async def test_plan_only_general_route_cannot_connect_to_or_execute_mcp_tools(self):
+        settings = normalize_settings({"general": {"enable": True, "mcp_servers": [{"enable": True}]}})
+        execute = AsyncMock()
+        with patch("custom_components.glow_assistant.engine.general_answer", new_callable=AsyncMock) as general:
+            with self.assertRaisesRegex(ModelError, "plan-only"):
+                await self.run_agent([{"service": "not-smarthome-related"}], settings=settings, executor=execute, dry_run=True)
+        general.assert_not_awaited()
+        execute.assert_not_awaited()
 
     async def test_history_is_sent_to_every_decider_and_the_answer_model(self):
         history = [{"role": "user", "content": "Is the office lamp on?"}, {"role": "assistant", "content": "Yes, it is on."}]
@@ -432,7 +466,8 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         snapshot["entities"][-1]["state"] = "unavailable"
         result, _, _ = await self.run_agent([
             {"service": "query_state"},
-            {"area": "no_area"}, {"target": "entity:sensor.office"},
+            {"area": "all_areas"}, {"domain_sensor": "keep", "domain_light": "drop"},
+            {"target": "entity:sensor.office"},
         ], snapshot=snapshot)
         self.assertEqual(result["state_info"][0]["attributes"], {})
 
@@ -527,14 +562,24 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result["domain"])
         execute.assert_not_awaited()
 
-    async def test_no_area_state_query_can_select_any_exposed_domain(self):
+    async def test_unspecified_room_query_uses_all_areas_and_filters_domains_before_targets(self):
         result, models, execute = await self.run_agent([
-            {"service": "query_state"}, {"area": "no_area"}, {"target": "entity:sensor.office"},
-        ])
-        targets = {target["entity_id"] for target in models.requests[2][1]["targets"]}
+            {"service": "query_state"}, {"area": "all_areas"},
+            {"domain_light": "keep", "domain_sensor": "drop"}, {"target": "entity:light.bed"},
+        ], prompt="Is the bed lamp on?")
+        area_question = models.requests[1][2]["area"]
+        self.assertNotIn("no_area", area_question["criteria"])
+        self.assertIn("all_areas", area_question["criteria"])
+        self.assertIn("when no specific room is identified", area_question["instructions"])
+        self.assertNotIn("Choose no_area when no room is identified.", area_question["instructions"])
+        self.assertEqual(set(models.requests[2][2]), {"domain_light", "domain_sensor"})
+        targets = {target["entity_id"] for target in models.requests[3][1]["targets"]}
         self.assertIn("light.bed", targets)
-        self.assertIn("sensor.office", targets)
-        self.assertEqual(result["domain"], "sensor")
+        self.assertIn("light.desk", targets)
+        self.assertNotIn("sensor.office", targets)
+        self.assertEqual(result["domain"], "light")
+        self.assertEqual([item["entity_id"] for item in result["state_info"]], ["light.bed"])
+        self.assertEqual(len(models.requests), 4)
         execute.assert_not_awaited()
 
     async def test_whole_home_query_includes_all_rooms_and_unassigned_entities(self):
@@ -554,6 +599,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         target_state = models.requests[3][1]
         targets = {target["entity_id"] for target in target_state["targets"]}
         self.assertIn("all_areas", area_question["criteria"])
+        self.assertNotIn("no_area", area_question["criteria"])
         self.assertIn("Custom area rules", area_question["instructions"])
         self.assertIn("choose all_areas", area_question["instructions"])
         self.assertEqual(target_state["task"], settings["decider"]["target_filter_prompt"])
@@ -575,22 +621,21 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(settings["decider"]["target_prompt"], "Custom target rules")
         execute.assert_not_awaited()
 
-    async def test_whole_home_group_is_not_offered_for_named_or_unspecified_room_queries(self):
-        for area in ("area:office", "no_area"):
-            with self.subTest(area=area):
-                result, models, execute = await self.run_agent([
-                    {"service": "query_state"}, {"area": area}, {"target": "entity:sensor.office"},
-                ])
-                self.assertTrue(all(target["type"] == "entity" for target in models.requests[2][1]["targets"]))
-                self.assertEqual(len(models.requests), 3)
-                self.assertNotIn("domain_filter", result["decisions"])
-                execute.assert_not_awaited()
+    async def test_named_room_query_skips_domain_filter_and_offers_only_individual_entities(self):
+        result, models, execute = await self.run_agent([
+            {"service": "query_state"}, {"area": "area:office"}, {"target": "entity:sensor.office"},
+        ])
+        self.assertTrue(all(target["type"] == "entity" for target in models.requests[2][1]["targets"]))
+        self.assertEqual(len(models.requests), 3)
+        self.assertNotIn("domain_filter", result["decisions"])
+        execute.assert_not_awaited()
 
     async def test_whole_home_group_is_not_offered_for_actions(self):
         result, models, execute = await self.run_agent([
             {"service": "light.turn_off"}, {"area": "no_area"}, {"target": "entity:light.desk"},
         ])
         self.assertNotIn("all_areas", models.requests[1][2]["area"]["criteria"])
+        self.assertIn("no_area", models.requests[1][2]["area"]["criteria"])
         self.assertTrue(all(target["type"] == "entity" for target in models.requests[2][1]["targets"]))
         self.assertNotIn("domain_filter", result["decisions"])
         self.assertEqual(len(models.requests), 3)

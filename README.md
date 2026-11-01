@@ -59,6 +59,15 @@ History applies to the current Assist conversation. It has no additional idle ex
 Open **Settings → Voice assistants → your assistant → Debug**.
 Expand a **Result for …** entry to see the choices, confidence, time, usage, and errors.
 
+## Local benchmark
+
+`benchmark.py` uses the same engine as the integration. It plans device actions and reports decision times.
+See [benchmark setup](benchmark.md) for the one-time addon update and `.env` settings.
+
+```bash
+python benchmark.py --query "Ist die Lampe im Büro an?" --confidence 0.5
+```
+
 ## TODO
 
 - [x] Add MCP server support for requests that do not concern the smart home.

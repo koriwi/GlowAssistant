@@ -8,6 +8,17 @@ from custom_components.glow_assistant.settings import normalize_settings
 
 @unittest.skipUnless(importlib.util.find_spec("homeassistant"), "Home Assistant is not installed; run the HA CI suite")
 class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
+    async def test_setup_registers_the_authenticated_snapshot_view(self):
+        from custom_components.glow_assistant import async_setup
+        from custom_components.glow_assistant.snapshot_api import SnapshotView
+
+        hass = Mock()
+        self.assertTrue(await async_setup(hass, {}))
+        view = hass.http.register_view.call_args.args[0]
+        self.assertIsInstance(view, SnapshotView)
+        self.assertTrue(view.requires_auth)
+        self.assertEqual(view.url, "/api/glow_assistant/snapshot")
+
     async def test_cover_position_feature_matches_ha(self):
         from homeassistant.components.cover import CoverEntityFeature
 

@@ -1,3 +1,10 @@
+async def async_setup(hass, config):
+    from .snapshot_api import SnapshotView
+
+    hass.http.register_view(SnapshotView(hass))
+    return True
+
+
 async def async_setup_entry(hass, entry):
     from homeassistant.const import Platform
 

@@ -3,7 +3,7 @@
   "name": "GlowAssistant",
   "codeowners": ["@koriwi"],
   "config_flow": true,
-  "dependencies": ["conversation"],
+  "dependencies": ["conversation", "http"],
   "documentation": "https://github.com/koriwi/GlowAssistant",
   "integration_type": "service",
   "iot_class": "cloud_polling",

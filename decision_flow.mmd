@@ -1,0 +1,43 @@
+flowchart TD
+    Input["User request"] --> Snapshot["Read exposed entities, states and available actions"]
+    Snapshot --> Service{"Decider: service / route"}
+
+    Service -->|unsure| Unsure["Unsure reply"]
+    Service -->|general| Enabled{"General model enabled?"}
+    Enabled -->|No| Unsure
+    Enabled -->|Yes| General["General model + optional HTTP MCP tools"]
+    General --> Reply["Assistant reply"]
+
+    Service -->|query_state| QueryArea{"Decider: area"}
+    QueryArea -->|Specific room| Room["Filter entities by room"]
+    QueryArea -->|"all_areas: no room specified or whole home"| Domains["Decider: domain keep/drop"]
+    Room --> QueryTargets["Decider: entity keep/drop"]
+    Domains --> QueryTargets
+    QueryTargets --> States["Read selected states from snapshot"]
+    States --> Answer["Smart-home answer model"]
+    Answer --> Reply
+
+    Service -->|HA action| Todo{"todo.add_item?"}
+    Todo -->|"Yes: skip area"| Filter
+    Todo -->|No| ActionArea["Decider: area — room or no_area"]
+    ActionArea --> Filter["Filter by action domain and selected room"]
+
+    Filter --> Shortcut{"Concrete room and multi-target action?"}
+    Shortcut -->|Yes| Scope{"Decider: target scope"}
+    Scope -->|area| AreaTargets["Use all filtered entities"]
+    Scope -->|entities| ActionTargets["Decider: entity keep/drop"]
+    Shortcut -->|No| Multiple{"Multi-target action?"}
+    Multiple -->|Yes| ActionTargets
+    Multiple -->|No| Single["Decider: single entity"]
+
+    AreaTargets --> Parameter{"Required parameter?"}
+    ActionTargets --> Parameter
+    Single --> Parameter
+
+    Parameter -->|None| Execute["Recheck exposure and execute HA action"]
+    Parameter -->|Numeric| Numeric["Decider: absolute/relative mode + value"]
+    Numeric --> Validate["Validate baseline, range and rounding"]
+    Validate --> Execute
+    Parameter -->|Free text| Text["Decider: word keep/drop"]
+    Text --> Execute
+    Execute --> Answer

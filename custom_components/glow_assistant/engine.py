@@ -123,13 +123,14 @@ def current_setting(entity, parameter, baseline):
 
 
 class AgentEngine:
-    def __init__(self, settings, client, execute, trace=None, history=None):
+    def __init__(self, settings, client, execute, trace=None, history=None, dry_run=False):
         self.settings = settings
         self.client = client
         self.execute = execute
         self.trace = trace
         self.history = list(history or []) if settings["history_enabled"] else []
         self.stage = "service"
+        self.dry_run = dry_run
 
     def _trace(self, stage, arguments, result=None):
         if result is None and stage != "failure":
@@ -235,6 +236,9 @@ class AgentEngine:
                 {"role": "user", "content": prompt},
             ]
             if any(server["enable"] for server in self.settings["general"]["mcp_servers"]):
+                if self.dry_run:
+                    self.stage = "general"
+                    raise ModelError("General MCP execution is disabled in plan-only benchmarks.")
                 started = perf_counter()
                 try:
                     result["answer"], rounds = await general_answer(
@@ -251,16 +255,21 @@ class AgentEngine:
         domain = None if query else action["service"].split(".", 1)[0]
         result["service"] = QUERY if query else action["service"]
         result["domain"] = domain
-        areas = {**{f"area:{key}": value for key, value in areas_from(entities).items()},
-                 "no_area": "No specific area is identified."}
+        areas = {f"area:{key}": value for key, value in areas_from(entities).items()}
         area_prompt = config["area_prompt"]
         if query:
             areas["all_areas"] = "All areas: the whole home, including exposed entities without a room assignment."
+            area_prompt = area_prompt.replace("Choose no_area when no room is identified. ", "")
             area_prompt += (
-                " For state queries about the whole home, choose all_areas instead of a single room or no_area. "
-                "Examples: 'are there any windows open in the house?' and 'sind irgendwo im Haus Fenster offen?'. "
-                "This is one supported scope, not an ambiguous request for multiple areas."
+                " For state queries, choose all_areas when no specific room is identified or the whole home is requested. "
+                "Examples: 'is the lamp Aurora on?', 'are there any windows open in the house?' and "
+                "'sind irgendwo im Haus Fenster offen?'. Choose a specific room only when identified by the request or history. "
+                "all_areas means search across all rooms, including entities without a room assignment; "
+                "it does not mean every entity is requested. Any no_area guidance applies to all_areas for state queries; "
+                "no_area is not an available choice. The whole home is one supported scope, not ambiguous multiple areas."
             )
+        else:
+            areas["no_area"] = "No specific area is identified."
         area = "no_area"
         if result["service"] != "todo.add_item":
             response = await self._decide(result, "area", {"prompt": prompt}, {
@@ -324,11 +333,13 @@ class AgentEngine:
             self._trace("execution", {"service": action["service"], "arguments": arguments})
             execution_started = perf_counter()
             try:
-                await self.execute(action["service"], arguments)
+                if self.dry_run:
+                    result["execution"] = {"status": "planned", "arguments": arguments}
+                else:
+                    await self.execute(action["service"], arguments)
+                    result["execution"] = {"status": "completed", "arguments": arguments}
             except ActionError as error:
                 result["execution"] = {"status": "error", "error": f"Action failed; device outcome unconfirmed: {error}"}
-            else:
-                result["execution"] = {"status": "completed", "arguments": arguments}
             finally:
                 result["timings_ms"]["execution"] = round((perf_counter() - execution_started) * 1000)
                 self._trace("execution", {}, {
@@ -340,6 +351,8 @@ class AgentEngine:
                                                      "Check the device's availability, Assist exposure, and Home Assistant logs."))
         facts = {key: value for key, value in result.items()
                  if key not in ("decisions", "usage", "timings_ms", "failures", "domain_filter", "target_selection")}
+        if self.dry_run:
+            language_instruction += " This is a plan-only benchmark. No device command was sent; describe actions as plans."
         try:
             await self._chat(result, "answer", [
                 {"role": "system", "content": f"{self.settings['answer']['prompt']}\n{language_instruction}"},
