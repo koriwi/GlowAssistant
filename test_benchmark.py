@@ -145,7 +145,7 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("execution", report["result"])
         self.assertEqual(len(models.requests), 4)
         self.assertFalse(models.chat_requests)
-        self.assertEqual({event["stage"] for event in report["trace"]}, {"service", "target_scope", "action_areas", "optional_parameters"})
+        self.assertEqual({event["stage"] for event in report["trace"]}, {"service", "target_scope", "action_areas", "parameter_capabilities", "optional_parameters"})
         output = io.StringIO()
         with redirect_stdout(output):
             benchmark.print_report(report, show_answer_input=True)

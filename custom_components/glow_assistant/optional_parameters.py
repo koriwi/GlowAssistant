@@ -23,6 +23,46 @@ def action_fields(fields):
     return result
 
 
+def _matches_filter(rules, attributes):
+    if not isinstance(rules, dict) or set(rules) - {"supported_features", "attribute"}:
+        return False
+    features = attributes.get("supported_features", 0)
+    flags = rules.get("supported_features", [])
+    if isinstance(features, int) and not isinstance(features, bool) and features >= 0 and isinstance(flags, list):
+        if any(isinstance(flag, int) and not isinstance(flag, bool) and flag > 0 and features & flag for flag in flags):
+            return True
+    attribute_filters = rules.get("attribute", {})
+    if isinstance(attribute_filters, dict):
+        for name, allowed in attribute_filters.items():
+            if name not in attributes or not isinstance(allowed, list):
+                continue
+            value = attributes[name]
+            if isinstance(value, (list, tuple)):
+                if any(item in allowed for item in value):
+                    return True
+            elif not isinstance(value, dict) and value in allowed:
+                return True
+    return False
+
+
+def filter_fields(fields, targets):
+    kept = {}
+    removed = {}
+    for name, field in fields.items():
+        if "filter" not in field:
+            kept[name] = field
+            continue
+        unsupported = [target["entity_id"] for target in targets
+                       if not _matches_filter(field["filter"], target.get("attributes", {}))]
+        if not targets or unsupported:
+            removed[name] = {"reason": "HA capability filter did not match every resolved target.",
+                             "unsupported_entity_ids": unsupported, "filter": field["filter"]}
+        else:
+            kept[name] = field
+    return kept, {"policy": "all_resolved_targets", "target_entity_ids": [target["entity_id"] for target in targets],
+                  "fields_before": len(fields), "fields_after": len(kept), "kept_fields": list(kept), "removed_fields": removed}
+
+
 def parameter_request(prompt, service, fields, instructions):
     required = {name: field for name, field in fields.items() if field.get("required", False)}
     optional = {name: field for name, field in fields.items() if name not in required}

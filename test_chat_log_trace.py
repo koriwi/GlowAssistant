@@ -103,6 +103,14 @@ class ChatLogTraceTests(unittest.TestCase):
         self.assertEqual(self.messages[-2].tool_calls[0].tool_name, "glow_assistant_select_optional_parameters")
         self.assertEqual(self.messages[-1].tool_result, result)
 
+    def test_capability_filter_has_native_debug_details_without_a_model_call(self):
+        result = {"status": "completed", "model_call": False, "fields_before": 4, "fields_after": 2,
+                  "removed_fields": {"target_temp_low": {"unsupported_entity_ids": ["climate.office"]}}}
+        self.trace("parameter_capabilities", {"target_entity_ids": ["climate.office"]})
+        self.trace("parameter_capabilities", {}, result)
+        self.assertEqual(self.messages[-2].tool_calls[0].tool_name, "glow_assistant_filter_parameter_capabilities")
+        self.assertEqual(self.messages[-1].tool_result, result)
+
     def test_target_scope_has_its_own_native_tool_card(self):
         result = {"decisions": {"target_scope": {"choice": "area", "confidence": 0.9}}, "duration_ms": 20}
         self.trace("target_scope", {"candidate_counts": {"target_scope": 3}})

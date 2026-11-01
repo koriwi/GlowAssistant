@@ -37,7 +37,7 @@ Output shows stage timings and decisions. `--json` includes the full engine resu
 
 Add `--show-answer-input` to print the smart-home answer request: model, messages, temperature and output token limit. Messages include the system prompt, pipeline language, history and final state facts. For detailed queries, selected entities appear in one `entities` array, with each entity's ID, name, room and query state together. For yes/no replies, only `state_answer` is sent for translation. Nested JSON in `content` is expanded for display; the chat API still receives text. With `--json`, this readable view is available under `answer_input`, and the original messages remain in `trace`. API keys and headers are excluded.
 
-Action requests run **service → target type → area resolution/filtering → target resolution → parameter detection → stop**. Target types:
+Action requests run **service → target type → area resolution/filtering → target resolution → capability prefilter → parameter detection → stop**. Target types:
 
 | Choice | Meaning |
 | --- | --- |
@@ -64,7 +64,11 @@ Area candidates use exposed snapshot rooms and aliases. Arealess entity selectio
 
 Multi-area and entity selection retain every real option strictly above its probability threshold; overall confidence is not used. `none` never overrides retained real options. Single-area selection ignores the multi-area threshold and uses only the unique highest probability; a tie or highest `none` stops. Prompts and probability thresholds are under Decider. Override the thresholds with `--action-area-threshold` and `--action-entity-threshold` (both default to 0.15). These are independent of `--confidence`. Full scores remain under `--json`; Choice probabilities share one distribution, so broad selections may need a lower threshold.
 
-After successful target resolution, parameter detection runs against the selected action's HA field metadata. Required fields are listed automatically. Optional fields use one Choice question plus `none`; every real field strictly above `parameter_probability_threshold` (default 0.15) is kept. Overall confidence is not a filter, and `none` never overrides retained real fields. `--parameter-threshold` overrides this cutoff independently of `--confidence`. No optional fields means no extra model call. The request includes the resolved target, without the entity catalog or current numeric values.
+After successful target resolution, expand the final targets to their exposed entity members in the cached snapshot. Apply HA field `filter.supported_features` and `filter.attribute` rules before parameter detection. A filtered field must match **every** resolved entity; unfiltered fields remain available. Missing capabilities, unresolved feature names and unrecognized filter rules do not establish support. Nested field groups are flattened before filtering. No extra HA or model request is made.
+
+The `parameter_capabilities` debug card/JSON record shows the actual target entity IDs, fields before/after filtering, retained fields, and removed fields with their HA filters and non-matching entity IDs. The console shows a short capability-filter summary and the `capabilities` timing row. This prefilter does not infer conditional required fields beyond HA's supplied `required` flags.
+
+Parameter detection then runs against the remaining action fields. Required fields are listed automatically. Optional fields use one Choice question plus `none`; every real field strictly above `parameter_probability_threshold` (default 0.15) is kept. Overall confidence is not a filter, and `none` never overrides retained real fields. `--parameter-threshold` overrides this cutoff independently of `--confidence`. No optional fields means no extra model call. The request includes the resolved target, without the entity catalog or current numeric values.
 
 Console output shows required/selected field names and probabilities for retained options plus `none`. `--json` retains the full distribution, including dropped fields. No values are extracted and no device or answer-model call runs.
 

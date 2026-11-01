@@ -8,6 +8,7 @@ STAGE_LABELS = {
     "context": "Read Home Assistant devices",
     "service": "Choose an action",
     "optional_parameters": "Choose optional action parameters",
+    "parameter_capabilities": "Filter action fields by target capabilities",
     "area": "Choose a room",
     "domain": "Choose a state-query domain",
     "query_type": "Choose a yes/no or detailed answer",

@@ -23,10 +23,28 @@ def snapshot():
         entity("sensor.office", "Office temperature", state="22"),
         entity("todo.shopping", "Shopping list", area="kitchen"),
         entity("todo.work", "Work list"), entity("todo.unassigned", "Other list", area=None),
-    ], "services": {**SNAPSHOT["services"], "todo.add_item": {"target": {}, "fields": {"item": {"required": True}}}}}
+    ], "services": {**copy.deepcopy(SNAPSHOT["services"]), "todo.add_item": {"target": {}, "fields": {"item": {"required": True}}}}}
     for item in data["entities"]:
         if item["area_id"] == "office":
             item["area_aliases"] = ["Büro", "buero"]
+    return data
+
+
+def climate_snapshot():
+    data = snapshot()
+    data["entities"].extend([
+        entity("climate.office", "Office thermostat", temperature=20, supported_features=401),
+        entity("climate.kitchen", "Kitchen thermostat", area="kitchen", temperature=21, supported_features=2),
+    ])
+    data["services"]["climate.set_temperature"] = {"target": {}, "fields": {
+        "temperature": {"filter": {"supported_features": [1]},
+                        "selector": {"number": {"min": 0, "max": 250, "step": 0.1}}},
+        "temperature_range": {"fields": {
+            "target_temp_low": {"filter": {"supported_features": [2]}, "selector": {"number": {"min": 0, "max": 250}}},
+            "target_temp_high": {"filter": {"supported_features": [2]}, "selector": {"number": {"min": 0, "max": 250}}},
+        }},
+        "hvac_mode": {"selector": {"state": {}}},
+    }}
     return data
 
 
@@ -134,15 +152,7 @@ class ActionRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("optional_parameters", result["decisions"])
 
     async def test_parameter_detection_runs_after_resolving_target_for_relative_climate_request(self):
-        data = snapshot()
-        data["entities"].extend([
-            entity("climate.office", "Office thermostat", temperature=20),
-            entity("climate.kitchen", "Kitchen thermostat", area="kitchen", temperature=21),
-        ])
-        data["services"]["climate.set_temperature"] = {"target": {}, "fields": {
-            "temperature": {"selector": {"number": {"min": 5, "max": 45, "unit_of_measurement": "°C"}}},
-            "hvac_mode": {"selector": {"select": {"options": ["heat", "off"]}}},
-        }}
+        data = climate_snapshot()
         result, client, events = await self.run_route("implied_area", [{"optional_parameters": answer({
             "temperature": 0.8, "hvac_mode": 0.1, "none": 0.1,
         })}], speaker_area="Office", service="climate.set_temperature:temperature", data=data,
@@ -155,8 +165,53 @@ class ActionRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("current", client.requests[-1][1])
         self.assertEqual(result["required_parameters"], [])
         self.assertNotIn("numeric", result["decisions"])
+        self.assertEqual(set(client.requests[-1][2]["optional_parameters"]["criteria"]), {"temperature", "hvac_mode", "none"})
+        self.assertTrue(client.requests[-1][1]["capabilities_validated_for_all_targets"])
+        self.assertEqual(result["parameter_capabilities"]["target_entity_ids"], ["climate.office"])
+        self.assertEqual(set(result["parameter_capabilities"]["removed_fields"]), {"target_temp_low", "target_temp_high"})
+        capabilities = next(output for stage, _, output in events if stage == "parameter_capabilities" and output)
+        self.assertFalse(capabilities["model_call"])
+        self.assertEqual(capabilities["fields_after"], 2)
         output = next(output for stage, _, output in events if stage == "optional_parameters" and output)
         self.assertEqual(output["selected_parameters"], ["temperature"])
+
+    async def test_range_target_excludes_single_temperature_before_parameter_detection(self):
+        result, client, _ = await self.run_route("implied_area", [{"optional_parameters": answer({
+            "target_temp_low": 0.4, "target_temp_high": 0.35, "hvac_mode": 0.1, "none": 0.15,
+        })}], speaker_area="Kitchen", service="climate.set_temperature:temperature", data=climate_snapshot(),
+            selected_parameters=["target_temp_low", "target_temp_high"])
+        self.assertNotIn("temperature", client.requests[-1][2]["optional_parameters"]["criteria"])
+        self.assertEqual(result["parameter_capabilities"]["removed_fields"]["temperature"]["unsupported_entity_ids"],
+                         ["climate.kitchen"])
+
+    async def test_multi_area_targets_use_capability_intersection(self):
+        result, client, _ = await self.run_route("areas", [
+            {"action_areas": answer({"area:office": 0.5, "area:kitchen": 0.4, "none": 0.1})},
+            {"optional_parameters": "none"},
+        ], service="climate.set_temperature:temperature", data=climate_snapshot())
+        self.assertEqual(set(client.requests[-1][2]["optional_parameters"]["criteria"]), {"hvac_mode", "none"})
+        self.assertEqual(result["parameter_capabilities"]["target_entity_ids"], ["climate.office", "climate.kitchen"])
+
+    async def test_specific_entity_capabilities_ignore_unselected_candidates_in_same_area(self):
+        data = climate_snapshot()
+        data["entities"].append(entity("climate.office_range", "Other office thermostat", supported_features=2))
+        result, client, _ = await self.run_route("entities_implied_area", [
+            {"action_entities": answer({"entity:climate.office": 0.9, "entity:climate.office_range": 0.05, "none": 0.05})},
+            {"optional_parameters": "temperature"},
+        ], speaker_area="Office", service="climate.set_temperature:temperature", data=data, selected_parameters=["temperature"])
+        self.assertEqual(result["parameter_capabilities"]["target_entity_ids"], ["climate.office"])
+        self.assertIn("temperature", client.requests[-1][2]["optional_parameters"]["criteria"])
+
+    async def test_all_optional_fields_filtered_out_skip_the_parameter_model_call(self):
+        data = snapshot()
+        data["services"]["light.turn_on"]["fields"] = {"brightness_pct": {"filter": {"supported_features": [1]}}}
+        result, client, events = await self.run_route("implied_area", speaker_area="Office", service="light.turn_on", data=data)
+        self.assertEqual(len(client.requests), 2)
+        self.assertEqual(result["parameter_capabilities"]["fields_after"], 0)
+        self.assertEqual(result["parameter_capabilities"]["removed_fields"]["brightness_pct"]["unsupported_entity_ids"],
+                         ["light.desk", "light.ceiling"])
+        self.assertNotIn("optional_parameters", result["decisions"])
+        self.assertTrue(any(stage == "parameter_capabilities" for stage, _, _ in events))
 
     async def test_unknown_speaker_area_stops_without_guessing_another_room(self):
         result, client, _ = await self.run_route("implied_area", speaker_area="Unknown room")

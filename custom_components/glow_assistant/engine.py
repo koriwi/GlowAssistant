@@ -14,7 +14,12 @@ from .debug import STAGE_LABELS, decision_details, failure_details, model_failur
 from .general import general_answer
 from .history import with_history
 from .numeric_values import finite_number
-from .optional_parameters import action_fields, decode_parameters, parameter_request
+from .optional_parameters import (
+    action_fields,
+    decode_parameters,
+    filter_fields,
+    parameter_request,
+)
 from .target_selection import decode_targets, target_request
 from .text_values import TEXT_ACTIONS
 
@@ -253,8 +258,8 @@ class AgentEngine:
                 "prompt": prompt, "service": result["service"], "speaker_area": speaker_area,
             }, {"target_scope": choice_question(scopes, config["target_scope_prompt"])})
             result["target_scope"] = self._choice(response, "target_scope", scopes)
-            await self._select_action_targets(result, entities)
-            await self._select_parameters(result)
+            members = await self._select_action_targets(result, entities)
+            await self._select_parameters(result, members)
             return
 
         result["service"] = QUERY
@@ -343,12 +348,14 @@ class AgentEngine:
             result["target"] = ({"type": "area", **selected_areas[0]} if len(selected_areas) == 1 else
                                 {"type": "areas", "area_ids": [area["area_id"] for area in selected_areas],
                                  "names": [area["name"] for area in selected_areas]})
-            return
+            return candidates
         options = target_options(candidates)
         selected = await self._action_selection(result, "action_entities", options)
         result["target"] = (options[selected[0]] if len(selected) == 1 else
                             {"type": "entities", "entity_ids": [options[key]["entity_id"] for key in selected],
                              "names": [options[key]["name"] for key in selected]})
+        selected_ids = {options[key]["entity_id"] for key in selected}
+        return [entity for entity in candidates if entity["entity_id"] in selected_ids]
 
     async def _action_selection(self, result, stage, options, single=False):
         config = self.settings["decider"]
@@ -372,10 +379,20 @@ class AgentEngine:
                             "Name the requested rooms or devices. Review the option probabilities and selection threshold.")
         return selected
 
-    async def _select_parameters(self, result):
+    async def _select_parameters(self, result, members):
         config = self.settings["decider"]
         fields = action_fields(result["action_metadata"].get("fields") or {})
+        started = perf_counter()
+        self._trace("parameter_capabilities", {"target_entity_ids": [member["entity_id"] for member in members],
+                                                "fields_before": len(fields)})
+        fields, capabilities = filter_fields(fields, members)
+        result["parameter_capabilities"] = capabilities
+        duration = round((perf_counter() - started) * 1000)
+        result["timings_ms"]["parameter_capabilities"] = duration
+        self._trace("parameter_capabilities", {}, {"status": "completed", "model_call": False,
+                                                   **capabilities, "duration_ms": duration})
         optional, payload = parameter_request(result["request"], result["service"], fields, config["parameter_prompt"])
+        payload["state"]["capabilities_validated_for_all_targets"] = True
         if result.get("target"):
             payload["state"]["target"] = result["target"]
         result["required_parameters"] = [name for name, field in fields.items() if field.get("required", False)]
@@ -387,7 +404,7 @@ class AgentEngine:
         def summarize(response):
             selection = decode_parameters(response, optional, config["parameter_probability_threshold"])
             result["parameter_selection"] = selection
-            return {**selection, "required_parameters": result["required_parameters"]}
+            return {**selection, "required_parameters": result["required_parameters"], "capability_filter": capabilities}
 
         await self._decide(result, "optional_parameters", payload["state"], payload["questions"], summarize=summarize)
 

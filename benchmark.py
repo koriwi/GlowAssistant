@@ -217,6 +217,12 @@ def print_report(report, show_answer_input=False):
     if "parameter_selection" in result:
         selection = result["parameter_selection"]
         selected = selection["selected_parameters"]
+        if "parameter_capabilities" in result:
+            capabilities = result["parameter_capabilities"]
+            removed = list(capabilities["removed_fields"])
+            detail = ", ".join(removed[:5]) + (f" (+{len(removed) - 5} more)" if len(removed) > 5 else "")
+            print(f"Capability filter: {capabilities['fields_before']} → {capabilities['fields_after']} fields" +
+                  (f"; removed: {detail}" if removed else ""))
         print("Required parameters: " + (", ".join(result["required_parameters"]) or "none"))
         print("Selected optional parameters: " + (", ".join(selected) or "none"))
         print(f"Probability threshold: {selection['probability_threshold']:g} (strictly above)")
@@ -242,11 +248,14 @@ def print_report(report, show_answer_input=False):
         if event["stage"] in ("action_areas", "action_entities") and "selected_names" in output:
             names = output["selected_names"]
             detail = "selected: " + (", ".join(names[:5]) or "none") + (f" (+{len(names) - 5} more)" if len(names) > 5 else "")
+        if event["stage"] == "parameter_capabilities" and "fields_after" in output:
+            detail = f"{output['fields_before']} → {output['fields_after']} fields; no model call"
         scores = [info["confidence"] for info in decisions.values() if isinstance(info.get("confidence"), (int, float))]
         score = "-"
         if scores:
             score = f"{min(scores):.3f}" if min(scores) == max(scores) else f"{min(scores):.3f}–{max(scores):.3f}"
-        stages.append((event["stage"], str(output["duration_ms"]), detail, score))
+        stage_label = "capabilities" if event["stage"] == "parameter_capabilities" else event["stage"]
+        stages.append((stage_label, str(output["duration_ms"]), detail, score))
     timings = report["timings_ms"]
     stages.extend([("engine subtotal", str(timings["engine"]), "", "-"), ("total", str(timings["total"]), "", "-")])
     print_table(["Stage", "Time (ms)", "Decision / status", "Confidence"], stages,

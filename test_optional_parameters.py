@@ -6,6 +6,7 @@ from custom_components.glow_assistant.optional_parameters import (
     INSTRUCTIONS,
     action_fields,
     decode_parameters,
+    filter_fields,
     parameter_request,
 )
 
@@ -18,6 +19,71 @@ def response(probabilities, confidence=0):
 
 
 class OptionalParameterTests(unittest.TestCase):
+    def test_thermostat_field_filters_use_shared_capabilities_across_targets(self):
+        fields = action_fields({
+            "temperature": {"filter": {"supported_features": [1]}},
+            "temperature_range": {"fields": {
+                "target_temp_low": {"filter": {"supported_features": [2]}},
+                "target_temp_high": {"filter": {"supported_features": [2]}},
+            }},
+            "hvac_mode": {"selector": {"select": {"options": ["heat", "off"]}}},
+        })
+        single = {"entity_id": "climate.single", "attributes": {"supported_features": 401}}
+        ranged = {"entity_id": "climate.range", "attributes": {"supported_features": 2}}
+        original = copy.deepcopy((fields, single, ranged))
+        for targets, expected in (([single], {"temperature", "hvac_mode"}),
+                                  ([ranged], {"target_temp_low", "target_temp_high", "hvac_mode"}),
+                                  ([single, ranged], {"hvac_mode"})):
+            with self.subTest(targets=targets):
+                kept, report = filter_fields(fields, targets)
+                self.assertEqual(set(kept), expected)
+                self.assertEqual(report["fields_before"], 4)
+                self.assertEqual(report["fields_after"], len(expected))
+                self.assertEqual(set(report["removed_fields"]), set(fields) - expected)
+                self.assertEqual(report["policy"], "all_resolved_targets")
+        _, report = filter_fields(fields, [single, ranged])
+        self.assertEqual(report["removed_fields"]["temperature"]["unsupported_entity_ids"], ["climate.range"])
+        self.assertEqual(report["removed_fields"]["target_temp_low"]["unsupported_entity_ids"], ["climate.single"])
+        self.assertEqual((fields, single, ranged), original)
+
+    def test_attribute_filters_match_scalar_or_list_values_and_require_all_targets(self):
+        fields = {
+            "color": {"filter": {"attribute": {"supported_color_modes": ["hs", "rgb"]}}},
+            "preset": {"filter": {"attribute": {"device_class": ["speaker"]}}},
+            "plain": {},
+        }
+        first = {"entity_id": "light.first", "attributes": {"supported_color_modes": ["onoff", "hs"], "device_class": "speaker"}}
+        second = {"entity_id": "light.second", "attributes": {"supported_color_modes": ["rgb"], "device_class": "other"}}
+        kept, report = filter_fields(fields, [first, second])
+        self.assertEqual(set(kept), {"color", "plain"})
+        self.assertEqual(report["removed_fields"]["preset"]["unsupported_entity_ids"], ["light.second"])
+        second["attributes"]["supported_color_modes"] = ["onoff"]
+        kept, _ = filter_fields(fields, [first, second])
+        self.assertEqual(set(kept), {"plain"})
+
+    def test_feature_and_attribute_alternatives_match_ha_filter_rules(self):
+        fields = {"value": {"filter": {"supported_features": [1, 2], "attribute": {"mode": ["supported"], "other": ["ok"]}}}}
+        for attributes in ({"supported_features": 2}, {"mode": "supported"}, {"other": "ok"}):
+            kept, _ = filter_fields(fields, [{"entity_id": "test.target", "attributes": attributes}])
+            self.assertEqual(set(kept), {"value"})
+
+    def test_unknown_capabilities_and_unrecognized_filters_do_not_claim_support(self):
+        fields = {"feature": {"filter": {"supported_features": [1]}},
+                  "attribute": {"filter": {"attribute": {"supported_color_modes": ["hs"]}}},
+                  "unresolved": {"filter": {"supported_features": ["climate.ClimateEntityFeature.TARGET_TEMPERATURE"]}},
+                  "unknown_rule": {"filter": {"future_rule": True}}, "plain": {}}
+        for attributes in ({}, {"supported_features": -1}, {"supported_features": True}):
+            kept, report = filter_fields(fields, [{"entity_id": "climate.target", "attributes": attributes}])
+            self.assertEqual(set(kept), {"plain"})
+            self.assertEqual(len(report["removed_fields"]), 4)
+
+    def test_unfiltered_required_fields_remain_required_and_filtered_fields_are_removed(self):
+        fields = {"item": {"required": True}, "feature": {"required": True, "filter": {"supported_features": [1]}}}
+        kept, _ = filter_fields(fields, [{"entity_id": "todo.shopping", "attributes": {}}])
+        optional, payload = parameter_request("Add milk", "todo.add_item", kept, INSTRUCTIONS)
+        self.assertEqual(optional, {})
+        self.assertEqual(payload["state"]["required_fields"], {"item": {"required": True}})
+
     def test_nested_groups_are_flattened_but_object_selectors_are_preserved(self):
         fields = {"temperature": {"required": True, "selector": {"number": {"min": 5}}},
                   "advanced": {"collapsed": True, "fields": {

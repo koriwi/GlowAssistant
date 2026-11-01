@@ -103,7 +103,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
                   "decisions": {}, "usage": {}, "timings_ms": {},
                   "action_metadata": {"service": service, **snapshot["services"][service]}}
         agent = AgentEngine(settings or normalize_settings({}), models, execute, trace=trace)
-        await agent._select_parameters(result)
+        await agent._select_parameters(result, [item for item in snapshot["entities"] if item["domain"] == service.split(".")[0]])
         return result, models, execute
 
     async def test_yes_no_query_skips_entity_filter_and_only_translates_the_decision(self):
@@ -251,7 +251,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
                 execute.assert_not_awaited()
 
     async def test_action_target_scope_choices_and_speaker_context(self):
-        with patch.object(AgentEngine, "_select_action_targets", new_callable=AsyncMock):
+        with patch.object(AgentEngine, "_select_action_targets", new_callable=AsyncMock, return_value=SNAPSHOT["entities"]):
             for scope, location, prompt in (
                 ("entities", None, "Add milk to the shopping list"),
                 ("entities", "Kitchen", "Setze Brot auf die Einkaufsliste"),
@@ -482,7 +482,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
             {"service": "light.turn_off"}, {"target_scope": "entities_explicit_area"},
             {"action_areas": "area:office"}, {"action_entities": "entity:light.desk"},
         ], trace=lambda *event: events.append(event))
-        self.assertEqual([stage for stage, _, _ in events], ["service", "service", "target_scope", "target_scope", "action_areas", "action_areas", "action_entities", "action_entities"])
+        self.assertEqual([stage for stage, _, _ in events], ["service", "service", "target_scope", "target_scope", "action_areas", "action_areas", "action_entities", "action_entities", "parameter_capabilities", "parameter_capabilities"])
         output = events[1][2]
         self.assertEqual(output["action_metadata"], result["action_metadata"])
         self.assertEqual(output["decisions"]["service"]["choice"], "light.turn_off")
