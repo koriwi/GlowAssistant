@@ -25,10 +25,22 @@ flowchart TD
     Answer --> Reply
 
     Service -->|HA action| Scope{"Decider: intended target type"}
-    Scope -->|"Specific arealess entities"| Console["Print action, speaker room, target type and timing"]
-    Scope -->|"Specific entities + one explicit area"| Console
-    Scope -->|"Specific entities + one implied speaker area"| Console
-    Scope -->|"Explicit area(s): no specific entities"| Console
-    Scope -->|"Implied speaker area: no specific entities"| Console
+    Scope -->|Arealess entities| DomainOnly["Filter entities by action domain"]
+    Scope -->|"Entities + explicit area"| OneArea["Decider: choose the one highest-probability area"]
+    OneArea --> DomainArea["Filter entities by action domain and selected area"]
+    Scope -->|"Entities + implied area"| Speaker["Use speaker area from HA context"]
+    Speaker --> DomainArea
+    DomainOnly --> Entities["Decider: one Choice; keep entities above probability threshold"]
+    DomainArea --> Entities
+    Scope -->|"Explicit area(s), no specific entities"| Areas["Decider: one Choice; keep areas above probability threshold"]
+    Scope -->|"Implied area only"| SpeakerOnly["Use speaker area directly; no area or entity model call"]
+    Areas --> AreaTargets["Selected areas are the targets"]
+    SpeakerOnly --> AreaTargets
     Scope -->|unsure| Unsure
-    Console --> Stop["Stop: no actual target selection, parameter calls or execution"]
+    Entities --> Required["List required action fields"]
+    AreaTargets --> Required
+    Required --> HasOptional{"Optional fields available?"}
+    HasOptional -->|Yes| Parameters["Decider: optional parameters + none; keep above probability threshold"]
+    HasOptional -->|No| Console["Print targets, required/optional fields and timing"]
+    Parameters --> Console
+    Console --> Stop["Stop: no value extraction or device actions"]

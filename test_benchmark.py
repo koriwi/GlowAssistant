@@ -72,6 +72,15 @@ class BenchmarkSettingsTests(unittest.TestCase):
         args = benchmark.parser().parse_args(["--query", "test", "--confidence", "0"])
         self.assertEqual(benchmark.model_settings(settings(), args, {})["decider"]["parameter_probability_threshold"], 0.15)
 
+    def test_action_selection_thresholds_are_independent_of_global_confidence(self):
+        args = benchmark.parser().parse_args([
+            "--query", "test", "--confidence", "0.9", "--action-area-threshold", "0.1", "--action-entity-threshold", "0.2",
+        ])
+        configured = benchmark.model_settings(settings(), args, {})["decider"]
+        self.assertEqual(configured["service_confidence"], 0.9)
+        self.assertEqual(configured["action_area_probability_threshold"], 0.1)
+        self.assertEqual(configured["action_entity_probability_threshold"], 0.2)
+
 
 class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
     def exported(self):
@@ -122,9 +131,10 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
         exported["snapshot"]["services"]["light.turn_on"] = {
             "description": "Turn on a light", "target": {"entity": {"domain": "light"}},
             "fields": {"brightness_pct": {"required": False, "description": "Brightness percentage", "example": 50,
-                                          "selector": {"number": {"min": 0, "max": 100, "step": 1}}}},
+                                          "selector": {"number": {"min": 0, "max": 100, "step": 1}}},
+                       "hue": {"selector": {"number": {"min": 0, "max": 360}}}},
         }
-        models = ScriptedModels([{"service": "light.turn_on:brightness_pct"}, {"target_scope": "areas"}, {"action_areas": "area:office"}])
+        models = ScriptedModels([{"service": "light.turn_on:brightness_pct"}, {"target_scope": "areas"}, {"action_areas": "area:office"}, {"optional_parameters": "brightness_pct"}])
         with (patch("benchmark.fetch_snapshot", new=AsyncMock(return_value=exported)),
               patch("benchmark.aiohttp.ClientSession", return_value=AsyncMock()),
               patch("benchmark.ModelClient", return_value=models)):
@@ -133,18 +143,22 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report["result"]["action_metadata"]["fields"],
                          exported["snapshot"]["services"]["light.turn_on"]["fields"])
         self.assertNotIn("execution", report["result"])
-        self.assertEqual(len(models.requests), 3)
+        self.assertEqual(len(models.requests), 4)
         self.assertFalse(models.chat_requests)
-        self.assertEqual({event["stage"] for event in report["trace"]}, {"service", "target_scope", "action_areas"})
+        self.assertEqual({event["stage"] for event in report["trace"]}, {"service", "target_scope", "action_areas", "optional_parameters"})
         output = io.StringIO()
         with redirect_stdout(output):
             benchmark.print_report(report, show_answer_input=True)
         printed = output.getvalue()
         self.assertRegex(printed, r"target scope\s+Explicit area\(s\); no specific entities")
         self.assertRegex(printed, r"speaker area\s+unknown")
-        self.assertNotIn('"brightness_pct"', printed)
-        self.assertNotIn("Selected optional parameters", printed)
+        self.assertNotIn('"selector"', printed)
+        self.assertIn("Selected optional parameters: brightness_pct", printed)
+        self.assertNotIn("hue", printed)
+        self.assertIn("hue", report["result"]["parameter_selection"]["probabilities"])
         self.assertIn("Answer model was not called.", printed)
+        self.assertRegex(printed, r"area filter\s+Office")
+        self.assertRegex(printed, r"target\s+area; Office \(office\)")
         self.assertNotIn("private-key", printed)
         self.assertNotIn("private-key", json.dumps(report))
         self.assertIsNone(benchmark.answer_input(report))
@@ -169,7 +183,7 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
             benchmark.print_report(report)
         self.assertRegex(output.getvalue(), r"speaker area\s+Küche")
         self.assertRegex(output.getvalue(), r"target scope\s+Implied area; no specific entities")
-        self.assertNotIn("parameter_selection", report["result"])
+        self.assertEqual(report["result"]["parameter_selection"]["selected_parameters"], [])
 
     async def test_query_answer_input_remains_readable_without_mutating_the_api_messages(self):
         args = benchmark.parser().parse_args(["--query", "Which lights are on?"])

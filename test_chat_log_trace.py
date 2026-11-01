@@ -110,6 +110,15 @@ class ChatLogTraceTests(unittest.TestCase):
         self.assertEqual(self.messages[0].tool_calls[0].tool_name, "glow_assistant_select_target_scope")
         self.assertEqual(self.messages[1].tool_result, result)
 
+    def test_action_area_and_entity_selection_have_native_cards(self):
+        for stage, name in (("action_areas", "glow_assistant_select_action_areas"),
+                            ("action_entities", "glow_assistant_select_action_entities")):
+            self.trace(stage, {"service": "light.turn_off"})
+            result = {"selected_names": ["Office"], "probability_threshold": 0.15}
+            self.trace(stage, {}, result)
+            self.assertEqual(self.messages[-2].tool_calls[0].tool_name, name)
+            self.assertEqual(self.messages[-1].tool_result, result)
+
     def test_yes_no_stages_have_native_debug_cards(self):
         for stage, tool_name in (("query_type", "glow_assistant_select_query_type"),
                                  ("binary_answer", "glow_assistant_answer_yes_no")):

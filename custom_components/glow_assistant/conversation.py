@@ -62,6 +62,7 @@ class GlowConversationEntity(conversation.ConversationEntity, conversation.Abstr
             if "action_metadata" in result:
                 _LOGGER.debug("Selected action metadata: %s", json.dumps(result["action_metadata"], ensure_ascii=False, default=str))
                 _LOGGER.info("Target scope: %s; speaker area: %s", result.get("target_scope"), result.get("speaker_area"))
+                _LOGGER.debug("Parameter detection: %s", result.get("parameter_selection"))
             if result.get("answer_error"):
                 _LOGGER.warning("Smart-home answer generation failed: %s", result["answer_error"])
             _LOGGER.debug("route=%s service=%s timings_ms=%s usage=%s",

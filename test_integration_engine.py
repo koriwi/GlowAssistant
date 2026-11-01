@@ -233,16 +233,16 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         for dry_run in (False, True):
             with self.subTest(dry_run=dry_run):
                 result, models, execute = await self.run_agent([
-                    {"service": "light.turn_on"}, {"target_scope": "areas"}, {"action_areas": "area:office"},
+                    {"service": "light.turn_on"}, {"target_scope": "areas"}, {"action_areas": "area:office"}, {"optional_parameters": "none"},
                 ], dry_run=dry_run, prompt="Turn on the office lights")
                 self.assertEqual(result["service"], "light.turn_on")
                 self.assertEqual(result["domain"], "light")
                 self.assertEqual(result["action_metadata"], {
                     "selection": "light.turn_on", "service": "light.turn_on", **SNAPSHOT["services"]["light.turn_on"],
                 })
-                self.assertEqual(len(models.requests), 3)
+                self.assertEqual(len(models.requests), 4)
                 self.assertEqual(result["target_scope"], "areas")
-                self.assertNotIn("parameter_selection", result)
+                self.assertEqual(result["parameter_selection"]["selected_parameters"], [])
                 self.assertFalse(models.chat_requests)
                 self.assertEqual(result["target"]["area_id"], "office")
                 self.assertNotIn("execution", result)
@@ -320,15 +320,15 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         history = [{"role": "user", "content": "Set the office to 20 degrees"}, {"role": "assistant", "content": "Selected."}]
         settings = normalize_settings({"history_enabled": True})
         result, models, execute = await self.run_agent([
-            {"service": "climate.set_temperature:temperature"}, {"target_scope": "areas"}, {"action_areas": "area:office"},
+            {"service": "climate.set_temperature:temperature"}, {"target_scope": "areas"}, {"action_areas": "area:office"}, {"optional_parameters": "none"},
         ], snapshot=snapshot, settings=settings, history=history, language="fr-CH")
         self.assertEqual(result["action_metadata"], {"service": "climate.set_temperature",
                                                   "selection": "climate.set_temperature:temperature", **description})
         self.assertEqual(snapshot, original)
         self.assertEqual(models.requests[0][1]["history"], history)
         self.assertEqual(models.requests[0][1]["language"], "fr-CH")
-        self.assertEqual(set(result["decisions"]), {"service", "target_scope", "action_areas"})
-        self.assertNotIn("parameter_selection", result)
+        self.assertEqual(set(result["decisions"]), {"service", "target_scope", "action_areas", "optional_parameters"})
+        self.assertEqual(result["parameter_selection"]["selected_parameters"], [])
         self.assertEqual(set(models.requests[1][2]["target_scope"]["criteria"]), {"entities", "entities_explicit_area", "areas", "unsure"})
         self.assertEqual(models.requests[-1][1]["history"], history)
         self.assertEqual(models.requests[-1][1]["language"], "fr-CH")
@@ -493,7 +493,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(models.requests), 4)
         self.assertFalse(models.chat_requests)
         self.assertEqual(result["target_scope"], "entities_explicit_area")
-        self.assertNotIn("parameter_selection", result)
+        self.assertEqual(result["parameter_selection"]["selected_parameters"], [])
         self.assertNotIn("optional_parameters", result["timings_ms"])
         execute.assert_not_awaited()
 
@@ -1187,6 +1187,8 @@ class IntegrationSettingsTests(unittest.TestCase):
             ("decider", "binary_answer_confidence", -0.1), ("decider", "binary_answer_confidence", 1.1),
             ("decider", "target_filter_confidence", -0.1), ("decider", "target_filter_confidence", 1.1),
             ("decider", "target_scope_confidence", -0.1), ("decider", "target_scope_confidence", 1.1),
+            ("decider", "action_area_probability_threshold", -0.1), ("decider", "action_area_probability_threshold", 1.1),
+            ("decider", "action_entity_probability_threshold", -0.1), ("decider", "action_entity_probability_threshold", 1.1),
             ("decider", "position_min", -1), ("decider", "position_max", 101),
             ("decider", "position_min", 100), ("decider", "position_levels", 11),
             ("decider", "position_step", 0.5), ("decider", "position_default_change", 0),

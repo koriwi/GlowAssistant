@@ -15,7 +15,7 @@ def answer(probabilities):
 
 
 def snapshot():
-    return {"entities": [
+    data = {"entities": [
         entity("light.desk", "Desk lamp", area_aliases=["Büro", "buero"]),
         entity("light.ceiling", "Ceiling lamp", area_aliases=["Büro", "buero"]),
         entity("light.kitchen", "Kitchen light", area="kitchen"),
@@ -24,6 +24,10 @@ def snapshot():
         entity("todo.shopping", "Shopping list", area="kitchen"),
         entity("todo.work", "Work list"), entity("todo.unassigned", "Other list", area=None),
     ], "services": {**SNAPSHOT["services"], "todo.add_item": {"target": {}, "fields": {"item": {"required": True}}}}}
+    for item in data["entities"]:
+        if item["area_id"] == "office":
+            item["area_aliases"] = ["Büro", "buero"]
+    return data
 
 
 class ProbabilitySelectionTests(unittest.TestCase):
@@ -56,18 +60,21 @@ class ProbabilitySelectionTests(unittest.TestCase):
 
 
 class ActionRoutingTests(unittest.IsolatedAsyncioTestCase):
-    async def run_route(self, scope, later=(), speaker_area=None, service="light.turn_off", data=None, settings=None, history=None):
+    async def run_route(self, scope, later=(), speaker_area=None, service="light.turn_off", data=None, settings=None, history=None, selected_parameters=(), prompt="test request"):
         client = ScriptedModels([{"service": service}, {"target_scope": scope}, *later])
         execute = AsyncMock()
         events = []
         result = await AgentEngine(settings or normalize_settings({}), client, execute,
                                    trace=lambda *event: events.append(event), history=history).process(
-            "test request", "de", data or snapshot(), speaker_area=speaker_area,
+            prompt, "de", data or snapshot(), speaker_area=speaker_area,
         )
         execute.assert_not_awaited()
         self.assertFalse(client.chat_requests)
         self.assertNotIn("execution", result)
-        self.assertNotIn("parameter_selection", result)
+        if result["route"] == "unsure":
+            self.assertNotIn("parameter_selection", result)
+        else:
+            self.assertEqual(result["parameter_selection"]["selected_parameters"], list(selected_parameters))
         return result, client, events
 
     async def test_explicit_areas_are_final_targets_without_entity_decision(self):
@@ -123,6 +130,33 @@ class ActionRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(client.requests[-1][2]["action_entities"]["criteria"]),
                          {"entity:todo.shopping", "entity:todo.work", "entity:todo.unassigned", "none"})
         self.assertNotIn("action_areas", result["decisions"])
+        self.assertEqual(result["required_parameters"], ["item"])
+        self.assertNotIn("optional_parameters", result["decisions"])
+
+    async def test_parameter_detection_runs_after_resolving_target_for_relative_climate_request(self):
+        data = snapshot()
+        data["entities"].extend([
+            entity("climate.office", "Office thermostat", temperature=20),
+            entity("climate.kitchen", "Kitchen thermostat", area="kitchen", temperature=21),
+        ])
+        data["services"]["climate.set_temperature"] = {"target": {}, "fields": {
+            "temperature": {"selector": {"number": {"min": 5, "max": 45, "unit_of_measurement": "°C"}}},
+            "hvac_mode": {"selector": {"select": {"options": ["heat", "off"]}}},
+        }}
+        result, client, events = await self.run_route("implied_area", [{"optional_parameters": answer({
+            "temperature": 0.8, "hvac_mode": 0.1, "none": 0.1,
+        })}], speaker_area="Office", service="climate.set_temperature:temperature", data=data,
+            selected_parameters=["temperature"], prompt="mach ein bisschen waermer")
+        self.assertEqual([set(questions) for _, _, questions in client.requests],
+                         [{"service"}, {"target_scope"}, {"optional_parameters"}])
+        self.assertEqual(client.requests[-1][1]["target"], result["target"])
+        self.assertEqual(result["target"]["area_id"], "office")
+        self.assertNotIn("entities", client.requests[-1][1])
+        self.assertNotIn("current", client.requests[-1][1])
+        self.assertEqual(result["required_parameters"], [])
+        self.assertNotIn("numeric", result["decisions"])
+        output = next(output for stage, _, output in events if stage == "optional_parameters" and output)
+        self.assertEqual(output["selected_parameters"], ["temperature"])
 
     async def test_unknown_speaker_area_stops_without_guessing_another_room(self):
         result, client, _ = await self.run_route("implied_area", speaker_area="Unknown room")

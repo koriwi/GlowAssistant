@@ -195,7 +195,8 @@ def print_report(report, show_answer_input=False):
         summary.append(("target scope", scopes.get(result.get("target_scope"), "Unsure")))
         if "selected_areas" in result:
             names = [area["name"] for area in result["selected_areas"]]
-            summary.append(("area filter", ", ".join(names) or "none"))
+            summary.append(("area filter", (", ".join(names[:5]) or "none") +
+                            (f" (+{len(names) - 5} more)" if len(names) > 5 else "")))
             if result["area_source"] == "speaker_context":
                 summary.append(("area source", "HA speaker context"))
         if "action_target_filter" in result:
@@ -220,7 +221,7 @@ def print_report(report, show_answer_input=False):
         print("Selected optional parameters: " + (", ".join(selected) or "none"))
         print(f"Probability threshold: {selection['probability_threshold']:g} (strictly above)")
         rows = [(name, f"{probability:.4f}", "keep" if name in selected else "drop" if name != "none" else "not a parameter")
-                for name, probability in selection["probabilities"].items()]
+                for name, probability in selection["probabilities"].items() if name in selected or name == "none"]
         if rows:
             print_table(["Parameter", "Probability", "Selection"], rows, [40, 12, 18], right_columns=(1,))
         print()

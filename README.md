@@ -2,7 +2,7 @@
 
 A Home Assistant conversation agent. Install it with HACS.
 
-GlowAssistant answers state queries. Action requests currently select the action and target type, then stop for testing. No device action is executed.
+GlowAssistant answers state queries. Action requests currently select the action, targets and parameter names, then stop for testing. No device action is executed.
 It uses Home Assistant's exposed entities. You can exclude additional entities in the integration settings.
 
 Minimum Home Assistant version: **2026.4.2**.

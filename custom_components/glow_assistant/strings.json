@@ -71,7 +71,11 @@
               "binary_answer_prompt": "Yes/no state answer prompt",
               "binary_answer_confidence": "Minimum yes/no answer confidence",
               "parameter_prompt": "Optional parameter selection prompt",
-              "parameter_probability_threshold": "Optional parameter probability threshold"
+              "parameter_probability_threshold": "Optional parameter probability threshold",
+              "action_area_prompt": "Action area selection prompt",
+              "action_area_probability_threshold": "Action area probability threshold",
+              "action_entity_prompt": "Action entity selection prompt",
+              "action_entity_probability_threshold": "Action entity probability threshold"
             },
             "data_description": {
               "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
@@ -108,7 +112,11 @@
               "binary_answer_prompt": "Answer yes/no from current candidate states, without entity keep/drop. Missing or ambiguous facts must return unsure. Clear to restore the default.",
               "binary_answer_confidence": "Stop if the yes/no answer is unsure or below this confidence. The answer model only translates a confirmed yes/no.",
               "parameter_prompt": "One Choice question for optional action fields plus none. Multiple parameters can be retained. Clear to restore the default. No templating.",
-              "parameter_probability_threshold": "Keep each actual parameter strictly above this probability (default 0.15). Uses per-option probabilities, not overall confidence. none never overrides retained parameters."
+              "parameter_probability_threshold": "Keep each actual parameter strictly above this probability (default 0.15). Uses per-option probabilities, not overall confidence. none never overrides retained parameters.",
+              "action_area_prompt": "One Choice question for explicitly requested areas. Multiple areas are allowed for area-only targets; specific entities with one explicit area use the unique highest probability. Implied areas use speaker context without this call. Clear to restore the default.",
+              "action_area_probability_threshold": "Keep each area strictly above this probability for multiple-area selection (default 0.15). Single explicit areas use the highest probability instead. Overall confidence is not a filter.",
+              "action_entity_prompt": "One Choice question for requested specific entities after domain and optional area filtering. Multiple targets are allowed. Clear to restore the default.",
+              "action_entity_probability_threshold": "Keep each entity strictly above this probability (default 0.15), independently of overall confidence. none never overrides retained entities."
             }
           },
           "answer": {
@@ -235,7 +243,11 @@
               "binary_answer_prompt": "Yes/no state answer prompt",
               "binary_answer_confidence": "Minimum yes/no answer confidence",
               "parameter_prompt": "Optional parameter selection prompt",
-              "parameter_probability_threshold": "Optional parameter probability threshold"
+              "parameter_probability_threshold": "Optional parameter probability threshold",
+              "action_area_prompt": "Action area selection prompt",
+              "action_area_probability_threshold": "Action area probability threshold",
+              "action_entity_prompt": "Action entity selection prompt",
+              "action_entity_probability_threshold": "Action entity probability threshold"
             },
             "data_description": {
               "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
@@ -272,7 +284,11 @@
               "binary_answer_prompt": "Answer yes/no from current candidate states, without entity keep/drop. Missing or ambiguous facts must return unsure. Clear to restore the default.",
               "binary_answer_confidence": "Stop if the yes/no answer is unsure or below this confidence. The answer model only translates a confirmed yes/no.",
               "parameter_prompt": "One Choice question for optional action fields plus none. Multiple parameters can be retained. Clear to restore the default. No templating.",
-              "parameter_probability_threshold": "Keep each actual parameter strictly above this probability (default 0.15). Uses per-option probabilities, not overall confidence. none never overrides retained parameters."
+              "parameter_probability_threshold": "Keep each actual parameter strictly above this probability (default 0.15). Uses per-option probabilities, not overall confidence. none never overrides retained parameters.",
+              "action_area_prompt": "One Choice question for explicitly requested areas. Multiple areas are allowed for area-only targets; specific entities with one explicit area use the unique highest probability. Implied areas use speaker context without this call. Clear to restore the default.",
+              "action_area_probability_threshold": "Keep each area strictly above this probability for multiple-area selection (default 0.15). Single explicit areas use the highest probability instead. Overall confidence is not a filter.",
+              "action_entity_prompt": "One Choice question for requested specific entities after domain and optional area filtering. Multiple targets are allowed. Clear to restore the default.",
+              "action_entity_probability_threshold": "Keep each entity strictly above this probability (default 0.15), independently of overall confidence. none never overrides retained entities."
             }
           },
           "answer": {
@@ -409,7 +425,11 @@
               "binary_answer_prompt": "Yes/no state answer prompt",
               "binary_answer_confidence": "Minimum yes/no answer confidence",
               "parameter_prompt": "Optional parameter selection prompt",
-              "parameter_probability_threshold": "Optional parameter probability threshold"
+              "parameter_probability_threshold": "Optional parameter probability threshold",
+              "action_area_prompt": "Action area selection prompt",
+              "action_area_probability_threshold": "Action area probability threshold",
+              "action_entity_prompt": "Action entity selection prompt",
+              "action_entity_probability_threshold": "Action entity probability threshold"
             },
             "data_description": {
               "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
@@ -446,7 +466,11 @@
               "binary_answer_prompt": "Answer yes/no from current candidate states, without entity keep/drop. Missing or ambiguous facts must return unsure. Clear to restore the default.",
               "binary_answer_confidence": "Stop if the yes/no answer is unsure or below this confidence. The answer model only translates a confirmed yes/no.",
               "parameter_prompt": "One Choice question for optional action fields plus none. Multiple parameters can be retained. Clear to restore the default. No templating.",
-              "parameter_probability_threshold": "Keep each actual parameter strictly above this probability (default 0.15). Uses per-option probabilities, not overall confidence. none never overrides retained parameters."
+              "parameter_probability_threshold": "Keep each actual parameter strictly above this probability (default 0.15). Uses per-option probabilities, not overall confidence. none never overrides retained parameters.",
+              "action_area_prompt": "One Choice question for explicitly requested areas. Multiple areas are allowed for area-only targets; specific entities with one explicit area use the unique highest probability. Implied areas use speaker context without this call. Clear to restore the default.",
+              "action_area_probability_threshold": "Keep each area strictly above this probability for multiple-area selection (default 0.15). Single explicit areas use the highest probability instead. Overall confidence is not a filter.",
+              "action_entity_prompt": "One Choice question for requested specific entities after domain and optional area filtering. Multiple targets are allowed. Clear to restore the default.",
+              "action_entity_probability_threshold": "Keep each entity strictly above this probability (default 0.15), independently of overall confidence. none never overrides retained entities."
             }
           },
           "answer": {

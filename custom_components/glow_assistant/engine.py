@@ -254,6 +254,7 @@ class AgentEngine:
             }, {"target_scope": choice_question(scopes, config["target_scope_prompt"])})
             result["target_scope"] = self._choice(response, "target_scope", scopes)
             await self._select_action_targets(result, entities)
+            await self._select_parameters(result)
             return
 
         result["service"] = QUERY
@@ -375,6 +376,8 @@ class AgentEngine:
         config = self.settings["decider"]
         fields = action_fields(result["action_metadata"].get("fields") or {})
         optional, payload = parameter_request(result["request"], result["service"], fields, config["parameter_prompt"])
+        if result.get("target"):
+            payload["state"]["target"] = result["target"]
         result["required_parameters"] = [name for name, field in fields.items() if field.get("required", False)]
         if not optional:
             result["parameter_selection"] = {"selected_parameters": [], "probabilities": {},
