@@ -12,7 +12,6 @@ from .const import (
     UNSURE,
 )
 from .debug import STAGE_LABELS, decision_details, failure_details, model_failure
-from .domain_filter import decode_domains, domain_request
 from .general import general_answer
 from .history import with_history
 from .numeric_values import decode_numeric, finite_number, numeric_request
@@ -282,11 +281,21 @@ class AgentEngine:
             raise Uncertain("target", "No exposed devices match the selected action and room filter.",
                             "Check the device's room, Assist exposure settings, and GlowAssistant exclusions.",
                             domain=domain, area=areas[area])
-        if query and area == "all_areas":
-            candidates = await self._filter_domains(result, candidates)
+        if query:
+            candidates = await self._select_domain(result, candidates, areas[area])
+            domain = result["domain"]
+            query_types = {"yes_no": "A yes/no question about current states.",
+                           "complex": "A question requesting values, names, counts or other details."}
+            response = await self._decide(result, "query_type", {"prompt": prompt}, {
+                "query_type": choice_question(query_types, config["query_type_prompt"]),
+            })
+            result["query_type"] = self._choice(response, "query_type", query_types)
+            if result["query_type"] == "yes_no":
+                await self._answer_yes_no(result, candidates, areas[area], language_instruction)
+                return
         target_state = {
             "prompt": prompt, "service": result["service"],
-            **({"domain": domain} if not query else {}),
+            "domain": domain,
             "area": areas[area] if area != "no_area" else None,
         }
         # Native HA target selectors accept entity lists
@@ -350,14 +359,52 @@ class AgentEngine:
                 self._failure(result, failure_details("execution", "Home Assistant could not confirm the device command.",
                                                      "Check the device's availability, Assist exposure, and Home Assistant logs."))
         facts = {key: value for key, value in result.items()
-                 if key not in ("decisions", "usage", "timings_ms", "failures", "domain_filter", "target_selection")}
+                 if key not in ("decisions", "usage", "timings_ms", "failures", "domain_filter", "target_selection",
+                                "target", "state_info")}
+        facts["entities"] = result["state_info"] if query else [
+            {"entity_id": entity["entity_id"], "name": entity["name"], "domain": entity["domain"],
+             "area": entity.get("area_name")}
+            for entity in members
+        ]
+        if result["target"]["type"] == "area":
+            facts["area"] = result["target"]["name"]
+        if "execution" in facts:
+            facts["execution"] = {**facts["execution"]}
+            if "arguments" in facts["execution"]:
+                facts["execution"]["arguments"] = {
+                    key: value for key, value in facts["execution"]["arguments"].items() if key != "entity_id"
+                }
         if self.dry_run:
             language_instruction += " This is a plan-only benchmark. No device command was sent; describe actions as plans."
+        await self._answer(result, [
+            {"role": "system", "content": f"{self.settings['answer']['prompt']}\n{language_instruction}"},
+            {"role": "user", "content": json.dumps(facts, ensure_ascii=False, default=str)},
+        ])
+
+    async def _answer_yes_no(self, result, entities, area, language_instruction):
+        candidates = [
+            {**target, "state": entity["state"], "attributes":
+             entity.get("attributes", {}) if entity["state"] not in ("unknown", "unavailable") else {}}
+            for target, entity in zip(target_options(entities).values(), entities, strict=True)
+        ]
+        options = {"yes": "The proposition in the user's question is true.",
+                   "no": "The proposition in the user's question is false."}
+        response = await self._decide(result, "binary_answer", {
+            "prompt": result["request"], "area": area, "domain": result["domain"], "entities": candidates,
+        }, {"binary_answer": choice_question(options, self.settings["decider"]["binary_answer_prompt"])})
+        result["state_answer"] = self._choice(response, "binary_answer", options)
+        await self._answer(result, [
+            {"role": "system", "content": (
+                f"{self.settings['answer']['prompt']}\n{language_instruction}\n"
+                "For this reply, only translate the supplied state_answer (yes or no) into the Assist pipeline language. "
+                "Output only that translated word with optional final punctuation. Do not explain, expand or reconsider it."
+            )},
+            {"role": "user", "content": json.dumps({"state_answer": result["state_answer"]})},
+        ])
+
+    async def _answer(self, result, messages):
         try:
-            await self._chat(result, "answer", [
-                {"role": "system", "content": f"{self.settings['answer']['prompt']}\n{language_instruction}"},
-                {"role": "user", "content": json.dumps(facts, ensure_ascii=False, default=str)},
-            ])
+            await self._chat(result, "answer", messages)
         except ModelError as error:
             completed = result.get("execution", {}).get("status") == "completed"
             result["answer"] = self.settings["answer_error_reply" if completed else "error_reply"]
@@ -387,6 +434,9 @@ class AgentEngine:
     async def _select_targets(self, result, entities, state, query):
         config = self.settings["decider"]
         targets = list(target_options(entities).values())
+        if query:
+            current_states = {entity["entity_id"]: entity["state"] for entity in entities}
+            targets = [{**target, "state": current_states[target["entity_id"]]} for target in targets]
         payload = target_request(state, targets, config["target_filter_prompt"])
 
         def summarize(response):
@@ -407,23 +457,25 @@ class AgentEngine:
             result["target"] = {"type": "entities", "entity_ids": selected, "names": [entity["name"] for entity in members]}
         return members
 
-    async def _filter_domains(self, result, entities):
+    async def _select_domain(self, result, entities, area):
         config = self.settings["decider"]
-        domains = sorted({entity["domain"] for entity in entities})
-        payload = domain_request(result["request"], domains, config["domain_filter_prompt"])
+        domains = {domain: domain for domain in sorted({entity["domain"] for entity in entities})}
 
         def summarize(response):
-            selected = decode_domains(response, domains, config["domain_filter_confidence"], config["domain_filter_keep_uncertain"])
-            selected.update(entities_before=len(entities),
-                            entities_after=sum(entity["domain"] in selected["kept_domains"] for entity in entities))
+            domain = read_choice(response, "domain", domains, config["domain_confidence"])
+            selected = {"selected_domain": None if domain == UNSURE else domain,
+                        "kept_domains": [domain] if domain != UNSURE else [],
+                        "entities_before": len(entities),
+                        "entities_after": sum(entity["domain"] == domain for entity in entities)}
             result["domain_filter"] = selected
             return selected
 
-        await self._decide(result, "domain_filter", payload["state"], payload["questions"], summarize=summarize)
-        if not result["domain_filter"]["kept_domains"]:
-            raise Uncertain("domain_filter", "No domains were retained by the whole-home domain filter.",
-                            "Review the domain decisions, confidence threshold, and Keep uncertain domains setting.")
-        return [entity for entity in entities if entity["domain"] in result["domain_filter"]["kept_domains"]]
+        response = await self._decide(result, "domain", {"prompt": result["request"], "area": area}, {
+            "domain": choice_question(domains, config["domain_prompt"]),
+        }, summarize=summarize)
+        domain = self._choice(response, "domain", domains)
+        result["domain"] = domain
+        return [entity for entity in entities if entity["domain"] == domain]
 
     async def _text(self, result):
         config = self.settings["decider"]

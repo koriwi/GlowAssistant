@@ -8,6 +8,9 @@ STAGE_LABELS = {
     "context": "Read Home Assistant devices",
     "service": "Choose an action",
     "area": "Choose a room",
+    "domain": "Choose a state-query domain",
+    "query_type": "Choose a yes/no or detailed answer",
+    "binary_answer": "Answer the yes/no state question",
     "target_scope": "Choose the room or individual devices",
     "domain_filter": "Filter whole-home entity domains",
     "target": "Choose a device or room",
@@ -127,7 +130,7 @@ def decision_details(questions, answers, config, query=False, targets=None):
         elif target_filter:
             confidence_stage = "target_filter"
             uncertain_setting = "query_target_keep_uncertain" if query else "action_target_keep_uncertain"
-        elif name in ("service", "area", "target_scope", "target"):
+        elif name in ("service", "area", "domain", "query_type", "binary_answer", "target_scope", "target"):
             confidence_stage = name
             uncertain_setting = None
         else:

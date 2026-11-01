@@ -28,6 +28,27 @@ class TargetSelectionTests(unittest.TestCase):
         self.assertEqual(json.dumps(request).count("Custom target rules"), 1)
         self.assertEqual(set(request["questions"]), {"target_0", "target_1"})
         self.assertTrue(all(set(question["criteria"]) == {"keep", "drop"} for question in request["questions"].values()))
+        for index, target in enumerate(targets):
+            question = request["questions"][f"target_{index}"]["instructions"]
+            self.assertIn(json.dumps({"entity_id": target["entity_id"]}), question)
+            self.assertNotIn("zero-based index", question)
+            self.assertNotIn('"state":', question)
+
+    def test_query_questions_identify_each_entity_and_state_without_an_index_lookup(self):
+        targets = [{"entity_id": f"light.lamp_{index}", "name": f"Lamp {index}",
+                    "state": ("on", "off", "unknown", "unavailable")[index % 4]} for index in range(14)]
+        targets[12] = {"entity_id": "light.treppenhaus_eingang_lampe_l2", "name": "Wandlampe Holz", "state": "on"}
+        original = copy.deepcopy(targets)
+        for candidates in (targets, list(reversed(targets))):
+            request = target_request({"prompt": "Which lights are on?", "service": "query_state"}, candidates, "Query rules")
+            self.assertEqual(json.dumps(request).count("Query rules"), 1)
+            for index, target in enumerate(candidates):
+                question = request["questions"][f"target_{index}"]
+                self.assertIn(json.dumps({"entity_id": target["entity_id"], "state": target["state"]}),
+                              question["instructions"])
+                self.assertNotIn("zero-based index", question["instructions"])
+                self.assertEqual(set(question["criteria"]), {"keep", "drop"})
+        self.assertEqual(targets, original)
 
     def test_uncertain_entities_follow_the_configured_switch(self):
         targets = [{"entity_id": f"light.{index}"} for index in range(4)]

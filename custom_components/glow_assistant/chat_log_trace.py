@@ -9,6 +9,9 @@ from .debug import failure_text
 STAGE_NAMES = {
     "service": "glow_assistant_select_service",
     "area": "glow_assistant_select_area",
+    "domain": "glow_assistant_select_domain",
+    "query_type": "glow_assistant_select_query_type",
+    "binary_answer": "glow_assistant_answer_yes_no",
     "target_scope": "glow_assistant_select_target_scope",
     "domain_filter": "glow_assistant_filter_domains",
     "target": "glow_assistant_select_target",

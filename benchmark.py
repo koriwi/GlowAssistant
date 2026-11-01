@@ -2,7 +2,10 @@ import argparse
 import asyncio
 import json
 import os
+import shutil
 import sys
+import textwrap
+from itertools import zip_longest
 from pathlib import Path
 from time import perf_counter
 from urllib.parse import urlsplit
@@ -33,9 +36,13 @@ def parser():
     result.add_argument("--query", "-q", required=True)
     result.add_argument("--confidence", type=confidence, help="Override every decider confidence threshold.")
     for field in CONFIDENCE_FIELDS:
-        result.add_argument("--" + field.replace("_", "-"), type=confidence)
+        flags = ["--" + field.replace("_", "-")]
+        if field == "domain_confidence":
+            flags.append("--domain-filter-confidence")
+        result.add_argument(*flags, type=confidence)
     result.add_argument("--language", help="Assist pipeline language to simulate; defaults to BENCHMARK_LANGUAGE or de.")
     result.add_argument("--json", action="store_true", help="Print complete decisions, trace and timings.")
+    result.add_argument("--show-answer-input", action="store_true", help="Print the exact smart-home answer request, including messages.")
     return result
 
 
@@ -123,18 +130,62 @@ async def run(args, env):
     }
 
 
-def print_report(report):
+def print_table(headers, rows, limits, right_columns=()):
+    rows = [[str(value) for value in row] for row in rows]
+    widths = [min(limit, max(len(row[index]) for row in [headers, *rows])) for index, limit in enumerate(limits)]
+
+    def line(cells):
+        return "  ".join(cell.rjust(width) if index in right_columns else cell.ljust(width)
+                         for index, (cell, width) in enumerate(zip(cells, widths, strict=True))).rstrip()
+
+    print(line(headers))
+    print(line(["-" * width for width in widths]))
+    for row in rows:
+        cells = [textwrap.wrap(value, width=width) or [""] for value, width in zip(row, widths, strict=True)]
+        for parts in zip_longest(*cells, fillvalue=""):
+            print(line(parts))
+
+
+def answer_input(report, readable=False):
+    for event in report["trace"]:
+        data = event.get("input", {})
+        if event["stage"] == "answer" and "messages" in data:
+            payload = {key: data[key] for key in ("model", "messages", "max_tokens", "temperature")}
+            if readable:
+                payload["messages"] = [{**message} for message in payload["messages"]]
+                for message in payload["messages"]:
+                    content = message.get("content")
+                    if isinstance(content, str):
+                        try:
+                            decoded = json.loads(content)
+                        except ValueError:
+                            continue
+                        if isinstance(decoded, (dict, list)):
+                            message["content"] = decoded
+            return payload
+    return None
+
+
+def print_report(report, show_answer_input=False):
     result = report["result"]
-    print("mode: plan only; no device actions")
-    print(f"context: {report['context']['entities']} entities; {report['context']['actions']} actions")
+    columns = shutil.get_terminal_size((120, 24)).columns
+    summary = [("mode", "plan only; no device actions"),
+               ("context", f"{report['context']['entities']} entities; {report['context']['actions']} actions")]
     for field in ("route", "service", "domain"):
         if field in result:
-            print(f"{field}: {result[field]}")
+            summary.append((field, result[field] if result[field] is not None else "-"))
     if result.get("target"):
         target = result["target"]
         name = target.get("name") or ", ".join(target.get("names", []))
         identifier = target.get("entity_id") or target.get("area_id")
-        print(f"target: {target['type']}; {name}" + (f" ({identifier})" if identifier else ""))
+        summary.append(("target", f"{target['type']}; {name}" + (f" ({identifier})" if identifier else "")))
+    if result.get("execution"):
+        execution = result["execution"]
+        summary.append(("execution", execution["status"]))
+        summary.append(("arguments", json.dumps(execution.get("arguments", {}), ensure_ascii=False)))
+    print_table(["Result", "Value"], summary, [14, max(24, columns - 16)])
+    print()
+    stages = [("snapshot", str(report["timings_ms"]["snapshot"]), "Read HA context and settings", "-")]
     for event in report["trace"]:
         output = event.get("output", {})
         if "duration_ms" not in output:
@@ -144,23 +195,27 @@ def print_report(report):
             kept = sum(info.get("kept", False) for info in decisions.values())
             detail = f"keep {kept}/{len(decisions)}"
         else:
-            choices = []
-            for name, info in decisions.items():
-                value = info.get("effective_choice", info.get("score", info.get("choice")))
-                score = info.get("confidence")
-                choices.append(f"{name}={value}" + (f" ({score:.3f})" if isinstance(score, (int, float)) else ""))
-            detail = ", ".join(choices) or output.get("status", "")
-        print(f"{event['stage']}: {output['duration_ms']} ms; {detail}")
-    if result.get("execution"):
-        execution = result["execution"]
-        print(f"execution: {execution['status']}; " + json.dumps(execution.get("arguments", {}), ensure_ascii=False))
+            detail = ", ".join(f"{name}={info.get('effective_choice', info.get('score', info.get('choice')))}"
+                               for name, info in decisions.items()) or output.get("status", "")
+        scores = [info["confidence"] for info in decisions.values() if isinstance(info.get("confidence"), (int, float))]
+        score = "-"
+        if scores:
+            score = f"{min(scores):.3f}" if min(scores) == max(scores) else f"{min(scores):.3f}–{max(scores):.3f}"
+        stages.append((event["stage"], str(output["duration_ms"]), detail, score))
+    timings = report["timings_ms"]
+    stages.extend([("engine subtotal", str(timings["engine"]), "", "-"), ("total", str(timings["total"]), "", "-")])
+    print_table(["Stage", "Time (ms)", "Decision / status", "Confidence"], stages,
+                [20, 9, max(24, columns - 50), 12], right_columns=(1, 3))
+    print()
     for field in ("answer", "error"):
         if field in result:
             print(f"{field}: {result[field]}")
     for failure in result.get("failures", []):
         print(f"failure [{failure['stage']}]: {failure['reason']}")
-    timings = report["timings_ms"]
-    print(f"total: {timings['total']} ms; snapshot: {timings['snapshot']} ms; engine: {timings['engine']} ms")
+    if show_answer_input:
+        data = answer_input(report, readable=True)
+        print("\nAnswer model input:")
+        print(json.dumps(data, ensure_ascii=False, indent=2) if data is not None else "Answer model was not called.")
 
 
 def main(argv=None):
@@ -175,9 +230,11 @@ def main(argv=None):
         print(f"benchmark error: {error}", file=sys.stderr)
         return 1
     if args.json:
+        if args.show_answer_input:
+            report["answer_input"] = answer_input(report, readable=True)
         print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
     else:
-        print_report(report)
+        print_report(report, show_answer_input=args.show_answer_input)
     return int("error" in report["result"])
 
 

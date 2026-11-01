@@ -93,11 +93,121 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         result = await agent.process(prompt, language, snapshot)
         return result, models, execute
 
+    async def test_yes_no_query_skips_entity_filter_and_only_translates_the_decision(self):
+        for answer, translated in (("yes", "Ja."), ("no", "Nein.")):
+            with self.subTest(answer=answer):
+                events = []
+                result, models, execute = await self.run_agent([
+                    {"service": "query_state"}, {"area": "area:office"}, {"domain": "light"},
+                    {"query_type": "yes_no"}, {"binary_answer": answer},
+                ], prompt="Ist die Lampe im Büro an?", answers=[translated],
+                    trace=lambda *event: events.append(event))
+                self.assertEqual(result["answer"], translated)
+                self.assertEqual(result["state_answer"], answer)
+                self.assertEqual(result["query_type"], "yes_no")
+                self.assertIsNone(result["target"])
+                self.assertNotIn("target_selection", result)
+                self.assertNotIn("state_info", result)
+                self.assertEqual([set(questions) for _, _, questions in models.requests],
+                                 [{"service"}, {"area"}, {"domain"}, {"query_type"}, {"binary_answer"}])
+                state = models.requests[-1][1]
+                self.assertEqual({item["entity_id"] for item in state["entities"]}, {"light.desk", "light.ceiling"})
+                self.assertTrue(all(item["state"] == "on" for item in state["entities"]))
+                system, facts = models.chat_requests[0][1]
+                self.assertIn("only translate", system["content"])
+                self.assertIn("Assist pipeline language: de", system["content"])
+                self.assertEqual(json.loads(facts["content"]), {"state_answer": answer})
+                outputs = {stage: output for stage, _, output in events if output is not None}
+                for stage in ("query_type", "binary_answer"):
+                    self.assertIn("duration_ms", outputs[stage])
+                    self.assertEqual(outputs[stage]["decisions"][stage]["confidence"], 0.9)
+                    self.assertEqual(outputs[stage]["decisions"][stage]["effective_choice"],
+                                     "yes_no" if stage == "query_type" else answer)
+                execute.assert_not_awaited()
+
+    async def test_whole_home_yes_no_uses_current_states_and_history_with_no_entity_decisions(self):
+        snapshot = copy.deepcopy(SNAPSHOT)
+        snapshot["entities"].extend([
+            entity("binary_sensor.left_window", "Left window", device_class="window"),
+            entity("binary_sensor.right_window", "Right window", state="off", area="bedroom", device_class="window"),
+            entity("binary_sensor.unassigned_window", "Other window", state="unavailable", area=None, temperature=99),
+            entity("binary_sensor.motion", "Motion", device_class="motion"),
+        ])
+        snapshot["entities"][4]["aliases"] = ["Renamed window"]
+        history = [{"role": "user", "content": "Are any windows open in the house?"},
+                   {"role": "assistant", "content": "Yes."}]
+        settings = normalize_settings({"history_enabled": True, "decider": {
+            "query_type_prompt": "Custom type rules", "binary_answer_prompt": "Custom binary rules",
+            "query_type_confidence": 0.2, "binary_answer_confidence": 0.3,
+        }})
+        result, models, execute = await self.run_agent([
+            {"service": "query_state"}, {"area": "all_areas"}, {"domain": "binary_sensor"},
+            {"query_type": "yes_no"}, {"binary_answer": "yes"},
+        ], snapshot=snapshot, history=history, settings=settings, language="fr-CH", prompt="And now?")
+        for _, state, _ in models.requests:
+            self.assertEqual(state["language"], "fr-CH")
+            self.assertEqual(state["history"], history)
+        self.assertIn("Custom type rules", models.requests[-2][2]["query_type"]["instructions"])
+        self.assertIn("Custom binary rules", models.requests[-1][2]["binary_answer"]["instructions"])
+        candidates = {item["entity_id"]: item for item in models.requests[-1][1]["entities"]}
+        self.assertEqual(set(candidates), {item["entity_id"] for item in snapshot["entities"]
+                                           if item["domain"] == "binary_sensor"})
+        self.assertEqual(candidates["binary_sensor.left_window"]["aliases"], ["Renamed window"])
+        self.assertEqual(candidates["binary_sensor.right_window"]["area"], "Bedroom")
+        self.assertEqual(candidates["binary_sensor.right_window"]["state"], "off")
+        self.assertEqual(candidates["binary_sensor.unassigned_window"]["state"], "unavailable")
+        self.assertEqual(candidates["binary_sensor.unassigned_window"]["attributes"], {})
+        self.assertIsNone(candidates["binary_sensor.unassigned_window"]["area"])
+        self.assertIn(json.dumps(history), models.chat_requests[0][1][0]["content"])
+        self.assertIn("Assist pipeline language: fr-CH", models.chat_requests[0][1][0]["content"])
+        self.assertEqual(result["state_answer"], "yes")
+        execute.assert_not_awaited()
+
+    async def test_uncertain_query_type_or_binary_answer_stops_without_chat_or_entity_filter(self):
+        for stage in ("query_type", "binary_answer"):
+            for choice, threshold in (("unsure", 0), ("yes_no" if stage == "query_type" else "yes", 0.95)):
+                with self.subTest(stage=stage, choice=choice, threshold=threshold):
+                    choices = [{"service": "query_state"}, {"area": "area:office"}, {"domain": "light"}]
+                    if stage == "binary_answer":
+                        choices.append({"query_type": "yes_no"})
+                    choices.append({stage: choice})
+                    settings = normalize_settings({"decider": {f"{stage}_confidence": threshold}})
+                    events = []
+                    result, models, execute = await self.run_agent(
+                        choices, settings=settings, trace=lambda *event: events.append(event),
+                    )
+                    self.assertEqual(result["route"], "unsure")
+                    self.assertEqual(result["answer"], settings["unsure_reply"])
+                    self.assertEqual(result["failures"][0]["stage"], stage)
+                    self.assertFalse(models.chat_requests)
+                    self.assertNotIn("target", result["decisions"])
+                    output = next(output for name, _, output in events if name == stage and output)
+                    self.assertEqual(output["decisions"][stage]["minimum_confidence"], threshold)
+                    execute.assert_not_awaited()
+
+    async def test_yes_no_translation_failure_preserves_decision_and_reports_answer_failure(self):
+        result, models, execute = await self.run_agent([
+            {"service": "query_state"}, {"area": "area:office"}, {"domain": "light"},
+            {"query_type": "yes_no"}, {"binary_answer": "no"},
+        ], answers=[ModelError("Model reply reached its output token limit.")])
+        self.assertEqual(result["state_answer"], "no")
+        self.assertEqual(result["answer"], DEFAULTS["error_reply"])
+        self.assertEqual(result["failures"][0]["stage"], "answer")
+        self.assertEqual(len(models.chat_requests), 1)
+        execute.assert_not_awaited()
+
+    async def test_invalid_binary_choice_is_rejected_without_an_answer_or_action(self):
+        with self.assertRaisesRegex(ModelError, "Invalid classifier"):
+            await self.run_agent([
+                {"service": "query_state"}, {"area": "area:office"}, {"domain": "light"},
+                {"query_type": "yes_no"}, {"binary_answer": "maybe"},
+            ])
+
     async def test_pipeline_language_reaches_every_decider_and_the_answer_model(self):
         settings = normalize_settings({"answer": {"prompt": "Custom answer rules"}})
         _, models, _ = await self.run_agent([
             {"service": "query_state"},
-            {"area": "area:office"}, {"target": "entity:light.desk"},
+            {"area": "area:office"}, {"domain": "light"}, {"query_type": "complex"}, {"target": "entity:light.desk"},
         ], settings=settings, language="fr-CH")
         for _, state, _ in models.requests:
             self.assertEqual(state["language"], "fr-CH")
@@ -125,7 +235,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_plan_only_query_reads_states_without_an_execution_step(self):
         result, _, execute = await self.run_agent([
-            {"service": "query_state"}, {"area": "area:office"}, {"targets": ["light.desk"]},
+            {"service": "query_state"}, {"area": "area:office"}, {"domain": "light"}, {"query_type": "complex"}, {"targets": ["light.desk"]},
         ], dry_run=True)
         execute.assert_not_awaited()
         self.assertEqual(result["state_info"][0]["entity_id"], "light.desk")
@@ -145,7 +255,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         settings = normalize_settings({"history_enabled": True})
         result, models, execute = await self.run_agent([
             {"service": "query_state"},
-            {"area": "area:office"}, {"target": "entity:light.desk"},
+            {"area": "area:office"}, {"domain": "light"}, {"query_type": "complex"}, {"target": "entity:light.desk"},
         ], settings=settings, history=history)
         self.assertEqual(result["answer"], "Erledigt.")
         for _, state, questions in models.requests:
@@ -155,13 +265,13 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
             else:
                 self.assertTrue(all("resolve references" in item["instructions"] for item in questions.values()))
         self.assertIn(json.dumps(history, ensure_ascii=False), models.chat_requests[0][1][0]["content"])
-        self.assertEqual(len(models.requests), 3)
+        self.assertEqual(len(models.requests), 5)
         execute.assert_not_awaited()
 
     async def test_disabled_history_is_not_forwarded_even_if_supplied(self):
         _, models, _ = await self.run_agent([
             {"service": "query_state"},
-            {"area": "area:office"}, {"target": "entity:light.desk"},
+            {"area": "area:office"}, {"domain": "light"}, {"query_type": "complex"}, {"target": "entity:light.desk"},
         ], history=[{"role": "user", "content": "private previous message"}])
         self.assertNotIn("private previous message", json.dumps(models.requests))
         self.assertNotIn("private previous message", json.dumps(models.chat_requests))
@@ -199,7 +309,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         with patch("custom_components.glow_assistant.engine.general_answer", new_callable=AsyncMock) as general:
             result, _, _ = await self.run_agent([
                 {"service": "query_state"},
-                {"area": "area:office"}, {"target": "entity:light.desk"},
+                {"area": "area:office"}, {"domain": "light"}, {"query_type": "complex"}, {"target": "entity:light.desk"},
             ], settings=settings)
             self.assertEqual(result["route"], "smarthome")
             result, _, _ = await self.run_agent([{"service": "not-smarthome-related"}], settings=settings)
@@ -260,7 +370,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         events = []
         result, _, execute = await self.run_agent([
             {"service": "query_state"},
-            {"area": "area:office"}, {"target": "area:office"},
+            {"area": "area:office"}, {"domain": "light"}, {"query_type": "complex"}, {"target": "area:office"},
         ], answers=[ModelError("Model endpoint returned HTTP 401.")], trace=lambda *event: events.append(event))
         output = next(output for stage, _, output in events if stage == "answer" and output is not None)
         self.assertEqual(output["status"], "error")
@@ -296,7 +406,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         session = Mock()
         models = ScriptedModels([
             {"service": "query_state"}, {"area": "all_areas"},
-            {"domain_light": "keep", "domain_sensor": "keep"}, {"target": "all_areas"},
+            {"domain": "light"}, {"query_type": "complex"}, {"target": "all_areas"},
         ])
         models.chat = ModelClient(session).chat
         execute = AsyncMock()
@@ -355,7 +465,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         }})
         events = []
         _, models, _ = await self.run_agent([
-            {"service": "query_state"}, {"area": "area:office"}, {"target": "entity:light.desk"},
+            {"service": "query_state"}, {"area": "area:office"}, {"domain": "light"}, {"query_type": "complex"}, {"target": "entity:light.desk"},
         ], settings=settings, history=history, trace=lambda *event: events.append(event))
         arguments = next(arguments for stage, arguments, output in events if stage == "answer" and output is None)
         self.assertEqual(arguments["messages"], models.chat_requests[0][1])
@@ -379,6 +489,11 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([target["entity_id"] for target in targets], ["light.desk", "light.ceiling"])
         self.assertTrue(all(set(question["criteria"]) == {"keep", "drop"} for question in models.requests[3][2].values()))
         self.assertNotIn("attributes", targets[0])
+        self.assertTrue(all("state" not in target for target in targets))
+        for index, target in enumerate(targets):
+            question = models.requests[3][2][f"target_{index}"]["instructions"]
+            self.assertIn(json.dumps({"entity_id": target["entity_id"]}), question)
+            self.assertNotIn("zero-based index", question)
         facts = json.loads(models.chat_requests[0][1][1]["content"])
         self.assertEqual(facts["execution"]["status"], "completed")
         self.assertNotIn("decisions", facts)
@@ -430,11 +545,11 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         for service, area in (("query_state", "area:office"), ("light.turn_on", "no_area")):
             with self.subTest(service=service, area=area):
                 result, models, _ = await self.run_agent([
-                    {"service": service}, {"area": area}, {"targets": ["light.desk"]},
+                    {"service": service}, {"area": area}, *([{"domain": "light"}, {"query_type": "complex"}] if service == "query_state" else []), {"targets": ["light.desk"]},
                 ])
                 self.assertNotIn("target_scope", result["decisions"])
-                self.assertEqual(len(models.requests), 3)
-                self.assertIn("target_0", models.requests[2][2])
+                self.assertEqual(len(models.requests), 5 if service == "query_state" else 3)
+                self.assertIn("target_0", models.requests[-1][2])
 
     async def test_area_or_entities_call_receives_language_history_and_editable_prompt(self):
         history = [{"role": "user", "content": "Turn on all office lights"}, {"role": "assistant", "content": "Done"}]
@@ -453,12 +568,12 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
     async def test_query_uses_cached_state_and_does_not_execute(self):
         result, models, execute = await self.run_agent([
             {"service": "query_state"},
-            {"area": "area:office"}, {"target": "entity:sensor.office"},
+            {"area": "area:office"}, {"domain": "sensor"}, {"query_type": "complex"}, {"target": "entity:sensor.office"},
         ], answers=["Es sind 22 Grad."])
         execute.assert_not_awaited()
         self.assertEqual(result["state_info"][0]["state"], "22")
         facts = json.loads(models.chat_requests[0][1][1]["content"])
-        self.assertEqual(facts["state_info"][0]["attributes"]["unit_of_measurement"], "°C")
+        self.assertEqual(facts["entities"][0]["attributes"]["unit_of_measurement"], "°C")
         self.assertEqual(result["answer"], "Es sind 22 Grad.")
 
     async def test_unavailable_query_omits_stale_attributes(self):
@@ -466,7 +581,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         snapshot["entities"][-1]["state"] = "unavailable"
         result, _, _ = await self.run_agent([
             {"service": "query_state"},
-            {"area": "all_areas"}, {"domain_sensor": "keep", "domain_light": "drop"},
+            {"area": "all_areas"}, {"domain": "sensor"}, {"query_type": "complex"},
             {"target": "entity:sensor.office"},
         ], snapshot=snapshot)
         self.assertEqual(result["state_info"][0]["attributes"], {})
@@ -527,59 +642,89 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("No exposed devices", result["failures"][0]["reason"])
         execute.assert_not_awaited()
 
-    async def test_state_query_sees_all_domains_in_the_selected_area(self):
+    async def test_room_query_selects_one_available_domain_before_entity_keep_drop(self):
         snapshot = copy.deepcopy(SNAPSHOT)
         snapshot["entities"].extend([
             entity("binary_sensor.office_window", "Office window", device_class="window"),
-            entity("binary_sensor.other_window", "Other window", area="bedroom", device_class="window"),
+            entity("fan.bedroom", "Fan", area="bedroom"),
         ])
         result, models, execute = await self.run_agent([
             {"service": "query_state"}, {"area": "area:office"},
-            {"target": "entity:binary_sensor.office_window"},
+            {"domain": "binary_sensor"}, {"query_type": "complex"}, {"targets": ["binary_sensor.office_window"]},
         ], snapshot=snapshot, prompt="sind fenster im buero offen?")
         self.assertEqual(set(models.requests[0][2]), {"service"})
-        self.assertNotIn("domain", result["decisions"]["service"])
-        self.assertNotIn("domain", models.requests[2][1])
-        targets = models.requests[2][1]["targets"]
-        self.assertEqual({target["entity_id"] for target in targets}, {
-            "light.desk", "light.ceiling", "sensor.office", "binary_sensor.office_window",
-        })
-        self.assertEqual({target["domain"] for target in targets}, {"binary_sensor", "light", "sensor"})
+        self.assertEqual(set(models.requests[2][2]), {"domain"})
+        self.assertEqual(set(models.requests[2][2]["domain"]["criteria"]), {"binary_sensor", "light", "sensor", "unsure"})
+        self.assertNotIn("entities", models.requests[2][1])
+        self.assertNotIn("targets", models.requests[2][1])
+        targets = models.requests[4][1]["targets"]
+        self.assertEqual({target["entity_id"] for target in targets}, {"binary_sensor.office_window"})
+        self.assertEqual(models.requests[4][1]["domain"], "binary_sensor")
         self.assertEqual(result["domain"], "binary_sensor")
         self.assertEqual(result["state_info"][0]["entity_id"], "binary_sensor.office_window")
         execute.assert_not_awaited()
 
-    async def test_area_query_passes_states_from_all_domains_in_that_area_to_the_answer_model(self):
+    async def test_room_query_answer_only_receives_the_selected_domain(self):
         snapshot = copy.deepcopy(SNAPSHOT)
         snapshot["entities"].append(entity("binary_sensor.office_window", "Window", device_class="window"))
         result, models, execute = await self.run_agent([
-            {"service": "query_state"}, {"area": "area:office"}, {"target": "area:office"},
+            {"service": "query_state"}, {"area": "area:office"}, {"domain": "light"}, {"query_type": "complex"}, {"targets": "all"},
         ], snapshot=snapshot)
-        expected = {item["entity_id"] for item in snapshot["entities"] if item["area_id"] == "office"}
         facts = json.loads(models.chat_requests[0][1][1]["content"])
-        self.assertEqual({item["entity_id"] for item in facts["state_info"]}, expected)
-        self.assertEqual({item["domain"] for item in facts["state_info"]}, {"sensor", "binary_sensor", "light"})
-        self.assertIsNone(result["domain"])
+        self.assertEqual({item["entity_id"] for item in facts["entities"]}, {"light.desk", "light.ceiling"})
+        self.assertEqual(facts["entities"], result["state_info"])
+        self.assertNotIn("target", facts)
+        self.assertNotIn("state_info", facts)
+        self.assertEqual(result["domain"], "light")
+        self.assertEqual(result["domain_filter"]["entities_before"], 4)
+        self.assertEqual(result["domain_filter"]["entities_after"], 2)
+        execute.assert_not_awaited()
+
+    async def test_query_keep_drop_receives_current_states_for_state_filtered_questions(self):
+        snapshot = copy.deepcopy(SNAPSHOT)
+        snapshot["entities"][1]["state"] = "off"
+        snapshot["entities"][2]["state"] = "unavailable"
+        original = copy.deepcopy(snapshot)
+        events = []
+        result, models, execute = await self.run_agent([
+            {"service": "query_state"}, {"area": "all_areas"}, {"domain": "light"},
+            {"query_type": "complex"}, {"targets": ["light.desk", "light.bed"]},
+        ], snapshot=snapshot, prompt="Welche Lichter im Haus sind an?", trace=lambda *event: events.append(event))
+        targets = models.requests[-1][1]["targets"]
+        self.assertEqual({target["entity_id"]: target["state"] for target in targets},
+                         {"light.desk": "on", "light.ceiling": "off", "light.bed": "unavailable"})
+        question = models.requests[-1][2]["target_0"]["instructions"]
+        self.assertIn('"entity_id": "light.desk"', question)
+        self.assertIn('"state": "on"', question)
+        self.assertNotIn("zero-based index", question)
+        self.assertTrue(all("attributes" not in target for target in targets))
+        self.assertEqual(snapshot, original)
+        trace_input = next(arguments for stage, arguments, output in events if stage == "target" and output is None)
+        self.assertEqual(trace_input["targets"], targets)
+        facts = json.loads(models.chat_requests[0][1][1]["content"])
+        self.assertEqual([(item["entity_id"], item["state"]) for item in facts["entities"]],
+                         [("light.desk", "on"), ("light.bed", "unavailable")])
+        self.assertEqual(result["target_selection"]["selected_entity_ids"], ["light.desk", "light.bed"])
         execute.assert_not_awaited()
 
     async def test_unspecified_room_query_uses_all_areas_and_filters_domains_before_targets(self):
         result, models, execute = await self.run_agent([
             {"service": "query_state"}, {"area": "all_areas"},
-            {"domain_light": "keep", "domain_sensor": "drop"}, {"target": "entity:light.bed"},
+            {"domain": "light"}, {"query_type": "complex"}, {"target": "entity:light.bed"},
         ], prompt="Is the bed lamp on?")
         area_question = models.requests[1][2]["area"]
         self.assertNotIn("no_area", area_question["criteria"])
         self.assertIn("all_areas", area_question["criteria"])
         self.assertIn("when no specific room is identified", area_question["instructions"])
         self.assertNotIn("Choose no_area when no room is identified.", area_question["instructions"])
-        self.assertEqual(set(models.requests[2][2]), {"domain_light", "domain_sensor"})
-        targets = {target["entity_id"] for target in models.requests[3][1]["targets"]}
+        self.assertEqual(set(models.requests[2][2]), {"domain"})
+        targets = {target["entity_id"] for target in models.requests[4][1]["targets"]}
         self.assertIn("light.bed", targets)
         self.assertIn("light.desk", targets)
         self.assertNotIn("sensor.office", targets)
         self.assertEqual(result["domain"], "light")
         self.assertEqual([item["entity_id"] for item in result["state_info"]], ["light.bed"])
-        self.assertEqual(len(models.requests), 4)
+        self.assertEqual(len(models.requests), 5)
         execute.assert_not_awaited()
 
     async def test_whole_home_query_includes_all_rooms_and_unassigned_entities(self):
@@ -592,11 +737,11 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         settings = normalize_settings({"decider": {"area_prompt": "Custom area rules", "target_prompt": "Custom target rules"}})
         result, models, execute = await self.run_agent([
             {"service": "query_state"}, {"area": "all_areas"},
-            {"domain_binary_sensor": "keep", "domain_light": "drop", "domain_sensor": "drop"},
+            {"domain": "binary_sensor"}, {"query_type": "complex"},
             {"target": "all_areas"},
         ], snapshot=snapshot, settings=settings, prompt="are there any windows open in the house?")
         area_question = models.requests[1][2]["area"]
-        target_state = models.requests[3][1]
+        target_state = models.requests[4][1]
         targets = {target["entity_id"] for target in target_state["targets"]}
         self.assertIn("all_areas", area_question["criteria"])
         self.assertNotIn("no_area", area_question["criteria"])
@@ -611,10 +756,10 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["domain_filter"]["entities_after"], 3)
         self.assertEqual(result["target"]["type"], "entities")
         facts = json.loads(models.chat_requests[0][1][1]["content"])
-        self.assertEqual({item["entity_id"] for item in facts["state_info"]},
+        self.assertEqual({item["entity_id"] for item in facts["entities"]},
                          {item["entity_id"] for item in snapshot["entities"] if item["domain"] == "binary_sensor"})
         self.assertNotIn("domain_filter", facts)
-        windows = {item["entity_id"]: item for item in facts["state_info"] if item["domain"] == "binary_sensor"}
+        windows = {item["entity_id"]: item for item in facts["entities"] if item["domain"] == "binary_sensor"}
         self.assertEqual(windows["binary_sensor.office_window"]["area"], "Office")
         self.assertEqual(windows["binary_sensor.bedroom_window"]["area"], "Bedroom")
         self.assertIsNone(windows["binary_sensor.unassigned_window"]["area"])
@@ -623,11 +768,11 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_named_room_query_skips_domain_filter_and_offers_only_individual_entities(self):
         result, models, execute = await self.run_agent([
-            {"service": "query_state"}, {"area": "area:office"}, {"target": "entity:sensor.office"},
+            {"service": "query_state"}, {"area": "area:office"}, {"domain": "sensor"}, {"query_type": "complex"}, {"target": "entity:sensor.office"},
         ])
-        self.assertTrue(all(target["type"] == "entity" for target in models.requests[2][1]["targets"]))
-        self.assertEqual(len(models.requests), 3)
-        self.assertNotIn("domain_filter", result["decisions"])
+        self.assertTrue(all(target["type"] == "entity" for target in models.requests[4][1]["targets"]))
+        self.assertEqual(len(models.requests), 5)
+        self.assertIn("domain", result["decisions"])
         execute.assert_not_awaited()
 
     async def test_whole_home_group_is_not_offered_for_actions(self):
@@ -661,17 +806,18 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         events = []
         result, _, execute = await self.run_agent([
             {"service": "query_state"}, {"area": "area:office"},
-            {"targets": ["binary_sensor.left_window", "binary_sensor.right_window"]},
+            {"domain": "binary_sensor"}, {"query_type": "complex"}, {"targets": ["binary_sensor.left_window", "binary_sensor.right_window"]},
         ], snapshot=snapshot, trace=lambda *event: events.append(event), prompt="Sind Fenster im Büro offen?")
         self.assertEqual(result["target"]["type"], "entities")
         arguments = next(arguments for stage, arguments, output in events if stage == "answer" and output is None)
-        states = json.loads(arguments["messages"][1]["content"])["state_info"]
+        states = json.loads(arguments["messages"][1]["content"])["entities"]
         self.assertEqual([state["entity_id"] for state in states], ["binary_sensor.left_window", "binary_sensor.right_window"])
         self.assertEqual([state["state"] for state in states], ["on", "off"])
+        self.assertEqual([state["name"] for state in states], ["Left window", "Right window"])
         output = next(output for stage, _, output in events if stage == "target" and output is not None)
-        self.assertEqual(output["entities_before"], 6)
+        self.assertEqual(output["entities_before"], 3)
         self.assertEqual(output["entities_after"], 2)
-        self.assertEqual(output["decisions"]["target_3"]["entity_id"], "binary_sensor.left_window")
+        self.assertEqual(output["decisions"]["target_0"]["entity_id"], "binary_sensor.left_window")
         execute.assert_not_awaited()
 
     async def test_native_multi_target_action_calls_only_retained_entities_once(self):
@@ -710,11 +856,11 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
                                                   "query_target_keep_uncertain": True}})
         result, models, execute = await self.run_agent([
             {"service": "query_state"}, {"area": "area:office"},
-            {"target_0": "drop", "target_1": "drop", "target_2": "drop"},
+            {"domain": "light"}, {"query_type": "complex"}, {"target_0": "drop", "target_1": "drop"},
         ], settings=settings, trace=lambda *event: events.append(event))
-        self.assertEqual(models.requests[2][1]["task"], "private-target-task")
+        self.assertEqual(models.requests[4][1]["task"], "private-target-task")
         self.assertNotIn("private-target-task", json.dumps(events))
-        self.assertEqual(result["target_selection"]["entities_after"], 3)
+        self.assertEqual(result["target_selection"]["entities_after"], 2)
         output = next(output for stage, _, output in events if stage == "target" and output is not None)
         self.assertEqual(output["decisions"]["target_0"]["effective_choice"], "keep")
         self.assertTrue(output["decisions"]["target_0"]["keep_uncertain"])
@@ -724,7 +870,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         settings = normalize_settings({"decider": {"target_filter_confidence": 0.9}})
         events = []
         result, models, execute = await self.run_agent([
-            {"service": "query_state"}, {"area": "area:office"}, {"targets": "all"},
+            {"service": "query_state"}, {"area": "area:office"}, {"domain": "light"}, {"query_type": "complex"}, {"targets": "all"},
         ], settings=settings, trace=lambda *event: events.append(event))
         self.assertEqual(result["route"], "unsure")
         self.assertEqual(result["target_selection"]["selected_entity_ids"], [])
@@ -765,77 +911,61 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("invalid or incomplete target", events[-1][2]["reason"])
         execute.assert_not_awaited()
 
-    async def test_whole_home_domain_filter_retains_multiple_domains_and_reports_reduction(self):
+    async def test_whole_home_domain_selection_is_one_question_and_reports_reduction(self):
         snapshot = copy.deepcopy(SNAPSHOT)
         snapshot["entities"].append(entity("binary_sensor.window", "Window", device_class="window"))
-        history = [{"role": "user", "content": "What about the windows and temperature?"}]
-        settings = normalize_settings({"history_enabled": True, "decider": {"domain_filter_prompt": "private-domain-prompt"}})
+        history = [{"role": "user", "content": "What about the windows?"}]
+        settings = normalize_settings({"history_enabled": True, "decider": {"domain_prompt": "private-domain-prompt"}})
         events = []
         result, models, execute = await self.run_agent([
-            {"service": "query_state"}, {"area": "all_areas"},
-            {"domain_binary_sensor": "keep", "domain_sensor": "keep", "domain_light": "drop"},
-            {"target": "all_areas"},
+            {"service": "query_state"}, {"area": "all_areas"}, {"domain": "binary_sensor"}, {"query_type": "complex"}, {"targets": "all"},
         ], snapshot=snapshot, settings=settings, history=history, trace=lambda *event: events.append(event))
         _, state, questions = models.requests[2]
-        self.assertEqual(state, {"prompt": "test request", "task": "private-domain-prompt",
-                                 "domains": ["binary_sensor", "light", "sensor"], "language": "de", "history": history})
-        self.assertEqual(set(questions), {"domain_binary_sensor", "domain_sensor", "domain_light"})
-        self.assertTrue(all(set(question["criteria"]) == {"keep", "drop"} for question in questions.values()))
+        self.assertEqual(state["history"], history)
+        self.assertEqual(state["language"], "de")
+        self.assertEqual(set(questions), {"domain"})
+        self.assertEqual(set(questions["domain"]["criteria"]), {"binary_sensor", "sensor", "light", "unsure"})
+        self.assertIn("private-domain-prompt", questions["domain"]["instructions"])
         self.assertNotIn("private-domain-prompt", json.dumps(events))
-        targets = {target["entity_id"] for target in models.requests[3][1]["targets"]}
-        self.assertIn("binary_sensor.window", targets)
-        self.assertIn("sensor.office", targets)
-        self.assertNotIn("light.desk", targets)
-        output = next(output for stage, _, output in events if stage == "domain_filter" and output is not None)
-        self.assertEqual(output["kept_domains"], ["binary_sensor", "sensor"])
+        targets = {target["entity_id"] for target in models.requests[4][1]["targets"]}
+        self.assertEqual(targets, {"binary_sensor.window"})
+        output = next(output for stage, _, output in events if stage == "domain" and output is not None)
+        self.assertEqual(output["selected_domain"], "binary_sensor")
         self.assertEqual(output["entities_before"], 5)
-        self.assertEqual(output["entities_after"], 2)
-        self.assertEqual(output["decisions"]["domain_light"]["effective_choice"], "drop")
-        self.assertEqual(output["decisions"]["domain_sensor"]["minimum_confidence"], 0.5)
-        self.assertIn("duration_ms", output)
-        self.assertIn("domain_filter", result["usage"])
-        self.assertEqual({item["domain"] for item in result["state_info"]}, {"binary_sensor", "sensor"})
+        self.assertEqual(output["entities_after"], 1)
+        self.assertEqual(output["decisions"]["domain"]["effective_choice"], "binary_sensor")
+        self.assertEqual(output["decisions"]["domain"]["minimum_confidence"], 0.5)
+        self.assertNotIn("keep_uncertain", output["decisions"]["domain"])
+        self.assertIn("domain", result["usage"])
         execute.assert_not_awaited()
 
-    async def test_whole_home_domain_uncertainty_is_configurable_without_an_all_drop_fallback(self):
-        for threshold, keep_uncertain, retained in ((0.5, False, False), (0.5, True, False), (0.9, False, False), (0.9, True, True)):
-            with self.subTest(threshold=threshold, keep_uncertain=keep_uncertain):
-                settings = normalize_settings({"decider": {"domain_filter_confidence": threshold,
-                                                          "domain_filter_keep_uncertain": keep_uncertain}})
+    async def test_uncertain_domain_selection_stops_without_restoring_all_domains(self):
+        for choice, threshold in (("unsure", 0.5), ("light", 0.95)):
+            with self.subTest(choice=choice, threshold=threshold):
+                settings = normalize_settings({"decider": {"domain_confidence": threshold}})
                 events = []
                 result, models, execute = await self.run_agent([
-                    {"service": "query_state"}, {"area": "all_areas"},
-                    {"domain_light": "drop", "domain_sensor": "drop"}, {"target": "all_areas"},
+                    {"service": "query_state"}, {"area": "all_areas"}, {"domain": choice}, {"query_type": "complex"},
                 ], settings=settings, trace=lambda *event: events.append(event))
-                output = next(output for stage, _, output in events if stage == "domain_filter" and output is not None)
-                self.assertNotIn("fallback", output)
-                self.assertEqual(output["decisions"]["domain_light"]["keep_uncertain"], keep_uncertain)
-                self.assertEqual(output["decisions"]["domain_light"]["uncertain"], threshold == 0.9)
-                if retained:
-                    self.assertEqual(result["domain_filter"]["kept_domains"], ["light", "sensor"])
-                    self.assertEqual(output["entities_before"], output["entities_after"])
-                    self.assertEqual(output["decisions"]["domain_light"]["effective_choice"], "keep")
-                    self.assertIn("sensor.office", [target["entity_id"] for target in models.requests[3][1]["targets"]])
-                else:
-                    self.assertEqual(result["domain_filter"]["kept_domains"], [])
-                    self.assertEqual(output["entities_after"], 0)
-                    self.assertEqual(len(models.requests), 3)
-                    self.assertFalse(models.chat_requests)
-                    self.assertEqual(result["failures"][0]["stage"], "domain_filter")
+                self.assertEqual(result["route"], "unsure")
+                self.assertEqual(result["domain_filter"]["kept_domains"], [])
+                self.assertEqual(result["domain_filter"]["entities_after"], 0)
+                self.assertEqual(len(models.requests), 3)
+                self.assertFalse(models.chat_requests)
+                self.assertEqual(result["failures"][0]["stage"], "domain")
                 execute.assert_not_awaited()
 
-    async def test_malformed_domain_filter_stops_before_building_the_target_request(self):
+    async def test_malformed_domain_selection_stops_before_building_the_target_request(self):
         events = []
         execute = AsyncMock()
         with self.assertRaises(ModelError):
             await self.run_agent([
-                {"service": "query_state"}, {"area": "all_areas"},
-                {"domain_light": "keep", "domain_sensor": "unsure"},
+                {"service": "query_state"}, {"area": "all_areas"}, {"domain": "invented"}, {"query_type": "complex"},
             ], executor=execute, trace=lambda *event: events.append(event))
         self.assertFalse(any(stage == "target" for stage, _, _ in events))
-        output = next(output for stage, _, output in events if stage == "domain_filter" and output is not None)
+        output = next(output for stage, _, output in events if stage == "domain" and output is not None)
         self.assertEqual(output["status"], "error")
-        self.assertEqual(events[-1][2]["stage"], "domain_filter")
+        self.assertEqual(events[-1][2]["stage"], "domain")
         execute.assert_not_awaited()
 
     async def test_answer_failure_after_action_preserves_outcome_and_never_retries(self):
@@ -853,7 +983,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
     async def test_query_answer_failure_preserves_state_and_error_details(self):
         result, models, execute = await self.run_agent([
             {"service": "query_state"},
-            {"area": "area:office"}, {"target": "entity:light.desk"},
+            {"area": "area:office"}, {"domain": "light"}, {"query_type": "complex"}, {"target": "entity:light.desk"},
         ], answers=[ModelError("Model reply reached its output token limit.")])
         self.assertEqual(result["answer"], DEFAULTS["error_reply"])
         self.assertEqual(result["answer_error"], "Model reply reached its output token limit.")
@@ -1183,13 +1313,28 @@ class IntegrationSettingsTests(unittest.TestCase):
         self.assertFalse(settings["general"]["enable"])
         self.assertEqual(settings["decider"]["api_key"], "")
 
-    def test_old_domain_classifier_settings_are_ignored(self):
-        settings = normalize_settings({"decider": {"domain_prompt": "Old rules", "domain_confidence": 0.9}})
-        self.assertNotIn("domain_prompt", settings["decider"])
-        self.assertNotIn("domain_confidence", settings["decider"])
+    def test_stock_target_filter_prompt_upgrades_while_custom_rules_are_preserved(self):
+        from custom_components.glow_assistant.target_selection import (
+            INSTRUCTIONS,
+            LEGACY_INSTRUCTIONS,
+        )
+
+        upgraded = normalize_settings({"decider": {"target_filter_prompt": LEGACY_INSTRUCTIONS}})
+        self.assertEqual(upgraded["decider"]["target_filter_prompt"], INSTRUCTIONS)
+        custom = normalize_settings({"decider": {"target_filter_prompt": "Custom rules"}})
+        self.assertEqual(custom["decider"]["target_filter_prompt"], "Custom rules")
+        reset = normalize_settings({"decider": {"target_filter_prompt": " "}})
+        self.assertEqual(reset["decider"]["target_filter_prompt"], INSTRUCTIONS)
+
+    def test_domain_selection_settings_are_preserved_and_blank_prompt_restores_default(self):
+        settings = normalize_settings({"decider": {"domain_prompt": "Custom rules", "domain_confidence": 0.2}})
+        self.assertEqual(settings["decider"]["domain_prompt"], "Custom rules")
+        self.assertEqual(settings["decider"]["domain_confidence"], 0.2)
+        reset = normalize_settings({"decider": {"domain_prompt": " "}})
+        self.assertEqual(reset["decider"]["domain_prompt"], DEFAULTS["decider"]["domain_prompt"])
 
     def test_uncertainty_switches_default_to_false_and_reject_non_boolean_values(self):
-        fields = ("domain_filter_keep_uncertain", "query_target_keep_uncertain", "action_target_keep_uncertain", "text_keep_uncertain")
+        fields = ("query_target_keep_uncertain", "action_target_keep_uncertain", "text_keep_uncertain")
         defaults = normalize_settings({})["decider"]
         for field in fields:
             self.assertIs(defaults[field], False)
@@ -1199,18 +1344,14 @@ class IntegrationSettingsTests(unittest.TestCase):
                 with self.subTest(field=field, value=value), self.assertRaises(TypeError):
                     validate_settings(settings)
 
-    def test_domain_prompt_upgrade_removes_the_old_keep_uncertain_instruction(self):
-        from custom_components.glow_assistant.domain_filter import (
-            INSTRUCTIONS,
-            LEGACY_INSTRUCTIONS,
-        )
-
-        settings = normalize_settings({"decider": {"domain_filter_prompt": LEGACY_INSTRUCTIONS}})
-        self.assertEqual(settings["decider"]["domain_filter_prompt"], INSTRUCTIONS)
-        self.assertNotIn("or when uncertain", settings["decider"]["domain_filter_prompt"])
-        self.assertFalse(settings["decider"]["domain_filter_keep_uncertain"])
-        custom = normalize_settings({"decider": {"domain_filter_prompt": "Custom domain rules"}})
-        self.assertEqual(custom["decider"]["domain_filter_prompt"], "Custom domain rules")
+    def test_domain_selection_migrates_the_previous_threshold_but_not_keep_drop_prompts(self):
+        settings = normalize_settings({"decider": {"domain_filter_prompt": "Keep/drop rules", "domain_filter_confidence": 0.3,
+                                                  "domain_filter_keep_uncertain": True}})
+        self.assertEqual(settings["decider"]["domain_prompt"], DEFAULTS["decider"]["domain_prompt"])
+        self.assertEqual(settings["decider"]["domain_confidence"], 0.3)
+        self.assertNotIn("domain_filter_keep_uncertain", settings["decider"])
+        custom = normalize_settings({"decider": {"domain_filter_confidence": 0.3, "domain_confidence": 0.7}})
+        self.assertEqual(custom["decider"]["domain_confidence"], 0.7)
 
     def test_http_mcp_settings_are_normalized_without_changing_model_keys(self):
         settings = self.local_settings()
@@ -1301,6 +1442,9 @@ class IntegrationSettingsTests(unittest.TestCase):
         self.assertEqual(settings["decider"]["area_prompt"], DEFAULTS["decider"]["area_prompt"])
         self.assertEqual(settings["decider"]["target_scope_prompt"], DEFAULTS["decider"]["target_scope_prompt"])
         self.assertNotEqual(id(settings["decider"]), id(DEFAULTS["decider"]))
+        for field in ("query_type_prompt", "binary_answer_prompt"):
+            self.assertEqual(normalize_settings({"decider": {field: " "}})["decider"][field], DEFAULTS["decider"][field])
+            self.assertEqual(normalize_settings({"decider": {field: "Custom rules"}})["decider"][field], "Custom rules")
 
     def test_invalid_ranges_and_models_are_rejected(self):
         for group, field, value in (
@@ -1308,7 +1452,9 @@ class IntegrationSettingsTests(unittest.TestCase):
             ("decider", "temperature_levels", 2.5), ("decider", "temperature_step", 0),
             ("decider", "service_confidence", 1.1), ("decider", "url", "localhost:8321"),
             ("decider", "text_confidence", -0.1), ("decider", "text_confidence", 1.1),
-            ("decider", "domain_filter_confidence", -0.1), ("decider", "domain_filter_confidence", 1.1),
+            ("decider", "domain_confidence", -0.1), ("decider", "domain_confidence", 1.1),
+            ("decider", "query_type_confidence", -0.1), ("decider", "query_type_confidence", 1.1),
+            ("decider", "binary_answer_confidence", -0.1), ("decider", "binary_answer_confidence", 1.1),
             ("decider", "target_filter_confidence", -0.1), ("decider", "target_filter_confidence", 1.1),
             ("decider", "target_scope_confidence", -0.1), ("decider", "target_scope_confidence", 1.1),
             ("decider", "position_min", -1), ("decider", "position_max", 101),

@@ -49,6 +49,16 @@ class BenchmarkSettingsTests(unittest.TestCase):
         self.assertEqual(cloud["decider"]["api_key"], "cloud-key")
         self.assertEqual(cloud["answer"]["api_key"], "")
 
+    def test_previous_domain_filter_confidence_flag_sets_the_new_single_choice_threshold(self):
+        args = benchmark.parser().parse_args([
+            "--query", "test", "--domain-filter-confidence", "0.2",
+            "--query-type-confidence", "0.3", "--binary-answer-confidence", "0.4",
+        ])
+        result = benchmark.model_settings(settings(), args, {})
+        self.assertEqual(result["decider"]["domain_confidence"], 0.2)
+        self.assertEqual(result["decider"]["query_type_confidence"], 0.3)
+        self.assertEqual(result["decider"]["binary_answer_confidence"], 0.4)
+
     def test_invalid_confidence_values_are_rejected(self):
         for value in ("-0.1", "1.1", "nan", "inf"):
             with self.subTest(value=value), self.assertRaises(argparse.ArgumentTypeError):
@@ -62,7 +72,7 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
     async def test_benchmark_imports_the_same_engine_and_sends_identical_decider_requests(self):
         self.assertIs(benchmark.AgentEngine, AgentEngine)
         choices = [{"service": "query_state"}, {"area": "all_areas"},
-                   {"domain_light": "keep", "domain_sensor": "drop"}, {"targets": ["light.desk"]}]
+                   {"domain": "light"}, {"query_type": "complex"}, {"targets": ["light.desk"]}]
         local, addon = ScriptedModels(choices), ScriptedModels(choices)
         args = benchmark.parser().parse_args(["--query", "Is the desk lamp on?", "--language", "en"])
         session = AsyncMock()
@@ -75,8 +85,27 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(local.requests, addon.requests)
         self.assertEqual(report["mode"], "plan_only")
         self.assertEqual(report["result"]["state_info"][0]["entity_id"], "light.desk")
-        self.assertEqual({event["stage"] for event in report["trace"]}, {"service", "area", "domain_filter", "target", "answer"})
+        self.assertEqual({event["stage"] for event in report["trace"]}, {"service", "area", "domain", "query_type", "target", "answer"})
         self.assertIn("engine", report["timings_ms"])
+        execute.assert_not_awaited()
+
+    async def test_yes_no_benchmark_matches_addon_and_exposes_only_translation_input(self):
+        choices = [{"service": "query_state"}, {"area": "area:office"}, {"domain": "light"},
+                   {"query_type": "yes_no"}, {"binary_answer": "yes"}]
+        local, addon = ScriptedModels(choices), ScriptedModels(choices)
+        args = benchmark.parser().parse_args(["--query", "Is the office light on?", "--language", "en"])
+        with (patch("benchmark.fetch_snapshot", new=AsyncMock(return_value=self.exported())),
+              patch("benchmark.aiohttp.ClientSession", return_value=AsyncMock()),
+              patch("benchmark.ModelClient", return_value=local)):
+            report = await benchmark.run(args, {})
+        execute = AsyncMock()
+        await AgentEngine(settings(), addon, execute).process(args.query, "en", SNAPSHOT)
+        self.assertEqual(local.requests, addon.requests)
+        self.assertEqual(local.chat_requests, addon.chat_requests)
+        self.assertEqual(report["result"]["state_answer"], "yes")
+        self.assertEqual({event["stage"] for event in report["trace"]},
+                         {"service", "area", "domain", "query_type", "binary_answer", "answer"})
+        self.assertEqual(benchmark.answer_input(report, readable=True)["messages"][1]["content"], {"state_answer": "yes"})
         execute.assert_not_awaited()
 
     async def test_action_benchmark_marks_planned_arguments_and_keeps_credentials_out_of_report(self):
@@ -93,8 +122,24 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
         output = io.StringIO()
         with redirect_stdout(output):
             benchmark.print_report(report)
-        self.assertIn("execution: planned", output.getvalue())
-        self.assertIn("target_scope:", output.getvalue())
+        self.assertRegex(output.getvalue(), r"execution\s+planned")
+        self.assertIn("target_scope", output.getvalue())
+        output = io.StringIO()
+        with redirect_stdout(output):
+            benchmark.print_report(report, show_answer_input=True)
+        request = json.loads(output.getvalue().split("Answer model input:\n", 1)[1])
+        self.assertEqual(request["messages"][0], models.chat_requests[0][1][0])
+        self.assertEqual(request["messages"][1]["content"], json.loads(models.chat_requests[0][1][1]["content"]))
+        facts = request["messages"][1]["content"]
+        self.assertEqual([item["entity_id"] for item in facts["entities"]], ["light.desk", "light.ceiling"])
+        self.assertEqual(facts["execution"]["arguments"], {})
+        self.assertNotIn("target", facts)
+        self.assertNotIn("state_info", facts)
+        self.assertIsInstance(models.chat_requests[0][1][1]["content"], str)
+        self.assertEqual(benchmark.answer_input(report)["messages"], models.chat_requests[0][1])
+        self.assertEqual(request["model"], models.chat_requests[0][0]["model"])
+        self.assertEqual(set(request), {"model", "messages", "max_tokens", "temperature"})
+        self.assertNotIn("private-key", output.getvalue())
 
     async def test_model_failure_keeps_stage_diagnostics(self):
         args = benchmark.parser().parse_args(["--query", "test"])
@@ -105,6 +150,7 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
             report = await benchmark.run(args, {})
         self.assertEqual(report["result"]["error"], "Model request timed out.")
         self.assertTrue(any(event["stage"] == "failure" for event in report["trace"]))
+        self.assertIsNone(benchmark.answer_input(report))
 
     async def test_snapshot_request_uses_administrator_token_without_redirects(self):
         response = SimpleNamespace(status=200, json=AsyncMock(return_value=self.exported()))

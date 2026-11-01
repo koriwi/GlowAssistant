@@ -88,11 +88,11 @@ class ChatLogTraceTests(unittest.TestCase):
         self.assertEqual(self.messages[0].tool_calls[0].tool_name, "glow_assistant_extract_text")
         self.assertEqual(self.messages[1].tool_result, result)
 
-    def test_domain_filter_stage_uses_a_native_tool_card_with_counts(self):
-        result = {"kept_domains": ["sensor", "binary_sensor"], "entities_before": 100, "entities_after": 20}
-        self.trace("domain_filter", {"domains": ["sensor", "binary_sensor", "light"]})
-        self.trace("domain_filter", {}, result)
-        self.assertEqual(self.messages[0].tool_calls[0].tool_name, "glow_assistant_filter_domains")
+    def test_domain_selection_stage_uses_a_native_tool_card_with_counts(self):
+        result = {"selected_domain": "sensor", "entities_before": 100, "entities_after": 20}
+        self.trace("domain", {"candidate_counts": {"domain": 4}})
+        self.trace("domain", {}, result)
+        self.assertEqual(self.messages[0].tool_calls[0].tool_name, "glow_assistant_select_domain")
         self.assertEqual(self.messages[1].tool_result, result)
 
     def test_target_scope_has_its_own_native_tool_card(self):
@@ -101,6 +101,17 @@ class ChatLogTraceTests(unittest.TestCase):
         self.trace("target_scope", {}, result)
         self.assertEqual(self.messages[0].tool_calls[0].tool_name, "glow_assistant_select_target_scope")
         self.assertEqual(self.messages[1].tool_result, result)
+
+    def test_yes_no_stages_have_native_debug_cards(self):
+        for stage, tool_name in (("query_type", "glow_assistant_select_query_type"),
+                                 ("binary_answer", "glow_assistant_answer_yes_no")):
+            with self.subTest(stage=stage):
+                result = {"decisions": {stage: {"choice": "unsure", "confidence": 0.3}}, "duration_ms": 20}
+                self.trace(stage, {"candidate_counts": {stage: 3}})
+                self.trace(stage, {}, result)
+                self.assertEqual(self.messages[-2].tool_calls[0].tool_name, tool_name)
+                self.assertEqual(self.messages[-1].tool_result, result)
+        self.assertFalse(self.trace.calls)
 
     def test_error_results_close_the_pending_call(self):
         self.trace("answer", {"max_tokens": 256})

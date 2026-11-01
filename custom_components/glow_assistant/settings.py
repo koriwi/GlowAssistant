@@ -5,18 +5,20 @@ from urllib.parse import urlsplit
 from .const import (
     ANSWER_PROMPT,
     AREA_PROMPT,
+    BINARY_ANSWER_PROMPT,
+    DOMAIN_PROMPT,
     GENERAL_PROMPT,
     LEGACY_GENERAL_PROMPT,
     LEGACY_SERVICE_PROMPT,
     NUMERIC_MODE_PROMPT,
+    QUERY_TYPE_PROMPT,
     SERVICE_PROMPT,
     TARGET_PROMPT,
     TARGET_SCOPE_PROMPT,
 )
-from .domain_filter import INSTRUCTIONS as DOMAIN_FILTER_INSTRUCTIONS
-from .domain_filter import LEGACY_INSTRUCTIONS as LEGACY_DOMAIN_FILTER_INSTRUCTIONS
 from .numeric_values import INSTRUCTIONS
 from .target_selection import INSTRUCTIONS as TARGET_FILTER_INSTRUCTIONS
+from .target_selection import LEGACY_INSTRUCTIONS as LEGACY_TARGET_FILTER_INSTRUCTIONS
 from .text_values import INSTRUCTIONS as TEXT_INSTRUCTIONS
 from .text_values import LEGACY_INSTRUCTIONS as LEGACY_TEXT_INSTRUCTIONS
 from .text_values import MESSAGE_INSTRUCTIONS
@@ -28,8 +30,9 @@ DEFAULTS = {
         "model": "typesafe/jev-1.14", "api_key": "", "timeout": 60,
         "max_input_chars": 100000,
         "service_prompt": SERVICE_PROMPT,
-        "domain_filter_prompt": DOMAIN_FILTER_INSTRUCTIONS, "domain_filter_confidence": 0.5,
-        "domain_filter_keep_uncertain": False,
+        "domain_prompt": DOMAIN_PROMPT, "domain_confidence": 0.5,
+        "query_type_prompt": QUERY_TYPE_PROMPT, "query_type_confidence": 0,
+        "binary_answer_prompt": BINARY_ANSWER_PROMPT, "binary_answer_confidence": 0,
         "area_prompt": AREA_PROMPT, "target_prompt": TARGET_PROMPT,
         "target_scope_prompt": TARGET_SCOPE_PROMPT, "target_scope_confidence": 0,
         "target_filter_prompt": TARGET_FILTER_INSTRUCTIONS, "target_filter_confidence": 0.5,
@@ -85,8 +88,11 @@ def normalize_settings(data):
         settings["general"]["prompt"] = GENERAL_PROMPT
     if settings["decider"]["service_prompt"] == LEGACY_SERVICE_PROMPT:
         settings["decider"]["service_prompt"] = SERVICE_PROMPT
-    if settings["decider"]["domain_filter_prompt"] == LEGACY_DOMAIN_FILTER_INSTRUCTIONS:
-        settings["decider"]["domain_filter_prompt"] = DOMAIN_FILTER_INSTRUCTIONS
+    decider = data.get("decider", {})
+    if settings["decider"]["target_filter_prompt"] == LEGACY_TARGET_FILTER_INSTRUCTIONS:
+        settings["decider"]["target_filter_prompt"] = TARGET_FILTER_INSTRUCTIONS
+    if "domain_confidence" not in decider and "domain_filter_confidence" in decider:
+        settings["decider"]["domain_confidence"] = decider["domain_filter_confidence"]
     text_prompt = settings["decider"]["text_prompt"]
     if text_prompt == LEGACY_TEXT_INSTRUCTIONS:
         settings["decider"]["text_prompt"] = TEXT_INSTRUCTIONS
@@ -113,9 +119,9 @@ def validate_settings(data):
             _range(config, "max_tokens", 1, 100000, group, integer=True)
             _range(config, "temperature", 0, 2, group)
     decider = settings["decider"]
-    for stage in ("service", "area", "target_scope", "target", "numeric", "text", "domain_filter", "target_filter"):
+    for stage in ("service", "area", "domain", "query_type", "binary_answer", "target_scope", "target", "numeric", "text", "target_filter"):
         _range(decider, f"{stage}_confidence", 0, 1, "decider")
-    for field in ("domain_filter_keep_uncertain", "query_target_keep_uncertain", "action_target_keep_uncertain", "text_keep_uncertain"):
+    for field in ("query_target_keep_uncertain", "action_target_keep_uncertain", "text_keep_uncertain"):
         if not isinstance(decider[field], bool):
             raise TypeError(f"decider: {field} must be a boolean.")
     for parameter in ("temperature", "brightness", "position"):

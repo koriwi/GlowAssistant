@@ -10,9 +10,16 @@ flowchart TD
 
     Service -->|query_state| QueryArea{"Decider: area"}
     QueryArea -->|Specific room| Room["Filter entities by room"]
-    QueryArea -->|"all_areas: no room specified or whole home"| Domains["Decider: domain keep/drop"]
-    Room --> QueryTargets["Decider: entity keep/drop"]
-    Domains --> QueryTargets
+    QueryArea -->|"all_areas: no room specified or whole home"| Domains["Decider: choose one domain"]
+    Room --> Domains
+    Domains --> DomainEntities["Filter entities by selected domain"]
+    DomainEntities --> QueryType{"Decider: yes/no question?"}
+    QueryType -->|Yes| BinaryAnswer["Decider: yes / no / unsure from candidate states"]
+    BinaryAnswer -->|unsure| Unsure
+    BinaryAnswer -->|yes / no| Translate["Answer model: translate yes/no into Assist language"]
+    Translate --> Reply
+    QueryType -->|No| QueryTargets["Decider: entity keep/drop"]
+    QueryType -->|unsure| Unsure
     QueryTargets --> States["Read selected states from snapshot"]
     States --> Answer["Smart-home answer model"]
     Answer --> Reply

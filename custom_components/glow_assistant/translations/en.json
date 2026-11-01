@@ -52,11 +52,8 @@
               "text_prompt": "Item extraction prompt",
               "text_confidence": "Text extraction confidence",
               "message_prompt": "Message extraction prompt",
-              "domain_filter_prompt": "Whole-home domain filter prompt",
-              "domain_filter_confidence": "Whole-home domain confidence threshold",
               "target_filter_prompt": "Target keep/drop prompt",
               "target_filter_confidence": "Target keep/drop confidence",
-              "domain_filter_keep_uncertain": "Keep uncertain domains",
               "query_target_keep_uncertain": "Keep uncertain targets for state queries",
               "action_target_keep_uncertain": "Keep uncertain targets for actions",
               "text_keep_uncertain": "Keep uncertain item/message words",
@@ -66,7 +63,13 @@
               "position_max": "Maximum cover position (% open)",
               "position_levels": "Cover position anchor levels",
               "position_step": "Cover position rounding step (%)",
-              "position_default_change": "Default opening/closing change (percentage points)"
+              "position_default_change": "Default opening/closing change (percentage points)",
+              "domain_prompt": "State-query domain selection prompt",
+              "domain_confidence": "Minimum state-query domain confidence",
+              "query_type_prompt": "State-query answer type prompt",
+              "query_type_confidence": "Minimum answer type confidence",
+              "binary_answer_prompt": "Yes/no state answer prompt",
+              "binary_answer_confidence": "Minimum yes/no answer confidence"
             },
             "data_description": {
               "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
@@ -85,11 +88,8 @@
               "text_prompt": "Instructions for shopping or to-do item words. Sent once per extraction. Clear to restore the default. No templating.",
               "text_confidence": "Above this confidence, follow keep/drop. At or below it, use Keep uncertain item/message words.",
               "message_prompt": "Instructions for notification or announcement words. Sent once per extraction. Clear to restore the default. No templating.",
-              "domain_filter_prompt": "Keep/drop instructions used only after selecting all areas for a state query. Clear to restore the default. No templating.",
-              "domain_filter_confidence": "Above this confidence, follow keep/drop. At or below it, use Keep uncertain domains. An empty selection stops the query.",
               "target_filter_prompt": "Instructions for selecting entities for state queries and actions that accept multiple targets. Sent once per selection. Clear to restore the default. No templating.",
               "target_filter_confidence": "Above this confidence, follow keep/drop. At or below it, use the corresponding Keep uncertain targets switch.",
-              "domain_filter_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
               "query_target_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
               "action_target_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
               "text_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
@@ -98,7 +98,13 @@
               "position_min": "0% is fully closed; 100% is fully open.",
               "position_max": "0% is fully closed; 100% is fully open.",
               "position_step": "Whole percentage points.",
-              "position_default_change": "Used for vague requests such as open a little more or close a little further."
+              "position_default_change": "Used for vague requests such as open a little more or close a little further.",
+              "domain_prompt": "Select one reporting domain after area selection for every state query. Clear to restore the default. No templating.",
+              "domain_confidence": "Stop when domain selection is unsure or below this confidence. No fallback to all domains.",
+              "query_type_prompt": "Choose yes/no or a detailed answer after area and domain selection. Clear to restore the default. No templating.",
+              "query_type_confidence": "Stop if the answer type is unsure or below this confidence.",
+              "binary_answer_prompt": "Answer yes/no from current candidate states, without entity keep/drop. Missing or ambiguous facts must return unsure. Clear to restore the default.",
+              "binary_answer_confidence": "Stop if the yes/no answer is unsure or below this confidence. The answer model only translates a confirmed yes/no."
             }
           },
           "answer": {
@@ -206,11 +212,8 @@
               "text_prompt": "Item extraction prompt",
               "text_confidence": "Text extraction confidence",
               "message_prompt": "Message extraction prompt",
-              "domain_filter_prompt": "Whole-home domain filter prompt",
-              "domain_filter_confidence": "Whole-home domain confidence threshold",
               "target_filter_prompt": "Target keep/drop prompt",
               "target_filter_confidence": "Target keep/drop confidence",
-              "domain_filter_keep_uncertain": "Keep uncertain domains",
               "query_target_keep_uncertain": "Keep uncertain targets for state queries",
               "action_target_keep_uncertain": "Keep uncertain targets for actions",
               "text_keep_uncertain": "Keep uncertain item/message words",
@@ -220,7 +223,13 @@
               "position_max": "Maximum cover position (% open)",
               "position_levels": "Cover position anchor levels",
               "position_step": "Cover position rounding step (%)",
-              "position_default_change": "Default opening/closing change (percentage points)"
+              "position_default_change": "Default opening/closing change (percentage points)",
+              "domain_prompt": "State-query domain selection prompt",
+              "domain_confidence": "Minimum state-query domain confidence",
+              "query_type_prompt": "State-query answer type prompt",
+              "query_type_confidence": "Minimum answer type confidence",
+              "binary_answer_prompt": "Yes/no state answer prompt",
+              "binary_answer_confidence": "Minimum yes/no answer confidence"
             },
             "data_description": {
               "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
@@ -239,11 +248,8 @@
               "text_prompt": "Instructions for shopping or to-do item words. Sent once per extraction. Clear to restore the default. No templating.",
               "text_confidence": "Above this confidence, follow keep/drop. At or below it, use Keep uncertain item/message words.",
               "message_prompt": "Instructions for notification or announcement words. Sent once per extraction. Clear to restore the default. No templating.",
-              "domain_filter_prompt": "Keep/drop instructions used only after selecting all areas for a state query. Clear to restore the default. No templating.",
-              "domain_filter_confidence": "Above this confidence, follow keep/drop. At or below it, use Keep uncertain domains. An empty selection stops the query.",
               "target_filter_prompt": "Instructions for selecting entities for state queries and actions that accept multiple targets. Sent once per selection. Clear to restore the default. No templating.",
               "target_filter_confidence": "Above this confidence, follow keep/drop. At or below it, use the corresponding Keep uncertain targets switch.",
-              "domain_filter_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
               "query_target_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
               "action_target_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
               "text_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
@@ -252,7 +258,13 @@
               "position_min": "0% is fully closed; 100% is fully open.",
               "position_max": "0% is fully closed; 100% is fully open.",
               "position_step": "Whole percentage points.",
-              "position_default_change": "Used for vague requests such as open a little more or close a little further."
+              "position_default_change": "Used for vague requests such as open a little more or close a little further.",
+              "domain_prompt": "Select one reporting domain after area selection for every state query. Clear to restore the default. No templating.",
+              "domain_confidence": "Stop when domain selection is unsure or below this confidence. No fallback to all domains.",
+              "query_type_prompt": "Choose yes/no or a detailed answer after area and domain selection. Clear to restore the default. No templating.",
+              "query_type_confidence": "Stop if the answer type is unsure or below this confidence.",
+              "binary_answer_prompt": "Answer yes/no from current candidate states, without entity keep/drop. Missing or ambiguous facts must return unsure. Clear to restore the default.",
+              "binary_answer_confidence": "Stop if the yes/no answer is unsure or below this confidence. The answer model only translates a confirmed yes/no."
             }
           },
           "answer": {
@@ -370,11 +382,8 @@
               "text_prompt": "Item extraction prompt",
               "text_confidence": "Text extraction confidence",
               "message_prompt": "Message extraction prompt",
-              "domain_filter_prompt": "Whole-home domain filter prompt",
-              "domain_filter_confidence": "Whole-home domain confidence threshold",
               "target_filter_prompt": "Target keep/drop prompt",
               "target_filter_confidence": "Target keep/drop confidence",
-              "domain_filter_keep_uncertain": "Keep uncertain domains",
               "query_target_keep_uncertain": "Keep uncertain targets for state queries",
               "action_target_keep_uncertain": "Keep uncertain targets for actions",
               "text_keep_uncertain": "Keep uncertain item/message words",
@@ -384,7 +393,13 @@
               "position_max": "Maximum cover position (% open)",
               "position_levels": "Cover position anchor levels",
               "position_step": "Cover position rounding step (%)",
-              "position_default_change": "Default opening/closing change (percentage points)"
+              "position_default_change": "Default opening/closing change (percentage points)",
+              "domain_prompt": "State-query domain selection prompt",
+              "domain_confidence": "Minimum state-query domain confidence",
+              "query_type_prompt": "State-query answer type prompt",
+              "query_type_confidence": "Minimum answer type confidence",
+              "binary_answer_prompt": "Yes/no state answer prompt",
+              "binary_answer_confidence": "Minimum yes/no answer confidence"
             },
             "data_description": {
               "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
@@ -403,11 +418,8 @@
               "text_prompt": "Instructions for shopping or to-do item words. Sent once per extraction. Clear to restore the default. No templating.",
               "text_confidence": "Above this confidence, follow keep/drop. At or below it, use Keep uncertain item/message words.",
               "message_prompt": "Instructions for notification or announcement words. Sent once per extraction. Clear to restore the default. No templating.",
-              "domain_filter_prompt": "Keep/drop instructions used only after selecting all areas for a state query. Clear to restore the default. No templating.",
-              "domain_filter_confidence": "Above this confidence, follow keep/drop. At or below it, use Keep uncertain domains. An empty selection stops the query.",
               "target_filter_prompt": "Instructions for selecting entities for state queries and actions that accept multiple targets. Sent once per selection. Clear to restore the default. No templating.",
               "target_filter_confidence": "Above this confidence, follow keep/drop. At or below it, use the corresponding Keep uncertain targets switch.",
-              "domain_filter_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
               "query_target_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
               "action_target_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
               "text_keep_uncertain": "When confidence is at or below the corresponding threshold, keep the decision if enabled; drop it if disabled.",
@@ -416,7 +428,13 @@
               "position_min": "0% is fully closed; 100% is fully open.",
               "position_max": "0% is fully closed; 100% is fully open.",
               "position_step": "Whole percentage points.",
-              "position_default_change": "Used for vague requests such as open a little more or close a little further."
+              "position_default_change": "Used for vague requests such as open a little more or close a little further.",
+              "domain_prompt": "Select one reporting domain after area selection for every state query. Clear to restore the default. No templating.",
+              "domain_confidence": "Stop when domain selection is unsure or below this confidence. No fallback to all domains.",
+              "query_type_prompt": "Choose yes/no or a detailed answer after area and domain selection. Clear to restore the default. No templating.",
+              "query_type_confidence": "Stop if the answer type is unsure or below this confidence.",
+              "binary_answer_prompt": "Answer yes/no from current candidate states, without entity keep/drop. Missing or ambiguous facts must return unsure. Clear to restore the default.",
+              "binary_answer_confidence": "Stop if the yes/no answer is unsure or below this confidence. The answer model only translates a confirmed yes/no."
             }
           },
           "answer": {
