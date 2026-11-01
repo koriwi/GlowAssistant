@@ -48,19 +48,22 @@ def _matches_filter(rules, attributes):
 def filter_fields(fields, targets):
     kept = {}
     removed = {}
+    support = {}
     for name, field in fields.items():
-        if "filter" not in field:
-            kept[name] = field
-            continue
-        unsupported = [target["entity_id"] for target in targets
-                       if not _matches_filter(field["filter"], target.get("attributes", {}))]
-        if not targets or unsupported:
-            removed[name] = {"reason": "HA capability filter did not match every resolved target.",
+        supported = []
+        unsupported = []
+        for target in targets:
+            matches = "filter" not in field or _matches_filter(field["filter"], target.get("attributes", {}))
+            (supported if matches else unsupported).append(target["entity_id"])
+        support[name] = {"supported_entity_ids": supported, "unsupported_entity_ids": unsupported}
+        if "filter" in field and not supported:
+            removed[name] = {"reason": "No resolved target matched the HA capability filter.",
                              "unsupported_entity_ids": unsupported, "filter": field["filter"]}
         else:
             kept[name] = field
-    return kept, {"policy": "all_resolved_targets", "target_entity_ids": [target["entity_id"] for target in targets],
-                  "fields_before": len(fields), "fields_after": len(kept), "kept_fields": list(kept), "removed_fields": removed}
+    return kept, {"policy": "any_resolved_target", "target_entity_ids": [target["entity_id"] for target in targets],
+                  "fields_before": len(fields), "fields_after": len(kept), "kept_fields": list(kept),
+                  "removed_fields": removed, "field_support": support}
 
 
 def parameter_request(prompt, service, fields, instructions):

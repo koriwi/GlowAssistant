@@ -19,7 +19,7 @@ def response(probabilities, confidence=0):
 
 
 class OptionalParameterTests(unittest.TestCase):
-    def test_thermostat_field_filters_use_shared_capabilities_across_targets(self):
+    def test_thermostat_field_filters_retain_fields_supported_by_any_target(self):
         fields = action_fields({
             "temperature": {"filter": {"supported_features": [1]}},
             "temperature_range": {"fields": {
@@ -33,20 +33,20 @@ class OptionalParameterTests(unittest.TestCase):
         original = copy.deepcopy((fields, single, ranged))
         for targets, expected in (([single], {"temperature", "hvac_mode"}),
                                   ([ranged], {"target_temp_low", "target_temp_high", "hvac_mode"}),
-                                  ([single, ranged], {"hvac_mode"})):
+                                  ([single, ranged], {"temperature", "target_temp_low", "target_temp_high", "hvac_mode"})):
             with self.subTest(targets=targets):
                 kept, report = filter_fields(fields, targets)
                 self.assertEqual(set(kept), expected)
                 self.assertEqual(report["fields_before"], 4)
                 self.assertEqual(report["fields_after"], len(expected))
                 self.assertEqual(set(report["removed_fields"]), set(fields) - expected)
-                self.assertEqual(report["policy"], "all_resolved_targets")
+                self.assertEqual(report["policy"], "any_resolved_target")
         _, report = filter_fields(fields, [single, ranged])
-        self.assertEqual(report["removed_fields"]["temperature"]["unsupported_entity_ids"], ["climate.range"])
-        self.assertEqual(report["removed_fields"]["target_temp_low"]["unsupported_entity_ids"], ["climate.single"])
+        self.assertEqual(report["field_support"]["temperature"]["unsupported_entity_ids"], ["climate.range"])
+        self.assertEqual(report["field_support"]["target_temp_low"]["unsupported_entity_ids"], ["climate.single"])
         self.assertEqual((fields, single, ranged), original)
 
-    def test_attribute_filters_match_scalar_or_list_values_and_require_all_targets(self):
+    def test_attribute_filters_keep_partially_supported_fields_and_record_coverage(self):
         fields = {
             "color": {"filter": {"attribute": {"supported_color_modes": ["hs", "rgb"]}}},
             "preset": {"filter": {"attribute": {"device_class": ["speaker"]}}},
@@ -55,11 +55,16 @@ class OptionalParameterTests(unittest.TestCase):
         first = {"entity_id": "light.first", "attributes": {"supported_color_modes": ["onoff", "hs"], "device_class": "speaker"}}
         second = {"entity_id": "light.second", "attributes": {"supported_color_modes": ["rgb"], "device_class": "other"}}
         kept, report = filter_fields(fields, [first, second])
-        self.assertEqual(set(kept), {"color", "plain"})
-        self.assertEqual(report["removed_fields"]["preset"]["unsupported_entity_ids"], ["light.second"])
+        self.assertEqual(set(kept), {"color", "preset", "plain"})
+        self.assertEqual(report["field_support"]["preset"]["unsupported_entity_ids"], ["light.second"])
         second["attributes"]["supported_color_modes"] = ["onoff"]
-        kept, _ = filter_fields(fields, [first, second])
-        self.assertEqual(set(kept), {"plain"})
+        kept, report = filter_fields(fields, [first, second])
+        self.assertEqual(set(kept), {"color", "preset", "plain"})
+        self.assertEqual(report["field_support"]["color"]["supported_entity_ids"], ["light.first"])
+        first["attributes"]["supported_color_modes"] = ["onoff"]
+        kept, report = filter_fields(fields, [first, second])
+        self.assertNotIn("color", kept)
+        self.assertEqual(report["removed_fields"]["color"]["unsupported_entity_ids"], ["light.first", "light.second"])
 
     def test_feature_and_attribute_alternatives_match_ha_filter_rules(self):
         fields = {"value": {"filter": {"supported_features": [1, 2], "attribute": {"mode": ["supported"], "other": ["ok"]}}}}

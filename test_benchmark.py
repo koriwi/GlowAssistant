@@ -154,6 +154,7 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
         self.assertRegex(printed, r"speaker area\s+unknown")
         self.assertNotIn('"selector"', printed)
         self.assertIn("Selected optional parameters: brightness_pct", printed)
+        self.assertRegex(printed, r"brightness_pct\s+1\.0000\s+2/2\s+keep")
         self.assertNotIn("hue", printed)
         self.assertIn("hue", report["result"]["parameter_selection"]["probabilities"])
         self.assertIn("Answer model was not called.", printed)

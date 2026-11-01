@@ -166,7 +166,7 @@ class ActionRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["required_parameters"], [])
         self.assertNotIn("numeric", result["decisions"])
         self.assertEqual(set(client.requests[-1][2]["optional_parameters"]["criteria"]), {"temperature", "hvac_mode", "none"})
-        self.assertTrue(client.requests[-1][1]["capabilities_validated_for_all_targets"])
+        self.assertEqual(client.requests[-1][1]["capability_filter_policy"], "any_resolved_target")
         self.assertEqual(result["parameter_capabilities"]["target_entity_ids"], ["climate.office"])
         self.assertEqual(set(result["parameter_capabilities"]["removed_fields"]), {"target_temp_low", "target_temp_high"})
         capabilities = next(output for stage, _, output in events if stage == "parameter_capabilities" and output)
@@ -184,13 +184,17 @@ class ActionRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["parameter_capabilities"]["removed_fields"]["temperature"]["unsupported_entity_ids"],
                          ["climate.kitchen"])
 
-    async def test_multi_area_targets_use_capability_intersection(self):
+    async def test_multi_area_targets_retain_partially_supported_fields_with_per_field_members(self):
         result, client, _ = await self.run_route("areas", [
             {"action_areas": answer({"area:office": 0.5, "area:kitchen": 0.4, "none": 0.1})},
             {"optional_parameters": "none"},
         ], service="climate.set_temperature:temperature", data=climate_snapshot())
-        self.assertEqual(set(client.requests[-1][2]["optional_parameters"]["criteria"]), {"hvac_mode", "none"})
-        self.assertEqual(result["parameter_capabilities"]["target_entity_ids"], ["climate.office", "climate.kitchen"])
+        self.assertEqual(set(client.requests[-1][2]["optional_parameters"]["criteria"]),
+                         {"temperature", "target_temp_low", "target_temp_high", "hvac_mode", "none"})
+        capabilities = result["parameter_capabilities"]
+        self.assertEqual(capabilities["target_entity_ids"], ["climate.office", "climate.kitchen"])
+        self.assertEqual(capabilities["field_support"]["temperature"]["supported_entity_ids"], ["climate.office"])
+        self.assertEqual(capabilities["field_support"]["target_temp_low"]["supported_entity_ids"], ["climate.kitchen"])
 
     async def test_specific_entity_capabilities_ignore_unselected_candidates_in_same_area(self):
         data = climate_snapshot()
@@ -212,6 +216,34 @@ class ActionRoutingTests(unittest.IsolatedAsyncioTestCase):
                          ["light.desk", "light.ceiling"])
         self.assertNotIn("optional_parameters", result["decisions"])
         self.assertTrue(any(stage == "parameter_capabilities" for stage, _, _ in events))
+
+    async def test_room_brightness_step_survives_on_off_only_members(self):
+        data = snapshot()
+        data["entities"][0]["attributes"]["supported_color_modes"] = ["brightness"]
+        data["entities"][1]["attributes"]["supported_color_modes"] = ["onoff"]
+        data["entities"][2]["attributes"]["supported_color_modes"] = ["rgb"]
+        data["entities"].extend(entity(f"light.binary_{index}", f"Binary light {index}", supported_color_modes=["onoff"])
+                                for index in range(6))
+        brightness_filter = {"attribute": {"supported_color_modes": ["brightness", "color_temp", "hs", "xy", "rgb", "rgbw", "rgbww"]}}
+        data["services"]["light.turn_on"]["fields"] = {
+            "brightness_pct": {"filter": brightness_filter, "selector": {"number": {"min": 0, "max": 100}}},
+            "brightness_step_pct": {"filter": brightness_filter, "selector": {"number": {"min": -100, "max": 100}}},
+            "rgb_color": {"filter": {"attribute": {"supported_color_modes": ["rgb", "hs"]}}},
+            "transition": {"filter": {"supported_features": [32]}},
+        }
+        result, client, _ = await self.run_route("implied_area", [{"optional_parameters": answer({
+            "brightness_pct": 0.05, "brightness_step_pct": 0.9, "none": 0.05,
+        })}], speaker_area="Office", service="light.turn_on:brightness_pct", data=data,
+            selected_parameters=["brightness_step_pct"], prompt="mach das licht ein bisschen heller")
+        self.assertEqual(result["target"]["area_id"], "office")
+        self.assertEqual(len(client.requests), 3)
+        self.assertEqual(set(client.requests[-1][2]["optional_parameters"]["criteria"]),
+                         {"brightness_pct", "brightness_step_pct", "none"})
+        capabilities = result["parameter_capabilities"]
+        self.assertEqual(len(capabilities["target_entity_ids"]), 8)
+        self.assertEqual(capabilities["field_support"]["brightness_step_pct"]["supported_entity_ids"], ["light.desk"])
+        self.assertEqual(len(capabilities["field_support"]["brightness_step_pct"]["unsupported_entity_ids"]), 7)
+        self.assertEqual(set(capabilities["removed_fields"]), {"rgb_color", "transition"})
 
     async def test_unknown_speaker_area_stops_without_guessing_another_room(self):
         result, client, _ = await self.run_route("implied_area", speaker_area="Unknown room")

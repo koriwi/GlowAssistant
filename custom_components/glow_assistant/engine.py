@@ -392,7 +392,7 @@ class AgentEngine:
         self._trace("parameter_capabilities", {}, {"status": "completed", "model_call": False,
                                                    **capabilities, "duration_ms": duration})
         optional, payload = parameter_request(result["request"], result["service"], fields, config["parameter_prompt"])
-        payload["state"]["capabilities_validated_for_all_targets"] = True
+        payload["state"]["capability_filter_policy"] = capabilities["policy"]
         if result.get("target"):
             payload["state"]["target"] = result["target"]
         result["required_parameters"] = [name for name, field in fields.items() if field.get("required", False)]

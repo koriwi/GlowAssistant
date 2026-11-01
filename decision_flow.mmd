@@ -37,7 +37,7 @@ flowchart TD
     Areas --> AreaTargets["Selected areas are the targets"]
     SpeakerOnly --> AreaTargets
     Scope -->|unsure| Unsure
-    Entities --> Capabilities["Expand resolved targets; keep fields supported by every entity"]
+    Entities --> Capabilities["Expand resolved targets; keep fields supported by any entity; track support per field"]
     AreaTargets --> Capabilities
     Capabilities --> Required["List applicable required action fields"]
     Required --> HasOptional{"Optional fields available?"}

@@ -226,10 +226,15 @@ def print_report(report, show_answer_input=False):
         print("Required parameters: " + (", ".join(result["required_parameters"]) or "none"))
         print("Selected optional parameters: " + (", ".join(selected) or "none"))
         print(f"Probability threshold: {selection['probability_threshold']:g} (strictly above)")
-        rows = [(name, f"{probability:.4f}", "keep" if name in selected else "drop" if name != "none" else "not a parameter")
+        capabilities = result.get("parameter_capabilities", {})
+        support = capabilities.get("field_support", {})
+        total_targets = len(capabilities.get("target_entity_ids", []))
+        rows = [(name, f"{probability:.4f}",
+                 f"{len(support[name]['supported_entity_ids'])}/{total_targets}" if name in support else "-",
+                 "keep" if name in selected else "not a parameter")
                 for name, probability in selection["probabilities"].items() if name in selected or name == "none"]
         if rows:
-            print_table(["Parameter", "Probability", "Selection"], rows, [40, 12, 18], right_columns=(1,))
+            print_table(["Parameter", "Probability", "Targets", "Selection"], rows, [40, 12, 9, 18], right_columns=(1, 2))
         print()
     stages = [("snapshot", str(report["timings_ms"]["snapshot"]), "Read HA context and settings", "-")]
     for event in report["trace"]:
