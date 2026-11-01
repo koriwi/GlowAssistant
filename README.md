@@ -13,7 +13,7 @@ Minimum Home Assistant version: **2026.4.2**.
 2. Download **GlowAssistant**.
 3. Restart Home Assistant.
 4. Open **Settings → Devices & services → Add integration → GlowAssistant**.
-5. Configure the **Decider** and **Smart-home answer** models.
+5. Configure the **Decider**. Enable and configure **Smart-home answer** only if you want LLM replies.
 6. Select GlowAssistant as the conversation agent under **Settings → Voice assistants**.
 
 Use the Assist pipeline to configure speech recognition and text-to-speech.
@@ -22,7 +22,7 @@ Use the Assist pipeline to configure speech recognition and text-to-speech.
 
 Set the endpoint URL, model ID, and API key for each model.
 Use a native decision model, such as Jev, for **Decider**.
-Use chat models for the other sections.
+Use chat models for the optional answer and general sections.
 Each model section also contains its prompts and limits.
 Local servers without authentication do not need an API key.
 
@@ -34,6 +34,9 @@ Local servers without authentication do not need an API key.
 Replace `SERVER` with the model server address.
 Set the port for each server.
 Use addresses that Home Assistant can reach.
+
+Smart-home replies use no answer LLM by default. Commands reply `ok`. Yes/no queries use a fixed reply. Other queries list entity names and values; one decision selects the requested state property, such as brightness or temperature.
+Enable **Smart-home answer → Enable LLM answer generation** to use the answer model.
 
 To answer questions about other topics, enable the **General model**.
 When you disable this model, these questions receive the configured **Unsure reply**.
@@ -64,7 +67,8 @@ Expand a **Result for …** entry to see the choices, confidence, time, usage, a
 See [benchmark setup](benchmark.md) for the one-time addon update and `.env` settings.
 
 ```bash
-python benchmark.py --query "Ist die Lampe im Büro an?" --confidence 0.5
+python benchmark.py --query "Ist die Lampe im Büro an?"
+python benchmark.py --query "Wie hell ist die Lampe?" --llm-answer
 ```
 
 ## TODO

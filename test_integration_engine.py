@@ -88,7 +88,10 @@ class ScriptedModels:
 class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
     async def run_agent(self, choices, snapshot=SNAPSHOT, settings=None, answers=None, trace=None, history=None, language="de", prompt="test request", dry_run=False, speaker_area=None):
         models = ScriptedModels(choices, answers)
-        agent = AgentEngine(settings or normalize_settings({}), models, trace=trace, history=history, dry_run=dry_run)
+        config = copy.deepcopy(settings) if settings else normalize_settings({})
+        # Existing query tests exercise LLM answer generation.
+        config["answer"]["enable"] = bool(choices and choices[0].get("service") == "query_state")
+        agent = AgentEngine(config, models, trace=trace, history=history, dry_run=dry_run)
         result = await agent.process(prompt, language, snapshot, speaker_area=speaker_area)
         return result, models
 
@@ -244,7 +247,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result["target"]["area_id"], "office")
                 self.assertNotIn("execution", result)
                 self.assertNotIn("failures", result)
-                self.assertIn("No action was executed", result["answer"])
+                self.assertEqual(result["answer"], "ok")
 
 
     async def test_action_target_scope_choices_and_speaker_context(self):
@@ -478,7 +481,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
             {"service": "light.turn_off"}, {"target_scope": "entities_explicit_area"},
             {"action_areas": "area:office"}, {"action_entities": "entity:light.desk"},
         ], trace=lambda *event: events.append(event))
-        self.assertEqual([stage for stage, _, _ in events], ["service", "service", "target_scope", "target_scope", "action_areas", "action_areas", "action_entities", "action_entities", "parameter_capabilities", "parameter_capabilities"])
+        self.assertEqual([stage for stage, _, _ in events], ["service", "service", "target_scope", "target_scope", "action_areas", "action_areas", "action_entities", "action_entities", "parameter_capabilities", "parameter_capabilities", "answer", "answer"])
         output = events[1][2]
         self.assertEqual(output["action_metadata"], result["action_metadata"])
         self.assertEqual(output["decisions"]["service"]["choice"], "light.turn_off")
@@ -548,7 +551,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
     async def test_answer_character_limit_reaches_stage_debug_and_failure_summary_with_effective_settings(self):
         settings = normalize_settings({
             "decider": {"model": "decider", "max_input_chars": 150000},
-            "answer": {"model": "answer-model", "max_input_chars": 100},
+            "answer": {"enable": True, "model": "answer-model", "max_input_chars": 100},
         })
         events = []
         session = Mock()
@@ -1019,7 +1022,7 @@ class IntegrationSettingsTests(unittest.TestCase):
     def local_settings(self):
         return normalize_settings({
             "decider": {"url": "http://server:8321/v1/systemone", "api_key": ""},
-            "answer": {"url": "http://server:8322/v1/chat/completions", "model": "small-model"},
+            "answer": {"enable": True, "url": "http://server:8322/v1/chat/completions", "model": "small-model"},
         })
 
     def test_local_models_and_disabled_general_need_no_keys(self):

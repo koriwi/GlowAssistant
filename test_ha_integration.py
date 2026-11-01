@@ -23,7 +23,7 @@ class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
     def settings(self):
         return normalize_settings({
             "decider": {"url": "http://server:8321/v1/systemone"},
-            "answer": {"url": "http://server:8322/v1/chat/completions", "model": "small-model"},
+            "answer": {"enable": True, "url": "http://server:8322/v1/chat/completions", "model": "small-model"},
         })
 
     async def test_config_flow_renders_three_sections_and_creates_entry(self):
@@ -43,6 +43,9 @@ class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(prompt.config["multiline"])
                 self.assertEqual(confidence.config["min"], 0)
                 self.assertEqual(confidence.config["max"], 1)
+            if key.schema == "answer":
+                enabled = next(selector for field, selector in block.schema.schema.items() if field.schema == "enable")
+                self.assertEqual(enabled.selector_type, "boolean")
         validated = form["data_schema"](self.settings())
         self.assertEqual(set(validated) & {"decider", "answer", "general"}, {"decider", "answer", "general"})
         result = await flow.async_step_user(validated)

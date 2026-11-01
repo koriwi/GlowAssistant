@@ -17,7 +17,7 @@ from test_integration_engine import SNAPSHOT, ScriptedModels
 def settings():
     return normalize_settings({
         "decider": {"url": "http://decider:8321/v1/systemone", "model": "decider"},
-        "answer": {"url": "http://answer:8322/v1/chat/completions", "model": "answer"},
+        "answer": {"enable": True, "url": "http://answer:8322/v1/chat/completions", "model": "answer"},
     })
 
 
@@ -107,7 +107,7 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
         choices = [{"service": "query_state"}, {"area": "all_areas"},
                    {"domain": "light"}, {"query_type": "complex"}, {"targets": ["light.desk"]}]
         local, addon = ScriptedModels(choices), ScriptedModels(choices)
-        args = benchmark.parser().parse_args(["--query", "Is the desk lamp on?", "--language", "en"])
+        args = benchmark.parser().parse_args(["--query", "Is the desk lamp on?", "--language", "en", "--llm-answer"])
         session = AsyncMock()
         with (patch("benchmark.fetch_snapshot", new=AsyncMock(return_value=self.exported())),
               patch("benchmark.aiohttp.ClientSession", return_value=session),
@@ -127,7 +127,7 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
         choices = [{"service": "query_state"}, {"area": "area:office"}, {"domain": "light"},
                    {"query_type": "yes_no"}, {"binary_answer": "yes"}]
         local, addon = ScriptedModels(choices), ScriptedModels(choices)
-        args = benchmark.parser().parse_args(["--query", "Is the office light on?", "--language", "en"])
+        args = benchmark.parser().parse_args(["--query", "Is the office light on?", "--language", "en", "--llm-answer"])
         with (patch("benchmark.fetch_snapshot", new=AsyncMock(return_value=self.exported())),
               patch("benchmark.aiohttp.ClientSession", return_value=AsyncMock()),
               patch("benchmark.ModelClient", return_value=local)):
@@ -208,7 +208,7 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("execution", report["result"])
         self.assertEqual(len(models.requests), 5)
         self.assertFalse(models.chat_requests)
-        self.assertEqual({event["stage"] for event in report["trace"]}, {"service", "target_scope", "action_areas", "parameter_capabilities", "optional_parameters", "numeric:brightness_pct"})
+        self.assertEqual({event["stage"] for event in report["trace"]}, {"service", "target_scope", "action_areas", "parameter_capabilities", "optional_parameters", "numeric:brightness_pct", "answer"})
         output = io.StringIO()
         with redirect_stdout(output):
             benchmark.print_report(report, show_answer_input=True)
@@ -251,7 +251,7 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report["result"]["parameter_selection"]["selected_parameters"], [])
 
     async def test_query_answer_input_remains_readable_without_mutating_the_api_messages(self):
-        args = benchmark.parser().parse_args(["--query", "Which lights are on?"])
+        args = benchmark.parser().parse_args(["--query", "Which lights are on?", "--llm-answer"])
         models = ScriptedModels([{"service": "query_state"}, {"area": "all_areas"}, {"domain": "light"},
                                  {"query_type": "complex"}, {"targets": ["light.desk"]}])
         with (patch("benchmark.fetch_snapshot", new=AsyncMock(return_value=self.exported())),

@@ -12,6 +12,7 @@ STAGE_LABELS = {
     "domain": "Choose a state-query domain",
     "query_type": "Choose a yes/no or detailed answer",
     "binary_answer": "Answer the yes/no state question",
+    "state_property": "Choose the requested state property",
     "target_scope": "Classify entity targets and explicit or implied areas",
     "action_areas": "Select action areas",
     "action_entities": "Select action entities",

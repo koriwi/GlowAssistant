@@ -140,7 +140,8 @@ class ChatLogTraceTests(unittest.TestCase):
 
     def test_yes_no_stages_have_native_debug_cards(self):
         for stage, tool_name in (("query_type", "glow_assistant_select_query_type"),
-                                 ("binary_answer", "glow_assistant_answer_yes_no")):
+                                 ("binary_answer", "glow_assistant_answer_yes_no"),
+                                 ("state_property", "glow_assistant_select_state_property")):
             with self.subTest(stage=stage):
                 result = {"decisions": {stage: {"choice": "unsure", "confidence": 0.3}}, "duration_ms": 20}
                 self.trace(stage, {"candidate_counts": {stage: 3}})

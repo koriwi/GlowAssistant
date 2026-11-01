@@ -16,12 +16,20 @@ flowchart TD
     DomainEntities --> QueryType{"Decider: yes/no question?"}
     QueryType -->|Yes| BinaryAnswer["Decider: yes / no / unsure from candidate states"]
     BinaryAnswer -->|unsure| Unsure
-    BinaryAnswer -->|yes / no| Translate["Answer model: translate yes/no into Assist language"]
+    BinaryAnswer -->|yes / no| BinaryMode{"LLM answer enabled?"}
+    BinaryMode -->|Yes| Translate["Answer model: translate yes/no into Assist language"]
+    BinaryMode -->|No| FixedBinary["Fixed Ja/Nein or Yes/No reply"]
     Translate --> Reply
+    FixedBinary --> Reply
     QueryType -->|No| QueryTargets["Decider: one Choice over entities + none; retain at or above relative probability cutoff"]
     QueryType -->|unsure| Unsure
     QueryTargets --> States["Read selected states from snapshot"]
-    States --> Answer["Smart-home answer model"]
+    States --> QueryReplyMode{"LLM answer enabled?"}
+    QueryReplyMode -->|Yes| Answer["Smart-home answer model"]
+    QueryReplyMode -->|No| Property["Decider: choose one requested state property"]
+    Property -->|unsure| Unsure
+    Property -->|Selected| StateText["Format entity names + values + units"]
+    StateText --> Reply
     Answer --> Reply
 
     Service -->|HA action| Scope{"Decider: intended target type"}
@@ -55,4 +63,9 @@ flowchart TD
     Numeric -->|Valid number| Values
     Values -->|More fields| Each
     Values -->|All complete| Console["Print targets, parameter values and per-field timings"]
-    Console --> Stop["Stop: no device actions"]
+    Console --> Stop["No device actions"]
+    Stop --> ActionReplyMode{"LLM answer enabled?"}
+    ActionReplyMode -->|Yes| PlanAnswer["Answer model: describe the unexecuted plan"]
+    ActionReplyMode -->|No| Ack["ok"]
+    PlanAnswer --> Reply
+    Ack --> Reply

@@ -34,6 +34,7 @@ def confidence(value):
 def parser():
     result = argparse.ArgumentParser(description="Benchmark the shared HA engine locally; device actions are planned only.")
     result.add_argument("--query", "-q", required=True)
+    result.add_argument("--llm-answer", action="store_true", help="Generate smart-home replies with the answer LLM; disabled by default.")
     result.add_argument("--confidence", type=confidence, help="Override every decider confidence threshold.")
     result.add_argument("--parameter-threshold", type=confidence,
                         help="Relative probability threshold for optional parameters; independent of --confidence.")
@@ -61,6 +62,7 @@ def model_settings(exported, args, env):
             value = env.get(f"{prefix}_{field.upper()}", "").strip()
             if value:
                 settings[group][field] = value
+    settings["answer"]["enable"] = args.llm_answer
     decider = settings["decider"]
     if not decider["api_key"] and urlsplit(decider["url"]).hostname == "openrouter.ai":
         decider["api_key"] = env.get("OPENROUTER_API_KEY", "").strip()
@@ -190,6 +192,10 @@ def print_report(report, show_answer_input=False):
     for field in ("route", "service", "domain"):
         if field in result:
             summary.append((field, result[field] if result[field] is not None else "-"))
+    if "answer_source" in result:
+        summary.append(("answer mode", result["answer_source"]))
+    if "state_property" in result:
+        summary.append(("state property", result["state_property"]))
     if "action_metadata" in result:
         summary.append(("speaker area", result.get("speaker_area") or "unknown"))
         scopes = {"entities": "Specific arealess entities",

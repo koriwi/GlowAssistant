@@ -28,6 +28,7 @@ from .parameter_values import (
     NUMERIC_INSTRUCTIONS,
     NUMERIC_MODE_INSTRUCTIONS,
 )
+from .state_properties import INSTRUCTIONS as STATE_PROPERTY_INSTRUCTIONS
 from .text_values import INSTRUCTIONS as TEXT_INSTRUCTIONS
 from .text_values import LEGACY_PROMPTS, MESSAGE_INSTRUCTIONS
 
@@ -45,6 +46,7 @@ DEFAULTS = {
         "query_type_prompt": QUERY_TYPE_PROMPT, "query_type_confidence": 0,
         "query_target_prompt": QUERY_TARGET_PROMPT, "query_target_probability_threshold": 0.02,
         "binary_answer_prompt": BINARY_ANSWER_PROMPT, "binary_answer_confidence": 0,
+        "state_property_prompt": STATE_PROPERTY_INSTRUCTIONS, "state_property_confidence": 0,
         "area_prompt": AREA_PROMPT,
         "target_scope_prompt": TARGET_SCOPE_PROMPT, "target_scope_confidence": 0,
         "text_prompt": TEXT_INSTRUCTIONS, "message_prompt": MESSAGE_INSTRUCTIONS,
@@ -53,6 +55,7 @@ DEFAULTS = {
         "service_confidence": 0, "area_confidence": 0,
     },
     "answer": {
+        "enable": False,
         "url": "https://openrouter.ai/api/v1/chat/completions",
         "model": "", "api_key": "", "timeout": 60, "max_input_chars": 100000,
         "max_tokens": 256, "temperature": 0.2, "prompt": ANSWER_PROMPT,
@@ -111,7 +114,9 @@ def validate_settings(data):
     settings = normalize_settings(data)
     for group in ("decider", "answer", "general"):
         config = settings[group]
-        if group != "general" or config["enable"]:
+        if group != "decider" and not isinstance(config["enable"], bool):
+            raise TypeError(f"{group}: enable must be a boolean.")
+        if group == "decider" or config["enable"]:
             parsed = urlsplit(config["url"])
             if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
                 raise ValueError(f"{group}: enter a full HTTP(S) endpoint URL without embedded credentials.")
@@ -128,7 +133,7 @@ def validate_settings(data):
     for field in ("parameter_probability_threshold", "action_area_probability_threshold", "action_entity_probability_threshold",
                   "query_target_probability_threshold", "text_probability_threshold"):
         _range(decider, field, 0, 1, "decider")
-    for stage in ("service", "area", "domain", "query_type", "binary_answer", "target_scope", "numeric"):
+    for stage in ("service", "area", "domain", "query_type", "binary_answer", "target_scope", "numeric", "state_property"):
         _range(decider, f"{stage}_confidence", 0, 1, "decider")
     if not isinstance(settings["history_enabled"], bool):
         raise TypeError("history_enabled must be a boolean.")

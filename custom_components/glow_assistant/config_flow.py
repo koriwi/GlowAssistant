@@ -79,7 +79,7 @@ async def async_test_models(hass, data, raw):
     for group in ("decider", "answer", "general"):
         if not raw.get(group, {}).get("test_connection"):
             continue
-        if group == "general" and not data[group]["enable"]:
+        if group != "decider" and not data[group]["enable"]:
             continue
         if group == "decider":
             options = {"ok": "The endpoint is working."}

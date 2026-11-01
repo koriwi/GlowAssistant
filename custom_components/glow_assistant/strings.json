@@ -52,7 +52,9 @@
               "text_probability_threshold": "Text word relative probability threshold",
               "numeric_prompt": "Numeric field extraction prompt",
               "numeric_confidence": "Minimum numeric extraction confidence",
-              "numeric_mode_prompt": "Absolute/relative numeric field prompt"
+              "numeric_mode_prompt": "Absolute/relative numeric field prompt",
+              "state_property_prompt": "State property selection prompt",
+              "state_property_confidence": "Minimum state property confidence"
             },
             "data_description": {
               "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
@@ -82,7 +84,9 @@
               "text_probability_threshold": "Keep real options with probability at or above this value / max(1, real option count). Exclude none/unsure from the count; two real options halve the configured cutoff. Overall confidence is not used; none does not override retained choices. Adding irrelevant options also lowers the cutoff and can retain weak matches. Default configured threshold: 0.3.",
               "numeric_prompt": "Extract the current numeric field using HA metadata and current settings. Ignore numbers and change amounts belonging to other_parameters. Clear to restore the default.",
               "numeric_confidence": "Applies to numeric mode and Score extraction. Unsupported types and missing numeric ranges stop explicitly.",
-              "numeric_mode_prompt": "Classify the current field as absolute, relative or unsure. Ignore other_parameters values and change verbs. Clear to restore the default."
+              "numeric_mode_prompt": "Classify the current field as absolute, relative or unsure. Ignore other_parameters values and change verbs. Clear to restore the default.",
+              "state_property_prompt": "One single-choice decision selects the state or attribute needed for a programmatic query reply. Clear to restore the default.",
+              "state_property_confidence": "Single-choice confidence threshold for selecting the requested state property. Used when LLM answer generation is disabled."
             }
           },
           "answer": {
@@ -96,14 +100,16 @@
               "max_tokens": "Maximum output tokens",
               "temperature": "Sampling temperature",
               "prompt": "System prompt",
-              "test_connection": "Test connection when saving"
+              "test_connection": "Test connection when saving",
+              "enable": "Enable LLM answer generation"
             },
             "data_description": {
               "url": "Full endpoint URL; no path is appended. Localhost refers to Home Assistant itself.",
               "api_key": "Optional for local servers without authentication. This model uses only this key.",
               "max_input_chars": "Reject larger requests without truncating candidates or state data. This counts characters, not tokens.",
               "test_connection": "Sends a model-only test request. It never executes a Home Assistant action.",
-              "prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating."
+              "prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
+              "enable": "Off by default. When disabled, commands reply ok, yes/no queries use a fixed reply, and other queries list entity names and the selected state value. No answer-model request is made."
             }
           },
           "general": {
@@ -190,7 +196,9 @@
               "text_probability_threshold": "Text word relative probability threshold",
               "numeric_prompt": "Numeric field extraction prompt",
               "numeric_confidence": "Minimum numeric extraction confidence",
-              "numeric_mode_prompt": "Absolute/relative numeric field prompt"
+              "numeric_mode_prompt": "Absolute/relative numeric field prompt",
+              "state_property_prompt": "State property selection prompt",
+              "state_property_confidence": "Minimum state property confidence"
             },
             "data_description": {
               "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
@@ -220,7 +228,9 @@
               "text_probability_threshold": "Keep real options with probability at or above this value / max(1, real option count). Exclude none/unsure from the count; two real options halve the configured cutoff. Overall confidence is not used; none does not override retained choices. Adding irrelevant options also lowers the cutoff and can retain weak matches. Default configured threshold: 0.3.",
               "numeric_prompt": "Extract the current numeric field using HA metadata and current settings. Ignore numbers and change amounts belonging to other_parameters. Clear to restore the default.",
               "numeric_confidence": "Applies to numeric mode and Score extraction. Unsupported types and missing numeric ranges stop explicitly.",
-              "numeric_mode_prompt": "Classify the current field as absolute, relative or unsure. Ignore other_parameters values and change verbs. Clear to restore the default."
+              "numeric_mode_prompt": "Classify the current field as absolute, relative or unsure. Ignore other_parameters values and change verbs. Clear to restore the default.",
+              "state_property_prompt": "One single-choice decision selects the state or attribute needed for a programmatic query reply. Clear to restore the default.",
+              "state_property_confidence": "Single-choice confidence threshold for selecting the requested state property. Used when LLM answer generation is disabled."
             }
           },
           "answer": {
@@ -234,14 +244,16 @@
               "max_tokens": "Maximum output tokens",
               "temperature": "Sampling temperature",
               "prompt": "System prompt",
-              "test_connection": "Test connection when saving"
+              "test_connection": "Test connection when saving",
+              "enable": "Enable LLM answer generation"
             },
             "data_description": {
               "url": "Full endpoint URL; no path is appended. Localhost refers to Home Assistant itself.",
               "api_key": "Optional for local servers without authentication. This model uses only this key.",
               "max_input_chars": "Reject larger requests without truncating candidates or state data. This counts characters, not tokens.",
               "test_connection": "Sends a model-only test request. It never executes a Home Assistant action.",
-              "prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating."
+              "prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
+              "enable": "Off by default. When disabled, commands reply ok, yes/no queries use a fixed reply, and other queries list entity names and the selected state value. No answer-model request is made."
             }
           },
           "general": {
@@ -338,7 +350,9 @@
               "text_probability_threshold": "Text word relative probability threshold",
               "numeric_prompt": "Numeric field extraction prompt",
               "numeric_confidence": "Minimum numeric extraction confidence",
-              "numeric_mode_prompt": "Absolute/relative numeric field prompt"
+              "numeric_mode_prompt": "Absolute/relative numeric field prompt",
+              "state_property_prompt": "State property selection prompt",
+              "state_property_confidence": "Minimum state property confidence"
             },
             "data_description": {
               "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
@@ -368,7 +382,9 @@
               "text_probability_threshold": "Keep real options with probability at or above this value / max(1, real option count). Exclude none/unsure from the count; two real options halve the configured cutoff. Overall confidence is not used; none does not override retained choices. Adding irrelevant options also lowers the cutoff and can retain weak matches. Default configured threshold: 0.3.",
               "numeric_prompt": "Extract the current numeric field using HA metadata and current settings. Ignore numbers and change amounts belonging to other_parameters. Clear to restore the default.",
               "numeric_confidence": "Applies to numeric mode and Score extraction. Unsupported types and missing numeric ranges stop explicitly.",
-              "numeric_mode_prompt": "Classify the current field as absolute, relative or unsure. Ignore other_parameters values and change verbs. Clear to restore the default."
+              "numeric_mode_prompt": "Classify the current field as absolute, relative or unsure. Ignore other_parameters values and change verbs. Clear to restore the default.",
+              "state_property_prompt": "One single-choice decision selects the state or attribute needed for a programmatic query reply. Clear to restore the default.",
+              "state_property_confidence": "Single-choice confidence threshold for selecting the requested state property. Used when LLM answer generation is disabled."
             }
           },
           "answer": {
@@ -382,14 +398,16 @@
               "max_tokens": "Maximum output tokens",
               "temperature": "Sampling temperature",
               "prompt": "System prompt",
-              "test_connection": "Test connection when saving"
+              "test_connection": "Test connection when saving",
+              "enable": "Enable LLM answer generation"
             },
             "data_description": {
               "url": "Full endpoint URL; no path is appended. Localhost refers to Home Assistant itself.",
               "api_key": "Optional for local servers without authentication. This model uses only this key.",
               "max_input_chars": "Reject larger requests without truncating candidates or state data. This counts characters, not tokens.",
               "test_connection": "Sends a model-only test request. It never executes a Home Assistant action.",
-              "prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating."
+              "prompt": "Plain instructions; request and context are supplied separately. Clear this field to restore its default. No templating.",
+              "enable": "Off by default. When disabled, commands reply ok, yes/no queries use a fixed reply, and other queries list entity names and the selected state value. No answer-model request is made."
             }
           },
           "general": {

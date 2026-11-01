@@ -27,15 +27,15 @@ python benchmark.py --query "Mach das Licht im Büro an" --confidence 0.25
 python benchmark.py --query "Sind im Haus Fenster offen?" --domain-confidence 0.4 --query-target-threshold 0.02 --json
 ```
 
-`--confidence` overrides the single-choice confidence thresholds; probability cutoffs are separate. Individual flags override that value: `--service-confidence`, `--area-confidence`, `--target-scope-confidence`, `--domain-confidence`, `--query-type-confidence`, `--binary-answer-confidence`, `--numeric-confidence`.
+`--confidence` overrides the single-choice confidence thresholds; probability cutoffs are separate. Individual flags override that value: `--service-confidence`, `--area-confidence`, `--target-scope-confidence`, `--domain-confidence`, `--query-type-confidence`, `--binary-answer-confidence`, `--numeric-confidence`, `--state-property-confidence`.
 
 Match `--language` to the Assist pipeline. It defaults to `BENCHMARK_LANGUAGE` or `de`. Each run starts with no conversation history.
 
-State queries follow service → area → single-domain selection → answer-type selection. Yes/no queries ask the decider for yes/no/unsure from all candidate states, without entity keep/drop. The answer model only translates yes/no into the Assist language. Other queries use one entity Choice question → probability filtering → answer model. Unsure decisions stop with the configured unsure reply. Domain selection runs for rooms and `all_areas`; actions get their domain from the service. `--domain-filter-confidence` remains an alias for `--domain-confidence`.
+State queries follow service → area → single-domain selection → answer-type selection. Yes/no queries ask the decider for yes/no/unsure from all candidate states, without entity keep/drop. With LLM replies off, yes/no is formatted directly as Ja/Nein for German or Yes/No otherwise. With LLM replies on, the answer model translates the result into the Assist language. Other queries use one entity Choice question → probability filtering → reply generation. With LLM replies off, a single state_property Choice selects the requested scalar state/attribute for all retained entities; code formats name + value. With LLM replies on, the answer model receives the selected entity states as before. Unsure decisions stop with the configured unsure reply. Domain selection runs for rooms and `all_areas`; actions get their domain from the service. `--domain-filter-confidence` remains an alias for `--domain-confidence`.
 
 Output shows stage timings and decisions. `--json` includes the full engine result, trace and usage. Snapshot fetch, engine and total times are separate.
 
-Add `--show-answer-input` to print the smart-home answer request: model, messages, temperature and output token limit. Messages include the system prompt, pipeline language, history and final state facts. For detailed queries, selected entities appear in one `entities` array, with each entity's ID, name, room and query state together. For yes/no replies, only `state_answer` is sent for translation. Nested JSON in `content` is expanded for display; the chat API still receives text. With `--json`, this readable view is available under `answer_input`, and the original messages remain in `trace`. API keys and headers are excluded.
+With `--llm-answer`, add `--show-answer-input` to print the smart-home answer request: model, messages, temperature and output token limit. Messages include the system prompt, pipeline language, history and final state facts. For detailed queries, selected entities appear in one `entities` array, with each entity's ID, name, room and query state together. For yes/no replies, only `state_answer` is sent for translation. Nested JSON in `content` is expanded for display; the chat API still receives text. With `--json`, this readable view is available under `answer_input`, and the original messages remain in `trace`. API keys and headers are excluded.
 
 Action requests run **service → target type → area resolution/filtering → target resolution → capability prefilter → parameter detection → value extraction → stop**. Target types:
 
@@ -70,7 +70,7 @@ The `parameter_capabilities` debug card/JSON record shows the actual target enti
 
 Parameter detection then runs against the remaining action fields. Required fields are listed automatically. Optional fields use one Choice question plus `none`; every real field at or above the calculated cutoff from `parameter_probability_threshold` (default 0.15) is kept. Overall confidence is not a filter, and `none` never overrides retained real fields. `--parameter-threshold` overrides this cutoff independently of `--confidence`. No optional fields means no extra model call. The request includes the resolved target, without the entity catalog or current numeric values.
 
-Console output lists all optional-field probabilities, including dropped fields with `drop: p < THRESHOLD`. Fields removed by the capability filter are labeled unsupported for the selected targets. `none` is labeled as a non-parameter. `--json` retains the full distribution. Required and retained optional fields are extracted next according to their HA selectors. Text and number selectors are supported; other formats report not yet supported. No device or answer-model call runs on action requests.
+Console output lists all optional-field probabilities, including dropped fields with `drop: p < THRESHOLD`. Fields removed by the capability filter are labeled unsupported for the selected targets. `none` is labeled as a non-parameter. `--json` retains the full distribution. Required and retained optional fields are extracted next according to their HA selectors. Text and number selectors are supported; other formats report not yet supported. No device call runs. Successful action plans reply ok by default; with --llm-answer the model describes the plan without claiming execution.
 
 Supply speaker context explicitly when benchmarking:
 
@@ -101,6 +101,25 @@ python benchmark.py -q "wie warm ist es?" --query-target-threshold 0.02 --show-a
 ```
 
 The `target` timing row shows `selected N/M (one Choice)`. `--json` includes every option probability, the active threshold and selected entity IDs; `state_info` contains the selected states for quality comparisons. The old keep/drop helpers, settings and flags have been removed. Use the new state-query Choice prompt and probability threshold. Yes/no queries still bypass entity selection. Area/domain selection and answer generation are unchanged, including the current all_areas fallback for an unspecified room.
+
+## Optional LLM replies
+
+`benchmark.py` requires `--llm-answer` to call the smart-home answer model, even if the exported HA setting is enabled. Without this flag, the answer model does not need a configured URL, model or API key. In HA, use **Smart-home answer → Enable LLM answer generation**, off by default. General-model routing has its own enable setting and is unchanged.
+
+```bash
+python benchmark.py -q "Wie hell sind die Lampen im Büro?"
+python benchmark.py -q "Wie hell sind die Lampen im Büro?" --llm-answer --show-answer-input
+```
+
+Default replies:
+
+- Successful commands: `ok`. Device execution remains disabled.
+- Yes/no state queries: Ja/Nein for German pipelines, Yes/No otherwise. Keep the existing binary-answer shortcut; no property selection or answer-model call.
+- Other state queries: one `state_property` single-choice call selects the requested property for all selected entities. Output each name + value, with units. Brightness is shown as percent; hue and saturation come from `hs_color`. Unknown, unavailable or missing attributes are reported explicitly. Never substitute an entity's main state for a missing requested attribute. Duplicate names include room names when available.
+
+The property selector receives the request, property names/metadata, language and enabled history, without the entity catalog or state values. Its prompt/confidence are under Decider. `--state-property-confidence` overrides the threshold. Only scalar state attributes and derived hue/saturation are offered; unsupported or ambiguous selections return unsure.
+
+The CLI shows `answer mode` and the selected `state property`. JSON includes `state_property` and per-entity `state_values`; native debug has a property-selection card and an answer entry marked `model_call: false`. `--show-answer-input` reports that the answer model was not called. With `--llm-answer`, existing exact input tracing remains available. Fixed state labels use German for German pipelines and English/canonical values otherwise.
 
 ## Parameter value extraction
 

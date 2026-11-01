@@ -25,6 +25,12 @@ from .parameter_values import (
     field_type,
     numeric_request,
 )
+from .state_properties import (
+    format_values,
+    property_options,
+    selected_values,
+    yes_no_answer,
+)
 from .text_values import TEXT_ACTIONS, decode_text, text_request
 from .validation import finite_number, probability_cutoff
 
@@ -250,7 +256,7 @@ class AgentEngine:
             action = actions[service_choice]
             result.update(
                 service=action["service"], domain=action["service"].split(".", 1)[0],
-                answer=f"Selected action: {action['service']}. No action was executed.",
+                answer="ok",
             )
             result["speaker_area"] = speaker_area
             scopes = {key: value for key, value in TARGET_SCOPES.items()
@@ -262,6 +268,16 @@ class AgentEngine:
             members = await self._select_action_targets(result, entities)
             await self._select_parameters(result, members)
             await self._extract_parameters(result, members)
+            if self.settings["answer"]["enable"]:
+                facts = {"request": prompt, "service": result["service"], "target": result["target"],
+                         "parameters": result.get("parameters", {}), "execution": {"status": "not_sent"}}
+                await self._answer(result, [
+                    {"role": "system", "content": f"{self.settings['answer']['prompt']}\n{language_instruction}\n"
+                     "No device command was sent. Describe the selected action as a plan; never claim it completed."},
+                    {"role": "user", "content": json.dumps(facts, ensure_ascii=False)},
+                ])
+            else:
+                self._programmatic_answer(result, "ok")
             return
 
         result["service"] = QUERY
@@ -304,6 +320,15 @@ class AgentEngine:
              entity.get("attributes", {}) if entity["state"] not in ("unknown", "unavailable") else {}}
             for entity in members
         ]
+        if not self.settings["answer"]["enable"]:
+            options = property_options(members)
+            response = await self._decide(result, "state_property", {"prompt": prompt, "domain": result["domain"]}, {
+                "state_property": choice_question(options, config["state_property_prompt"]),
+            })
+            result["state_property"] = self._choice(response, "state_property", options)
+            result["state_values"] = selected_values(members, result["state_property"])
+            self._programmatic_answer(result, format_values(result["state_values"], result["language"]))
+            return
         facts = {key: value for key, value in result.items()
                  if key not in ("decisions", "usage", "timings_ms", "failures", "domain_filter", "target_selection",
                                 "target", "state_info")}
@@ -475,6 +500,9 @@ class AgentEngine:
             "prompt": result["request"], "area": area, "domain": result["domain"], "entities": candidates,
         }, {"binary_answer": choice_question(options, self.settings["decider"]["binary_answer_prompt"])})
         result["state_answer"] = self._choice(response, "binary_answer", options)
+        if not self.settings["answer"]["enable"]:
+            self._programmatic_answer(result, yes_no_answer(result["state_answer"], result["language"]))
+            return
         await self._answer(result, [
             {"role": "system", "content": (
                 f"{self.settings['answer']['prompt']}\n{language_instruction}\n"
@@ -484,7 +512,16 @@ class AgentEngine:
             {"role": "user", "content": json.dumps({"state_answer": result["state_answer"]})},
         ])
 
+    def _programmatic_answer(self, result, text):
+        started = perf_counter()
+        self._trace("answer", {"mode": "programmatic"})
+        result.update(answer=text, answer_source="programmatic")
+        result["timings_ms"]["answer"] = round((perf_counter() - started) * 1000)
+        self._trace("answer", {}, {"status": "completed", "model_call": False, "mode": "programmatic", "answer": text,
+                                   "duration_ms": result["timings_ms"]["answer"]})
+
     async def _answer(self, result, messages):
+        result["answer_source"] = "llm"
         try:
             await self._chat(result, "answer", messages)
         except ModelError as error:
