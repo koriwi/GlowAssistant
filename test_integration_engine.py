@@ -344,7 +344,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         }
         probabilities = {"brightness_pct": 0.25, "hue": 0.2, "child_lock": 0.05, "none": 0.5}
         events = []
-        settings = normalize_settings({"decider": {"parameter_prompt": "Custom parameter task"}})
+        settings = normalize_settings({"decider": {"parameter_prompt": "Custom parameter task", "parameter_probability_threshold": 0.15}})
         result, models, execute = await self.run_parameter_stage([
             {"service": "light.turn_on"}, {"optional_parameters": {
                 "type": "choice", "choice": "none", "confidence": 0, "probabilities": probabilities,
@@ -1020,7 +1020,7 @@ class IntegrationSettingsTests(unittest.TestCase):
         self.assertEqual(settings["decider"]["api_key"], "")
 
     def test_parameter_probability_setting_is_validated_independently_of_confidence(self):
-        self.assertEqual(self.local_settings()["decider"]["parameter_probability_threshold"], 0.15)
+        self.assertEqual(self.local_settings()["decider"]["parameter_probability_threshold"], 0.3)
         for value in (-0.1, 1.1, True, float("nan")):
             settings = self.local_settings()
             settings["decider"]["parameter_probability_threshold"] = value

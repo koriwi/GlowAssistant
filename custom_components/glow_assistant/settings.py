@@ -36,7 +36,7 @@ DEFAULTS = {
         "model": "typesafe/jev-1.14", "api_key": "", "timeout": 60,
         "max_input_chars": 100000,
         "service_prompt": SERVICE_PROMPT,
-        "parameter_prompt": PARAMETER_INSTRUCTIONS, "parameter_probability_threshold": 0.15,
+        "parameter_prompt": PARAMETER_INSTRUCTIONS, "parameter_probability_threshold": 0.3,
         "action_area_prompt": ACTION_AREA_INSTRUCTIONS, "action_area_probability_threshold": 0.15,
         "action_entity_prompt": ACTION_ENTITY_INSTRUCTIONS, "action_entity_probability_threshold": 0.15,
         "domain_prompt": DOMAIN_PROMPT, "domain_confidence": 0.5,

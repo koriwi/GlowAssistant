@@ -70,7 +70,7 @@ class BenchmarkSettingsTests(unittest.TestCase):
         self.assertEqual(configured["decider"]["service_confidence"], 0.9)
         self.assertEqual(configured["decider"]["parameter_probability_threshold"], 0.2)
         args = benchmark.parser().parse_args(["--query", "test", "--confidence", "0"])
-        self.assertEqual(benchmark.model_settings(settings(), args, {})["decider"]["parameter_probability_threshold"], 0.15)
+        self.assertEqual(benchmark.model_settings(settings(), args, {})["decider"]["parameter_probability_threshold"], 0.3)
 
     def test_action_selection_thresholds_are_independent_of_global_confidence(self):
         args = benchmark.parser().parse_args([
