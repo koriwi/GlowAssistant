@@ -35,6 +35,8 @@ def parser():
     result = argparse.ArgumentParser(description="Benchmark the shared HA engine locally; device actions are planned only.")
     result.add_argument("--query", "-q", required=True)
     result.add_argument("--confidence", type=confidence, help="Override every decider confidence threshold.")
+    result.add_argument("--parameter-threshold", type=confidence,
+                        help="Keep optional action parameters above this probability; independent of --confidence.")
     for field in CONFIDENCE_FIELDS:
         flags = ["--" + field.replace("_", "-")]
         if field == "domain_confidence":
@@ -62,6 +64,8 @@ def model_settings(exported, args, env):
         specific = getattr(args, field)
         if specific is not None:
             decider[field] = specific
+    if args.parameter_threshold is not None:
+        decider["parameter_probability_threshold"] = args.parameter_threshold
     return validate_settings(settings)
 
 
@@ -185,6 +189,21 @@ def print_report(report, show_answer_input=False):
         summary.append(("arguments", json.dumps(execution.get("arguments", {}), ensure_ascii=False)))
     print_table(["Result", "Value"], summary, [14, max(24, columns - 16)])
     print()
+    if result.get("action_metadata") is not None:
+        print("Selected action metadata (fields are optional unless required is true):")
+        print(json.dumps(result["action_metadata"], ensure_ascii=False, indent=2, default=str))
+        print()
+    if "parameter_selection" in result:
+        selection = result["parameter_selection"]
+        selected = selection["selected_parameters"]
+        print("Required parameters: " + (", ".join(result["required_parameters"]) or "none"))
+        print("Selected optional parameters: " + (", ".join(selected) or "none"))
+        print(f"Probability threshold: {selection['probability_threshold']:g} (strictly above)")
+        rows = [(name, f"{probability:.4f}", "keep" if name in selected else "drop" if name != "none" else "not a parameter")
+                for name, probability in selection["probabilities"].items()]
+        if rows:
+            print_table(["Parameter", "Probability", "Selection"], rows, [40, 12, 18], right_columns=(1,))
+        print()
     stages = [("snapshot", str(report["timings_ms"]["snapshot"]), "Read HA context and settings", "-")]
     for event in report["trace"]:
         output = event.get("output", {})
@@ -197,6 +216,8 @@ def print_report(report, show_answer_input=False):
         else:
             detail = ", ".join(f"{name}={info.get('effective_choice', info.get('score', info.get('choice')))}"
                                for name, info in decisions.items()) or output.get("status", "")
+        if event["stage"] == "optional_parameters" and "selected_parameters" in output:
+            detail = "selected: " + (", ".join(output["selected_parameters"]) or "none")
         scores = [info["confidence"] for info in decisions.values() if isinstance(info.get("confidence"), (int, float))]
         score = "-"
         if scores:

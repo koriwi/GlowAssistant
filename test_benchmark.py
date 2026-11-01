@@ -64,6 +64,14 @@ class BenchmarkSettingsTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(argparse.ArgumentTypeError):
                 benchmark.confidence(value)
 
+    def test_parameter_threshold_is_separate_from_global_confidence(self):
+        args = benchmark.parser().parse_args(["--query", "test", "--confidence", "0.9", "--parameter-threshold", "0.2"])
+        configured = benchmark.model_settings(settings(), args, {})
+        self.assertEqual(configured["decider"]["service_confidence"], 0.9)
+        self.assertEqual(configured["decider"]["parameter_probability_threshold"], 0.2)
+        args = benchmark.parser().parse_args(["--query", "test", "--confidence", "0"])
+        self.assertEqual(benchmark.model_settings(settings(), args, {})["decider"]["parameter_probability_threshold"], 0.15)
+
 
 class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
     def exported(self):
@@ -108,38 +116,58 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(benchmark.answer_input(report, readable=True)["messages"][1]["content"], {"state_answer": "yes"})
         execute.assert_not_awaited()
 
-    async def test_action_benchmark_marks_planned_arguments_and_keeps_credentials_out_of_report(self):
-        args = benchmark.parser().parse_args(["--query", "Turn on the office lights"])
-        models = ScriptedModels([{"service": "light.turn_on"}, {"area": "area:office"}, {"target_scope": "area"}])
-        with (patch("benchmark.fetch_snapshot", new=AsyncMock(return_value=self.exported())),
+    async def test_action_benchmark_prints_field_metadata_and_stops_after_selection(self):
+        args = benchmark.parser().parse_args(["--query", "Set the office lights to 50 percent"])
+        exported = self.exported()
+        exported["snapshot"]["services"]["light.turn_on"] = {
+            "description": "Turn on a light", "target": {"entity": {"domain": "light"}},
+            "fields": {"brightness_pct": {"required": False, "description": "Brightness percentage", "example": 50,
+                                          "selector": {"number": {"min": 0, "max": 100, "step": 1}}}},
+        }
+        models = ScriptedModels([{"service": "light.turn_on:brightness_pct"}, {"optional_parameters": "brightness_pct"}])
+        with (patch("benchmark.fetch_snapshot", new=AsyncMock(return_value=exported)),
               patch("benchmark.aiohttp.ClientSession", return_value=AsyncMock()),
               patch("benchmark.ModelClient", return_value=models)):
             report = await benchmark.run(args, {"DECIDER_API_KEY": "private-key"})
-        self.assertEqual(report["result"]["execution"], {
-            "status": "planned", "arguments": {"entity_id": ["light.desk", "light.ceiling"]},
-        })
-        self.assertNotIn("private-key", json.dumps(report))
+        self.assertEqual(report["result"]["service"], "light.turn_on")
+        self.assertEqual(report["result"]["action_metadata"]["fields"],
+                         exported["snapshot"]["services"]["light.turn_on"]["fields"])
+        self.assertNotIn("execution", report["result"])
+        self.assertEqual(len(models.requests), 2)
+        self.assertFalse(models.chat_requests)
+        self.assertEqual({event["stage"] for event in report["trace"]}, {"service", "optional_parameters"})
         output = io.StringIO()
         with redirect_stdout(output):
-            benchmark.print_report(report)
-        self.assertRegex(output.getvalue(), r"execution\s+planned")
-        self.assertIn("target_scope", output.getvalue())
+            benchmark.print_report(report, show_answer_input=True)
+        printed = output.getvalue()
+        self.assertIn("Selected action metadata", printed)
+        self.assertIn("Selected optional parameters: brightness_pct", printed)
+        self.assertIn("Probability threshold: 0.15", printed)
+        for text in ('"brightness_pct"', '"required": false', '"number"', '"max": 100', '"example": 50'):
+            self.assertIn(text, printed)
+        self.assertIn("Answer model was not called.", printed)
+        self.assertNotIn("private-key", printed)
+        self.assertNotIn("private-key", json.dumps(report))
+        self.assertIsNone(benchmark.answer_input(report))
+
+    async def test_query_answer_input_remains_readable_without_mutating_the_api_messages(self):
+        args = benchmark.parser().parse_args(["--query", "Which lights are on?"])
+        models = ScriptedModels([{"service": "query_state"}, {"area": "all_areas"}, {"domain": "light"},
+                                 {"query_type": "complex"}, {"targets": ["light.desk"]}])
+        with (patch("benchmark.fetch_snapshot", new=AsyncMock(return_value=self.exported())),
+              patch("benchmark.aiohttp.ClientSession", return_value=AsyncMock()),
+              patch("benchmark.ModelClient", return_value=models)):
+            report = await benchmark.run(args, {})
         output = io.StringIO()
         with redirect_stdout(output):
             benchmark.print_report(report, show_answer_input=True)
         request = json.loads(output.getvalue().split("Answer model input:\n", 1)[1])
         self.assertEqual(request["messages"][0], models.chat_requests[0][1][0])
         self.assertEqual(request["messages"][1]["content"], json.loads(models.chat_requests[0][1][1]["content"]))
-        facts = request["messages"][1]["content"]
-        self.assertEqual([item["entity_id"] for item in facts["entities"]], ["light.desk", "light.ceiling"])
-        self.assertEqual(facts["execution"]["arguments"], {})
-        self.assertNotIn("target", facts)
-        self.assertNotIn("state_info", facts)
+        self.assertEqual(request["messages"][1]["content"]["entities"][0]["entity_id"], "light.desk")
         self.assertIsInstance(models.chat_requests[0][1][1]["content"], str)
         self.assertEqual(benchmark.answer_input(report)["messages"], models.chat_requests[0][1])
-        self.assertEqual(request["model"], models.chat_requests[0][0]["model"])
         self.assertEqual(set(request), {"model", "messages", "max_tokens", "temperature"})
-        self.assertNotIn("private-key", output.getvalue())
 
     async def test_model_failure_keeps_stage_diagnostics(self):
         args = benchmark.parser().parse_args(["--query", "test"])

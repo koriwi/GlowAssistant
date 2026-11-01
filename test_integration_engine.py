@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from custom_components.glow_assistant.client import ModelClient, ModelError
 from custom_components.glow_assistant.engine import (
-    ActionError,
     AgentEngine,
     action_options,
     read_choice,
@@ -48,10 +47,12 @@ class ScriptedModels:
 
     async def decide(self, config, state, questions):
         self.requests.append(copy.deepcopy((config, state, questions)))
-        choices = ({"target_scope": "entities"} if set(questions) == {"target_scope"}
-                   and "target_scope" not in self.choices[0] else self.choices.pop(0))
+        choices = self.choices.pop(0)
         answers = {}
         for name, question in questions.items():
+            if isinstance(choices.get(name), dict):
+                answers[name] = copy.deepcopy(choices[name])
+                continue
             if question["type"] == "score":
                 score = choices[name]
                 probabilities = {str(index): 0 for index in range(len(question["criteria"]))}
@@ -216,22 +217,112 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Assist pipeline language: fr-CH", system)
         self.assertIn("Write the spoken reply in this language", system)
 
-    async def test_plan_only_action_uses_normal_decisions_but_never_executes_or_claims_completion(self):
-        events = []
+    async def test_actions_stop_after_selection_in_ha_and_plan_only_mode(self):
+        for dry_run in (False, True):
+            with self.subTest(dry_run=dry_run):
+                result, models, execute = await self.run_agent([
+                    {"service": "light.turn_on"}, {"optional_parameters": "none"},
+                ], dry_run=dry_run, prompt="Turn on the office lights")
+                self.assertEqual(result["service"], "light.turn_on")
+                self.assertEqual(result["domain"], "light")
+                self.assertEqual(result["action_metadata"], {
+                    "selection": "light.turn_on", "service": "light.turn_on", **SNAPSHOT["services"]["light.turn_on"],
+                })
+                self.assertEqual(len(models.requests), 2)
+                self.assertEqual(result["parameter_selection"]["selected_parameters"], [])
+                self.assertFalse(models.chat_requests)
+                self.assertIsNone(result["target"])
+                self.assertNotIn("execution", result)
+                self.assertNotIn("failures", result)
+                self.assertIn("No action was executed", result["answer"])
+                execute.assert_not_awaited()
+
+    async def test_parameterized_action_returns_all_raw_metadata_without_extraction(self):
+        snapshot = copy.deepcopy(SNAPSHOT)
+        description = {
+            "name": "Set temperature", "description": "Set the thermostat target", "target": {"entity": {"domain": "climate"}},
+            "fields": {
+                "temperature": {"required": True, "description": "New target", "example": 21,
+                                "selector": {"number": {"min": 5, "max": 45, "step": 1, "unit_of_measurement": "°C"}}},
+                "advanced": {"collapsed": True, "fields": {"hvac_mode": {"selector": {"select": {"options": ["heat", "off"]}}}}},
+            },
+        }
+        snapshot["services"]["climate.set_temperature"] = description
+        original = copy.deepcopy(snapshot)
+        history = [{"role": "user", "content": "Set the office to 20 degrees"}, {"role": "assistant", "content": "Selected."}]
+        settings = normalize_settings({"history_enabled": True})
         result, models, execute = await self.run_agent([
-            {"service": "light.turn_on"}, {"area": "area:office"}, {"target_scope": "area"},
-        ], dry_run=True, trace=lambda *event: events.append(event))
+            {"service": "climate.set_temperature:temperature"}, {"optional_parameters": "none"},
+        ], snapshot=snapshot, settings=settings, history=history, language="fr-CH")
+        self.assertEqual(result["action_metadata"], {"service": "climate.set_temperature",
+                                                  "selection": "climate.set_temperature:temperature", **description})
+        self.assertEqual(snapshot, original)
+        self.assertEqual(models.requests[0][1]["history"], history)
+        self.assertEqual(models.requests[0][1]["language"], "fr-CH")
+        self.assertEqual(set(result["decisions"]), {"service", "optional_parameters"})
+        self.assertEqual(result["required_parameters"], ["temperature"])
+        self.assertEqual(set(models.requests[-1][2]["optional_parameters"]["criteria"]), {"hvac_mode", "none"})
+        self.assertEqual(models.requests[-1][1]["history"], history)
+        self.assertEqual(models.requests[-1][1]["language"], "fr-CH")
+        self.assertFalse(models.chat_requests)
         execute.assert_not_awaited()
-        self.assertEqual(len(models.requests), 3)
-        self.assertEqual(result["execution"], {
-            "status": "planned", "arguments": {"entity_id": ["light.desk", "light.ceiling"]},
-        })
-        self.assertNotIn("failures", result)
-        self.assertIn("No device command was sent", models.chat_requests[0][1][0]["content"])
-        facts = json.loads(models.chat_requests[0][1][1]["content"])
-        self.assertEqual(facts["execution"]["status"], "planned")
-        self.assertTrue(any(stage == "execution" and output and output["status"] == "planned"
-                            for stage, _, output in events))
+
+    async def test_optional_parameters_use_all_choice_probabilities_even_when_none_wins(self):
+        snapshot = copy.deepcopy(SNAPSHOT)
+        snapshot["services"]["light.turn_on"]["fields"] = {
+            "brightness_pct": {"selector": {"number": {"min": 0, "max": 100}}},
+            "hue": {"selector": {"number": {"min": 0, "max": 360}}},
+            "child_lock": {"selector": {"boolean": {}}},
+        }
+        probabilities = {"brightness_pct": 0.25, "hue": 0.2, "child_lock": 0.05, "none": 0.5}
+        events = []
+        settings = normalize_settings({"decider": {"parameter_prompt": "Custom parameter task"}})
+        result, models, execute = await self.run_agent([
+            {"service": "light.turn_on"}, {"optional_parameters": {
+                "type": "choice", "choice": "none", "confidence": 0, "probabilities": probabilities,
+            }},
+        ], snapshot=snapshot, settings=settings, trace=lambda *event: events.append(event))
+        self.assertEqual(result["parameter_selection"]["selected_parameters"], ["brightness_pct", "hue"])
+        self.assertEqual(len(models.requests), 2)
+        self.assertEqual(set(models.requests[-1][2]), {"optional_parameters"})
+        self.assertEqual(models.requests[-1][2]["optional_parameters"]["instructions"], "Custom parameter task")
+        self.assertNotIn("entities", models.requests[-1][1])
+        self.assertNotIn("targets", models.requests[-1][1])
+        output = next(output for stage, _, output in events if stage == "optional_parameters" and output)
+        self.assertEqual(output["selected_parameters"], ["brightness_pct", "hue"])
+        self.assertEqual(output["probability_threshold"], 0.15)
+        self.assertEqual(output["decisions"]["optional_parameters"]["probabilities"], probabilities)
+        self.assertNotIn("minimum_confidence", output["decisions"]["optional_parameters"])
+        self.assertNotIn("Custom parameter task", json.dumps(events))
+        self.assertFalse(models.chat_requests)
+        execute.assert_not_awaited()
+
+    async def test_required_only_action_skips_optional_parameter_call(self):
+        snapshot = copy.deepcopy(SNAPSHOT)
+        snapshot["services"]["todo.add_item"] = {"target": {}, "fields": {
+            "item": {"required": True, "selector": {"text": {}}},
+        }}
+        result, models, execute = await self.run_agent([{"service": "todo.add_item"}], snapshot=snapshot)
+        self.assertEqual(result["required_parameters"], ["item"])
+        self.assertEqual(result["parameter_selection"]["selected_parameters"], [])
+        self.assertEqual(len(models.requests), 1)
+        self.assertFalse(models.chat_requests)
+        execute.assert_not_awaited()
+
+    async def test_invalid_optional_parameter_distribution_stops_without_action_or_answer(self):
+        events = []
+        execute = AsyncMock()
+        with self.assertRaisesRegex(ModelError, "Malformed optional parameter"):
+            await self.run_agent([
+                {"service": "light.turn_on"}, {"optional_parameters": {
+                    "type": "choice", "choice": "brightness_pct", "confidence": 0.9,
+                    "probabilities": {"brightness_pct": 1},
+                }},
+            ], executor=execute, trace=lambda *event: events.append(event))
+        self.assertEqual(events[-1][2]["stage"], "optional_parameters")
+        self.assertFalse(any(stage in ("execution", "answer") for stage, _, _ in events))
+        execute.assert_not_awaited()
+
 
     async def test_plan_only_query_reads_states_without_an_execution_step(self):
         result, _, execute = await self.run_agent([
@@ -316,34 +407,25 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result["route"], "unsure")
         general.assert_not_awaited()
 
-    async def test_trace_reports_each_decision_and_action_without_extra_requests(self):
+    async def test_action_selection_trace_contains_metadata_and_no_downstream_calls(self):
         events = []
-        def trace(stage, arguments, result):
-            events.append(copy.deepcopy((stage, arguments, result)))
         result, models, execute = await self.run_agent([
             {"service": "light.turn_off"},
-            {"area": "area:office"}, {"target": "area:office"},
-        ], trace=trace)
-        expected = ["service", "area", "target_scope", "target", "execution", "answer"]
-        self.assertEqual([stage for stage, _, output in events if output is None], expected)
-        self.assertEqual([stage for stage, _, output in events if output is not None], expected)
-        outputs = {stage: output for stage, _, output in events if output is not None}
-        choice = outputs["service"]["decisions"]["service"]
-        self.assertEqual(choice["choice"], "light.turn_off")
-        self.assertEqual(choice["confidence"], 0.9)
-        self.assertEqual(choice["selected"]["service"], "light.turn_off")
-        self.assertEqual(set(outputs["service"]["decisions"]), {"service"})
-        self.assertEqual(outputs["target"]["selected_entity_ids"], ["light.desk", "light.ceiling"])
-        self.assertTrue(outputs["target"]["decisions"]["target_0"]["kept"])
-        for stage in expected:
-            self.assertGreaterEqual(outputs[stage]["duration_ms"], 0)
-            self.assertEqual(outputs[stage]["status"], "completed")
-        self.assertEqual(outputs["service"]["usage"], {"input_tokens": 5})
-        self.assertEqual(outputs["execution"]["arguments"]["entity_id"], ["light.desk", "light.ceiling"])
-        self.assertEqual(outputs["answer"]["answer"], result["answer"])
-        self.assertEqual(len(models.requests), 4)
-        self.assertEqual(len(models.chat_requests), 1)
-        execute.assert_awaited_once()
+        ], trace=lambda *event: events.append(event))
+        self.assertEqual([stage for stage, _, _ in events], ["service", "service"])
+        output = events[-1][2]
+        self.assertEqual(output["action_metadata"], result["action_metadata"])
+        self.assertEqual(output["decisions"]["service"]["choice"], "light.turn_off")
+        self.assertEqual(output["decisions"]["service"]["confidence"], 0.9)
+        self.assertEqual(output["usage"], {"input_tokens": 5})
+        self.assertGreaterEqual(output["duration_ms"], 0)
+        self.assertEqual(output["status"], "completed")
+        self.assertEqual(len(models.requests), 1)
+        self.assertFalse(models.chat_requests)
+        self.assertEqual(result["parameter_selection"]["selected_parameters"], [])
+        self.assertNotIn("optional_parameters", result["timings_ms"])
+        execute.assert_not_awaited()
+
 
     async def test_trace_explains_confidence_rejection(self):
         events = []
@@ -357,6 +439,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(choice["effective_choice"], "unsure")
         self.assertEqual(choice["minimum_confidence"], 0.95)
         self.assertEqual(result["route"], "unsure")
+        self.assertNotIn("action_metadata", result)
         failure = events[-1][2]
         self.assertEqual(events[-1][0], "failure")
         self.assertEqual(failure, result["failures"][0])
@@ -475,95 +558,17 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(arguments["max_input_chars"], settings["answer"]["max_input_chars"])
         self.assertNotIn("private-api-key", json.dumps(arguments))
 
-    async def test_direct_action_uses_its_domain_and_filtered_room_targets(self):
+
+    async def test_state_query_bypasses_area_or_entities_scope_decision(self):
         result, models, execute = await self.run_agent([
-            {"service": "light.turn_off"},
-            {"area": "area:office"}, {"target": "area:office"},
+            {"service": "query_state"}, {"area": "area:office"}, {"domain": "light"},
+            {"query_type": "complex"}, {"targets": ["light.desk"]},
         ])
-        execute.assert_awaited_once_with("light.turn_off", {"entity_id": ["light.desk", "light.ceiling"]})
-        self.assertEqual(result["domain"], "light")
-        self.assertEqual(result["answer"], "Erledigt.")
-        self.assertEqual(models.requests[0][1], {"prompt": "test request", "language": "de"})
-        self.assertEqual(models.requests[1][1], {"prompt": "test request", "language": "de"})
-        targets = models.requests[3][1]["targets"]
-        self.assertEqual([target["entity_id"] for target in targets], ["light.desk", "light.ceiling"])
-        self.assertTrue(all(set(question["criteria"]) == {"keep", "drop"} for question in models.requests[3][2].values()))
-        self.assertNotIn("attributes", targets[0])
-        self.assertTrue(all("state" not in target for target in targets))
-        for index, target in enumerate(targets):
-            question = models.requests[3][2][f"target_{index}"]["instructions"]
-            self.assertIn(json.dumps({"entity_id": target["entity_id"]}), question)
-            self.assertNotIn("zero-based index", question)
-        facts = json.loads(models.chat_requests[0][1][1]["content"])
-        self.assertEqual(facts["execution"]["status"], "completed")
-        self.assertNotIn("decisions", facts)
+        self.assertEqual(len(models.requests), 5)
+        self.assertNotIn("target_scope", result["decisions"])
+        self.assertIn("target_0", models.requests[-1][2])
+        execute.assert_not_awaited()
 
-    async def test_area_action_skips_entity_selection_and_controls_all_matching_exposed_devices(self):
-        events = []
-        result, models, execute = await self.run_agent([
-            {"service": "light.turn_on"}, {"area": "area:office"}, {"target_scope": "area"},
-        ], prompt="Mach das Licht im Büro an", trace=lambda *event: events.append(event))
-        execute.assert_awaited_once_with("light.turn_on", {"entity_id": ["light.desk", "light.ceiling"]})
-        self.assertEqual(result["target"]["type"], "area")
-        self.assertEqual(result["target"]["area_id"], "office")
-        self.assertEqual(result["target"]["name"], "Office")
-        self.assertEqual(len(models.requests), 3)
-        self.assertNotIn("target", result["decisions"])
-        self.assertNotIn("target", result["timings_ms"])
-        self.assertNotIn("targets", models.requests[2][1])
-        self.assertNotIn("entities", models.requests[2][1])
-        output = next(output for stage, _, output in events if stage == "target_scope" and output is not None)
-        decision = output["decisions"]["target_scope"]
-        self.assertEqual(decision["effective_choice"], "area")
-        self.assertEqual(decision["minimum_confidence"], 0)
-        self.assertNotIn("keep_uncertain", decision)
-
-    async def test_named_device_action_continues_to_entity_keep_drop(self):
-        result, models, execute = await self.run_agent([
-            {"service": "light.turn_on"}, {"area": "area:office"}, {"target_scope": "entities"},
-            {"targets": ["light.desk"]},
-        ], prompt="Turn on the desk lamp in the office")
-        execute.assert_awaited_once_with("light.turn_on", {"entity_id": ["light.desk"]})
-        self.assertEqual(result["target"]["type"], "entity")
-        self.assertEqual(len(models.requests), 4)
-        self.assertIn("target_0", models.requests[3][2])
-
-    async def test_unclear_or_low_confidence_scope_stops_without_broadening(self):
-        for choice, threshold in (("unsure", 0), ("area", 0.95), ("entities", 0.95)):
-            with self.subTest(choice=choice, threshold=threshold):
-                settings = normalize_settings({"decider": {"target_scope_confidence": threshold}})
-                result, models, execute = await self.run_agent([
-                    {"service": "light.turn_on"}, {"area": "area:office"}, {"target_scope": choice},
-                ], settings=settings)
-                execute.assert_not_awaited()
-                self.assertEqual(result["route"], "unsure")
-                self.assertEqual(result["failures"][0]["stage"], "target_scope")
-                self.assertEqual(len(models.requests), 3)
-                self.assertFalse(models.chat_requests)
-
-    async def test_state_query_and_no_area_action_bypass_area_or_entities_decision(self):
-        for service, area in (("query_state", "area:office"), ("light.turn_on", "no_area")):
-            with self.subTest(service=service, area=area):
-                result, models, _ = await self.run_agent([
-                    {"service": service}, {"area": area}, *([{"domain": "light"}, {"query_type": "complex"}] if service == "query_state" else []), {"targets": ["light.desk"]},
-                ])
-                self.assertNotIn("target_scope", result["decisions"])
-                self.assertEqual(len(models.requests), 5 if service == "query_state" else 3)
-                self.assertIn("target_0", models.requests[-1][2])
-
-    async def test_area_or_entities_call_receives_language_history_and_editable_prompt(self):
-        history = [{"role": "user", "content": "Turn on all office lights"}, {"role": "assistant", "content": "Done"}]
-        settings = normalize_settings({"history_enabled": True, "decider": {"target_scope_prompt": "Custom scope rules"}})
-        _, models, _ = await self.run_agent([
-            {"service": "light.turn_off"}, {"area": "area:office"}, {"target_scope": "area"},
-        ], settings=settings, history=history, language="de-DE", prompt="Jetzt wieder aus")
-        _, state, questions = models.requests[2]
-        self.assertEqual(state["history"], history)
-        self.assertEqual(state["language"], "de-DE")
-        self.assertEqual(state["domain"], "light")
-        self.assertEqual(state["area"], {"name": "Office", "aliases": []})
-        self.assertIn("Custom scope rules", questions["target_scope"]["instructions"])
-        self.assertIn("resolve references", questions["target_scope"]["instructions"])
 
     async def test_query_uses_cached_state_and_does_not_execute(self):
         result, models, execute = await self.run_agent([
@@ -588,20 +593,21 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_unsure_at_each_stage_bypasses_chat_and_execution(self):
         cases = [
-            [{"service": "unsure"}],
-            [{"service": "light.turn_off"}, {"area": "unsure"}],
-            [{"service": "light.turn_off"}, {"area": "no_area"}, {"target": "unsure"}],
+            ([{"service": "unsure"}], "service"),
+            ([{"service": "query_state"}, {"area": "unsure"}], "area"),
+            ([{"service": "query_state"}, {"area": "all_areas"}, {"domain": "light"},
+              {"query_type": "complex"}, {"targets": []}], "target"),
         ]
-        for choices, expected_stage in zip(cases, ("service", "area", "target")):
-            with self.subTest(choices=choices):
+        for choices, expected_stage in cases:
+            with self.subTest(stage=expected_stage):
                 result, models, execute = await self.run_agent(choices)
-                self.assertEqual(result["answer"], "ich bin mir nicht sicher")
                 self.assertEqual(result["route"], "unsure")
+                self.assertEqual(result["answer"], DEFAULTS["unsure_reply"])
                 self.assertEqual(result["failures"][0]["stage"], expected_stage)
-                reason = "No matching entities" if expected_stage == "target" else "selected unsure"
-                self.assertIn(reason, result["failures"][0]["reason"])
+                self.assertNotIn("action_metadata", result)
                 self.assertFalse(models.chat_requests)
                 execute.assert_not_awaited()
+
 
     async def test_disabled_general_returns_fixed_unsure(self):
         result, models, execute = await self.run_agent([{"service": "not-smarthome-related"}])
@@ -630,17 +636,6 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(models.requests), 1)
         execute.assert_not_awaited()
 
-    async def test_no_action_compatible_entities_in_area_stops_selection(self):
-        snapshot = copy.deepcopy(SNAPSHOT)
-        snapshot["entities"].append(entity("sensor.kitchen", "Kitchen temperature", area="kitchen"))
-        result, models, execute = await self.run_agent([
-            {"service": "light.turn_off"}, {"area": "area:kitchen"},
-        ], snapshot=snapshot)
-        self.assertEqual(result["route"], "unsure")
-        self.assertEqual(len(models.requests), 2)
-        self.assertEqual(result["failures"][0]["stage"], "target")
-        self.assertIn("No exposed devices", result["failures"][0]["reason"])
-        execute.assert_not_awaited()
 
     async def test_room_query_selects_one_available_domain_before_entity_keep_drop(self):
         snapshot = copy.deepcopy(SNAPSHOT)
@@ -775,16 +770,6 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("domain", result["decisions"])
         execute.assert_not_awaited()
 
-    async def test_whole_home_group_is_not_offered_for_actions(self):
-        result, models, execute = await self.run_agent([
-            {"service": "light.turn_off"}, {"area": "no_area"}, {"target": "entity:light.desk"},
-        ])
-        self.assertNotIn("all_areas", models.requests[1][2]["area"]["criteria"])
-        self.assertIn("no_area", models.requests[1][2]["area"]["criteria"])
-        self.assertTrue(all(target["type"] == "entity" for target in models.requests[2][1]["targets"]))
-        self.assertNotIn("domain_filter", result["decisions"])
-        self.assertEqual(len(models.requests), 3)
-        execute.assert_awaited_once_with("light.turn_off", {"entity_id": ["light.desk"]})
 
     async def test_whole_home_query_without_exposed_entities_stops_before_target_selection(self):
         result, models, execute = await self.run_agent([
@@ -820,35 +805,6 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(output["decisions"]["target_0"]["entity_id"], "binary_sensor.left_window")
         execute.assert_not_awaited()
 
-    async def test_native_multi_target_action_calls_only_retained_entities_once(self):
-        result, models, execute = await self.run_agent([
-            {"service": "light.turn_off"}, {"area": "no_area"}, {"targets": ["light.desk", "light.bed"]},
-        ], prompt="Turn off the desk and bed lamps")
-        execute.assert_awaited_once_with("light.turn_off", {"entity_id": ["light.desk", "light.bed"]})
-        self.assertEqual(result["target"]["entity_ids"], ["light.desk", "light.bed"])
-        self.assertTrue(all(target["domain"] == "light" for target in models.requests[2][1]["targets"]))
-
-    async def test_single_target_action_keeps_its_single_choice_path(self):
-        snapshot = copy.deepcopy(SNAPSHOT)
-        snapshot["services"]["light.turn_off"].pop("target")
-        result, models, execute = await self.run_agent([
-            {"service": "light.turn_off"}, {"area": "area:office"}, {"target": "entity:light.desk"},
-        ], snapshot=snapshot)
-        self.assertEqual(set(models.requests[2][2]), {"target"})
-        self.assertNotIn("targets", models.requests[2][1])
-        self.assertNotIn("target_selection", result)
-        self.assertNotIn("area:office", models.requests[2][2]["target"]["criteria"])
-        execute.assert_awaited_once_with("light.turn_off", {"entity_id": ["light.desk"]})
-
-    async def test_action_keep_at_confidence_threshold_cannot_execute(self):
-        settings = normalize_settings({"decider": {"target_filter_confidence": 0.9}})
-        result, models, execute = await self.run_agent([
-            {"service": "light.turn_off"}, {"area": "area:office"}, {"targets": "all"},
-        ], settings=settings)
-        self.assertEqual(result["route"], "unsure")
-        self.assertEqual(result["target_selection"]["selected_entity_ids"], [])
-        self.assertFalse(models.chat_requests)
-        execute.assert_not_awaited()
 
     async def test_query_retains_uncertain_drops_and_uses_editable_target_filter_prompt(self):
         events = []
@@ -881,35 +837,19 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(output["decisions"]["target_0"]["effective_choice"], "drop")
         execute.assert_not_awaited()
 
-    async def test_query_and_action_uncertainty_switches_are_independent(self):
-        for query_setting, action_setting, executes in ((True, False, False), (False, True, True)):
-            with self.subTest(query_setting=query_setting, action_setting=action_setting):
-                settings = normalize_settings({"decider": {
-                    "target_filter_confidence": 0.9, "query_target_keep_uncertain": query_setting,
-                    "action_target_keep_uncertain": action_setting,
-                }})
-                result, _, execute = await self.run_agent([
-                    {"service": "light.turn_off"}, {"area": "area:office"}, {"targets": "all"},
-                ], settings=settings)
-                if executes:
-                    execute.assert_awaited_once_with("light.turn_off", {"entity_id": ["light.desk", "light.ceiling"]})
-                    self.assertEqual(result["execution"]["status"], "completed")
-                else:
-                    self.assertEqual(result["route"], "unsure")
-                    execute.assert_not_awaited()
 
-    async def test_malformed_target_batch_stops_before_action_or_answer(self):
+    async def test_malformed_query_target_batch_stops_before_answer(self):
         events = []
         execute = AsyncMock()
         with self.assertRaises(ModelError):
             await self.run_agent([
-                {"service": "light.turn_off"}, {"area": "area:office"},
-                {"target_0": "keep", "target_1": "unsure"},
+                {"service": "query_state"}, {"area": "area:office"}, {"domain": "light"},
+                {"query_type": "complex"}, {"target_0": "keep", "target_1": "unsure"},
             ], executor=execute, trace=lambda *event: events.append(event))
         self.assertFalse(any(stage in ("execution", "answer") for stage, _, _ in events))
         self.assertEqual(events[-1][2]["stage"], "target")
-        self.assertIn("invalid or incomplete target", events[-1][2]["reason"])
         execute.assert_not_awaited()
+
 
     async def test_whole_home_domain_selection_is_one_question_and_reports_reduction(self):
         snapshot = copy.deepcopy(SNAPSHOT)
@@ -968,17 +908,6 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[-1][2]["stage"], "domain")
         execute.assert_not_awaited()
 
-    async def test_answer_failure_after_action_preserves_outcome_and_never_retries(self):
-        result, models, execute = await self.run_agent([
-            {"service": "light.turn_off"}, {"area": "no_area"}, {"target": "entity:light.desk"},
-        ], answers=[ModelError("No answer")])
-        execute.assert_awaited_once()
-        self.assertEqual(result["execution"]["status"], "completed")
-        self.assertEqual(result["answer"], DEFAULTS["answer_error_reply"])
-        self.assertEqual(result["answer_error"], "No answer")
-        self.assertIn("answer", result["timings_ms"])
-        self.assertEqual(len(models.chat_requests), 1)
-        self.assertEqual(result["failures"][0]["device_command"], "completed")
 
     async def test_query_answer_failure_preserves_state_and_error_details(self):
         result, models, execute = await self.run_agent([
@@ -992,85 +921,6 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(models.chat_requests), 1)
         execute.assert_not_awaited()
 
-    async def test_action_failure_is_reported_as_unconfirmed(self):
-        execute = AsyncMock(side_effect=ActionError("partial failure"))
-        result, models, _ = await self.run_agent([
-            {"service": "light.turn_off"}, {"area": "no_area"}, {"target": "entity:light.desk"},
-        ], executor=execute)
-        execute.assert_awaited_once()
-        self.assertEqual(result["execution"]["status"], "error")
-        facts = json.loads(models.chat_requests[0][1][1]["content"])
-        self.assertIn("unconfirmed", facts["execution"]["error"])
-        self.assertEqual(result["failures"][0]["stage"], "execution")
-        self.assertEqual(result["failures"][0]["device_command"], "unconfirmed")
-        self.assertNotIn("failures", facts)
-
-    async def run_numeric(self, currents=(21,), score=4.02, mode="relative", parameter="temperature", settings=None, trace=None, history=None):
-        domain, name, field = {
-            "temperature": ("climate", "climate.set_temperature", "temperature"),
-            "brightness": ("light", "light.turn_on", "brightness_pct"),
-            "position": ("cover", "cover.set_cover_position", "position"),
-        }[parameter]
-        snapshot = {
-            "entities": [entity(f"{domain}.device_{index}", f"Device {index}",
-                                temperature=current, brightness=current, current_position=current,
-                                supported_features=15, min_temp=5, max_temp=45, target_temp_step=1)
-                         for index, current in enumerate(currents)],
-            "services": {name: {"target": {}, "fields": {field: {"required": parameter != "brightness"}}}},
-        }
-        return await self.run_agent([
-            {"service": f"{name}:{field}"}, {"area": "area:office"}, {"target_scope": "area"},
-            {"numeric_mode": mode, "numeric_score": score},
-        ], snapshot=snapshot, settings=settings, trace=trace, history=history)
-
-    async def test_numeric_history_does_not_replace_the_fresh_current_setting(self):
-        history = [{"role": "user", "content": "Make the office warmer"}, {"role": "assistant", "content": "Target is 25 degrees"}]
-        settings = normalize_settings({"history_enabled": True})
-        _, models, execute = await self.run_numeric(currents=(21,), settings=settings, history=history)
-        numeric_state = models.requests[3][1]
-        self.assertEqual(numeric_state["history"], history)
-        self.assertEqual(numeric_state["language"], "de")
-        self.assertEqual(numeric_state["current"], 21)
-        self.assertEqual(execute.await_args.args[1]["temperature"], 22)
-
-    async def test_numeric_trace_shows_score_confidence_and_actual_applied_value(self):
-        events = []
-        await self.run_numeric(trace=lambda *event: events.append(event))
-        numeric_input = next(arguments for stage, arguments, output in events if stage == "numeric" and output is None)
-        outputs = {stage: output for stage, _, output in events if output is not None}
-        self.assertEqual(numeric_input["current"], 21)
-        self.assertEqual(numeric_input["candidate_counts"]["numeric_score"], 9)
-        self.assertEqual(outputs["numeric"]["decisions"]["numeric_score"]["score"], 4.02)
-        self.assertEqual(outputs["numeric"]["decisions"]["numeric_score"]["confidence"], 0.9)
-        self.assertEqual(outputs["numeric"]["decisions"]["numeric_mode"]["choice"], "relative")
-        self.assertEqual(outputs["execution"]["arguments"]["temperature"], 22)
-
-    async def test_temperature_is_quantized_and_relative_direction_preserved(self):
-        result, models, execute = await self.run_numeric()
-        execute.assert_awaited_once_with("climate.set_temperature", {"entity_id": ["climate.device_0"], "temperature": 22})
-        self.assertEqual(result["route"], "smarthome")
-        state = models.requests[3][1]
-        self.assertEqual((state["minimum"], state["maximum"], state["current"], state["baseline"]), (16, 26, 21, "target"))
-
-    async def test_fractional_baseline_does_not_reverse_relative_direction(self):
-        _, _, execute = await self.run_numeric(currents=(21.01,), score=4.02)
-        self.assertEqual(execute.await_args.args[1]["temperature"], 22)
-
-    async def test_relative_area_with_different_settings_is_unsure(self):
-        result, models, execute = await self.run_numeric(currents=(20, 22))
-        self.assertEqual(result["route"], "unsure")
-        self.assertFalse(models.chat_requests)
-        self.assertIn("differ between", result["failures"][0]["reason"])
-        self.assertEqual(result["failures"][0]["current_values"], [20, 22])
-        execute.assert_not_awaited()
-
-    async def test_missing_current_value_explains_why_relative_change_stopped(self):
-        result, models, execute = await self.run_numeric(currents=(None,))
-        self.assertEqual(result["failures"][0]["stage"], "numeric")
-        self.assertIn("unavailable", result["failures"][0]["reason"])
-        self.assertIn("absolute value", result["failures"][0]["suggestion"])
-        self.assertFalse(models.chat_requests)
-        execute.assert_not_awaited()
 
     async def test_invalid_decision_after_response_still_emits_a_failure_summary(self):
         events = []
@@ -1085,221 +935,6 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("invalid decision", events[-1][2]["reason"])
         execute.assert_not_awaited()
 
-    async def test_absolute_area_can_set_a_common_temperature(self):
-        _, _, execute = await self.run_numeric(currents=(20, 22), score=4.8, mode="absolute")
-        execute.assert_awaited_once_with("climate.set_temperature", {
-            "entity_id": ["climate.device_0", "climate.device_1"], "temperature": 22,
-        })
-
-    async def test_brightness_uses_percent_and_configured_default_change(self):
-        _, models, execute = await self.run_numeric(currents=(127.5,), score=3, parameter="brightness")
-        self.assertEqual(models.requests[3][1]["current"], 50)
-        self.assertEqual(models.requests[3][1]["default_step"], 10)
-        execute.assert_awaited_once_with("light.turn_on", {"entity_id": ["light.device_0"], "brightness_pct": 60})
-
-    async def test_cover_relative_changes_use_current_position_and_whole_percentages(self):
-        for score, expected in ((3, 60), (2, 40), (2.51, 51)):
-            with self.subTest(score=score):
-                _, models, execute = await self.run_numeric(currents=(50,), score=score, parameter="position")
-                execute.assert_awaited_once_with("cover.set_cover_position", {
-                    "entity_id": ["cover.device_0"], "position": expected,
-                })
-                self.assertIsInstance(execute.await_args.args[1]["position"], int)
-                state = models.requests[-1][1]
-                self.assertEqual((state["minimum"], state["maximum"], state["current"], state["default_step"]), (0, 100, 50, 10))
-                self.assertIn("0 = fully closed", state["position_semantics"])
-                self.assertIn("100 = fully open", state["position_semantics"])
-
-    async def test_cover_absolute_positions_allow_endpoints_and_different_current_positions(self):
-        for score, expected in ((0, 0), (2.5, 50), (5, 100)):
-            with self.subTest(score=score):
-                _, _, execute = await self.run_numeric(currents=(20, 80), score=score, mode="absolute", parameter="position")
-                execute.assert_awaited_once_with("cover.set_cover_position", {
-                    "entity_id": ["cover.device_0", "cover.device_1"], "position": expected,
-                })
-
-    async def test_cover_relative_changes_require_known_common_current_positions(self):
-        for currents in ((None,), (20, 80), (-1,), (101,)):
-            with self.subTest(currents=currents):
-                result, _, execute = await self.run_numeric(currents=currents, score=3, parameter="position")
-                self.assertEqual(result["route"], "unsure")
-                execute.assert_not_awaited()
-
-    async def test_cover_position_uses_fresh_state_despite_history(self):
-        history = [{"role": "user", "content": "Set the blinds to 90% open"}, {"role": "assistant", "content": "Done"}]
-        _, models, execute = await self.run_numeric(currents=(40,), score=2.5, parameter="position", history=history,
-                                                    settings=normalize_settings({"history_enabled": True}))
-        self.assertEqual(models.requests[-1][1]["current"], 40)
-        self.assertEqual(models.requests[-1][1]["history"], history)
-        self.assertEqual(execute.await_args.args[1]["position"], 50)
-
-    async def test_cover_without_position_support_stops_before_numeric_call(self):
-        snapshot = {
-            "entities": [entity("cover.blind", "Blind", current_position=50, supported_features=3)],
-            "services": {"cover.set_cover_position": {"target": {}, "fields": {"position": {"required": True}}}},
-        }
-        result, models, execute = await self.run_agent([
-            {"service": "cover.set_cover_position:position"}, {"area": "area:office"}, {"target_scope": "area"},
-        ], snapshot=snapshot)
-        self.assertEqual(result["route"], "unsure")
-        self.assertIn("does not support", result["failures"][0]["reason"])
-        self.assertEqual(len(models.requests), 3)
-        execute.assert_not_awaited()
-
-    async def test_numeric_unsure_skips_action_and_answer_model(self):
-        result, models, execute = await self.run_numeric(mode="unsure")
-        self.assertEqual(result["answer"], "ich bin mir nicht sicher")
-        self.assertFalse(models.chat_requests)
-        execute.assert_not_awaited()
-
-    async def run_text(self, service="todo.add_item", settings=None, trace=None, history=None, target_area=False, answers=None, executor=None):
-        domain = service.split(".")[0]
-        parameter = TEXT_ACTIONS[service][0]
-        prompt = "Schreibe Energy Energy Drinks auf die Einkaufsliste"
-        choices = [
-            {"service": service},
-            *([{"area": "no_area"}] if service != "todo.add_item" else []),
-            {"target": "area:office" if target_area else f"entity:{domain}.destination"},
-            {f"word_{index}": "keep" if index in (1, 2, 3) else "drop" for index in range(len(prompt.split()))},
-        ]
-        members = [entity(f"{domain}.destination", "Einkaufsliste" if domain == "todo" else "Destination")]
-        if target_area:
-            members.append(entity(f"{domain}.second", "Second destination"))
-        if domain == "todo":
-            members[0].update(area_id=None, area_name=None)
-        snapshot = {
-            "entities": [*members, entity("light.unrelated", "Unrelated lamp")],
-            "services": {service: {"target": {}, "fields": {parameter: {"required": domain != "assist_satellite"}}}},
-        }
-        return await self.run_agent(choices, snapshot=snapshot, settings=settings, trace=trace, history=history,
-                                    prompt=prompt, answers=answers, executor=executor)
-
-    async def test_three_allowed_text_actions_copy_payload_into_the_correct_field(self):
-        for service, (parameter, _) in TEXT_ACTIONS.items():
-            with self.subTest(service=service):
-                result, models, execute = await self.run_text(service)
-                domain = service.split(".")[0]
-                execute.assert_awaited_once_with(service, {"entity_id": [f"{domain}.destination"], parameter: "Energy Energy Drinks"})
-                self.assertEqual(result["execution"]["status"], "completed")
-                self.assertEqual(len(models.requests), 3 if service == "todo.add_item" else 4)
-                state = models.requests[-1][1]
-                prompt_key = "text_prompt" if service == "todo.add_item" else "message_prompt"
-                self.assertEqual(state["task"], DEFAULTS["decider"][prompt_key])
-                self.assertEqual(state["language"], "de")
-                self.assertEqual(state["words"], result["request"].split())
-                facts = json.loads(models.chat_requests[0][1][1]["content"])
-                self.assertEqual(facts["execution"]["arguments"][parameter], "Energy Energy Drinks")
-
-    async def test_shopping_addition_skips_area_selection_and_finds_lists_in_any_room(self):
-        for shopping_area in (None, "office"):
-            with self.subTest(shopping_area=shopping_area):
-                snapshot = {
-                    "entities": [
-                        entity("todo.shopping", "Einkaufsliste", area=shopping_area),
-                        entity("todo.tasks", "Aufgaben", area="bedroom"),
-                        entity("light.kitchen", "Kitchen light", area="kitchen"),
-                    ],
-                    "services": {"todo.add_item": {"target": {}, "fields": {"item": {"required": True}}}},
-                }
-                events = []
-                result, models, execute = await self.run_agent([
-                    {"service": "todo.add_item"}, {"targets": ["todo.shopping"]},
-                    {"word_0": "drop", "word_1": "keep", "word_2": "drop", "word_3": "drop", "word_4": "drop"},
-                ], snapshot=snapshot, prompt="Setze Zwiebeln auf die Einkaufsliste!", trace=lambda *event: events.append(event))
-                execute.assert_awaited_once_with("todo.add_item", {"entity_id": ["todo.shopping"], "item": "Zwiebeln"})
-                self.assertEqual(len(models.requests), 3)
-                self.assertNotIn("area", result["decisions"])
-                self.assertNotIn("area", result["timings_ms"])
-                self.assertFalse(any(stage == "area" for stage, _, _ in events))
-                self.assertIsNone(models.requests[1][1]["area"])
-                self.assertEqual({target["entity_id"] for target in models.requests[1][1]["targets"]}, {"todo.shopping", "todo.tasks"})
-
-    async def test_announcement_area_target_keeps_the_existing_entity_scope(self):
-        _, _, execute = await self.run_text("assist_satellite.announce", target_area=True)
-        execute.assert_awaited_once_with("assist_satellite.announce", {
-            "entity_id": ["assist_satellite.destination", "assist_satellite.second"], "message": "Energy Energy Drinks",
-        })
-
-    async def test_text_threshold_equality_drops_words_and_empty_payload_never_executes(self):
-        settings = normalize_settings({"decider": {"text_confidence": 0.9}})
-        result, models, execute = await self.run_text(settings=settings)
-        self.assertEqual(result["route"], "unsure")
-        self.assertEqual(result["failures"][0]["stage"], "text")
-        self.assertIn("No payload words", result["failures"][0]["reason"])
-        self.assertFalse(models.chat_requests)
-        execute.assert_not_awaited()
-
-    async def test_text_uncertainty_switch_is_applied_and_visible_in_debug(self):
-        settings = normalize_settings({"decider": {"text_confidence": 0.9, "text_keep_uncertain": True}})
-        events = []
-        result, _, execute = await self.run_text(settings=settings, trace=lambda *event: events.append(event))
-        execute.assert_awaited_once()
-        self.assertEqual(execute.await_args.args[1]["item"], result["request"])
-        output = next(output for stage, _, output in events if stage == "text" and output is not None)
-        self.assertTrue(output["decisions"]["word_0"]["keep_uncertain"])
-        self.assertTrue(output["decisions"]["word_0"]["uncertain"])
-        self.assertEqual(output["decisions"]["word_0"]["effective_choice"], "keep")
-
-    async def test_text_trace_shows_confidence_threshold_and_kept_words_without_prompt_template(self):
-        events = []
-        settings = normalize_settings({"history_enabled": True, "decider": {
-            "text_prompt": "private-text-template", "text_confidence": 0.7,
-        }})
-        history = [{"role": "assistant", "content": "Previous item"}]
-        _, models, _ = await self.run_text(settings=settings, trace=lambda *event: events.append(event), history=history)
-        self.assertEqual(models.requests[-1][1]["history"], history)
-        self.assertEqual(models.requests[-1][1]["task"], "private-text-template")
-        self.assertTrue(all("Apply state.task" in question["instructions"] for question in models.requests[-1][2].values()))
-        self.assertNotIn("private-text-template", json.dumps(events))
-        output = next(output for stage, _, output in events if stage == "text" and output is not None)
-        self.assertGreaterEqual(output["duration_ms"], 0)
-        self.assertEqual(output["decisions"]["word_1"]["confidence"], 0.9)
-        self.assertEqual(output["decisions"]["word_1"]["minimum_confidence"], 0.7)
-        self.assertTrue(output["decisions"]["word_1"]["kept"])
-        self.assertEqual(output["decisions"]["word_0"]["effective_choice"], "drop")
-
-    async def test_answer_failure_after_text_action_does_not_repeat_the_action(self):
-        result, _, execute = await self.run_text(answers=[ModelError("Model reply reached its output token limit.")])
-        execute.assert_awaited_once()
-        self.assertEqual(result["execution"]["status"], "completed")
-        self.assertEqual(result["failures"][0]["device_command"], "completed")
-
-    async def test_shopping_extraction_preserves_probe_questions_with_pipeline_language_and_history(self):
-        from text_probe import INSTRUCTIONS, word_request
-
-        history = [{"role": "user", "content": "Use the shopping list"}]
-        settings = normalize_settings({"history_enabled": True})
-        result, models, _ = await self.run_text(settings=settings, history=history)
-        _, probe = word_request(result["request"], INSTRUCTIONS)
-        _, state, questions = models.requests[-1]
-        self.assertEqual(questions, probe["questions"])
-        self.assertEqual(state, {**probe["state"], "language": "de", "history": history})
-
-    async def test_custom_message_prompt_is_used_for_both_message_actions(self):
-        settings = normalize_settings({"decider": {"text_prompt": "Item rules", "message_prompt": "Message rules"}})
-        for service in ("notify.send_message", "assist_satellite.announce"):
-            with self.subTest(service=service):
-                _, models, _ = await self.run_text(service=service, settings=settings)
-                self.assertEqual(models.requests[-1][1]["task"], "Message rules")
-
-    async def test_incomplete_text_response_never_executes_and_has_a_debug_failure(self):
-        original = ScriptedModels.decide
-
-        async def incomplete(model, config, state, questions):
-            response = await original(model, config, state, questions)
-            if "word_0" in questions:
-                response["answers"].pop("word_0")
-            return response
-
-        events = []
-        execute = AsyncMock()
-        with patch.object(ScriptedModels, "decide", new=incomplete), self.assertRaises(ModelError):
-            await self.run_text(executor=execute, trace=lambda *event: events.append(event))
-        execute.assert_not_awaited()
-        failure = events[-1][2]
-        self.assertEqual(failure["stage"], "text")
-        self.assertIn("incomplete word selections", failure["reason"])
-
 
 class IntegrationSettingsTests(unittest.TestCase):
     def local_settings(self):
@@ -1312,6 +947,16 @@ class IntegrationSettingsTests(unittest.TestCase):
         settings = validate_settings(self.local_settings())
         self.assertFalse(settings["general"]["enable"])
         self.assertEqual(settings["decider"]["api_key"], "")
+
+    def test_parameter_probability_setting_is_validated_independently_of_confidence(self):
+        self.assertEqual(self.local_settings()["decider"]["parameter_probability_threshold"], 0.15)
+        for value in (-0.1, 1.1, True, float("nan")):
+            settings = self.local_settings()
+            settings["decider"]["parameter_probability_threshold"] = value
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                validate_settings(settings)
+        reset = normalize_settings({"decider": {"parameter_prompt": " "}})
+        self.assertEqual(reset["decider"]["parameter_prompt"], DEFAULTS["decider"]["parameter_prompt"])
 
     def test_stock_target_filter_prompt_upgrades_while_custom_rules_are_preserved(self):
         from custom_components.glow_assistant.target_selection import (

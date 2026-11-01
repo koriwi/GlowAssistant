@@ -69,7 +69,9 @@
               "query_type_prompt": "State-query answer type prompt",
               "query_type_confidence": "Minimum answer type confidence",
               "binary_answer_prompt": "Yes/no state answer prompt",
-              "binary_answer_confidence": "Minimum yes/no answer confidence"
+              "binary_answer_confidence": "Minimum yes/no answer confidence",
+              "parameter_prompt": "Optional parameter selection prompt",
+              "parameter_probability_threshold": "Optional parameter probability threshold"
             },
             "data_description": {
               "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
@@ -104,7 +106,9 @@
               "query_type_prompt": "Choose yes/no or a detailed answer after area and domain selection. Clear to restore the default. No templating.",
               "query_type_confidence": "Stop if the answer type is unsure or below this confidence.",
               "binary_answer_prompt": "Answer yes/no from current candidate states, without entity keep/drop. Missing or ambiguous facts must return unsure. Clear to restore the default.",
-              "binary_answer_confidence": "Stop if the yes/no answer is unsure or below this confidence. The answer model only translates a confirmed yes/no."
+              "binary_answer_confidence": "Stop if the yes/no answer is unsure or below this confidence. The answer model only translates a confirmed yes/no.",
+              "parameter_prompt": "One Choice question for optional action fields plus none. Multiple parameters can be retained. Clear to restore the default. No templating.",
+              "parameter_probability_threshold": "Keep each actual parameter strictly above this probability (default 0.15). Uses per-option probabilities, not overall confidence. none never overrides retained parameters."
             }
           },
           "answer": {
@@ -229,7 +233,9 @@
               "query_type_prompt": "State-query answer type prompt",
               "query_type_confidence": "Minimum answer type confidence",
               "binary_answer_prompt": "Yes/no state answer prompt",
-              "binary_answer_confidence": "Minimum yes/no answer confidence"
+              "binary_answer_confidence": "Minimum yes/no answer confidence",
+              "parameter_prompt": "Optional parameter selection prompt",
+              "parameter_probability_threshold": "Optional parameter probability threshold"
             },
             "data_description": {
               "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
@@ -264,7 +270,9 @@
               "query_type_prompt": "Choose yes/no or a detailed answer after area and domain selection. Clear to restore the default. No templating.",
               "query_type_confidence": "Stop if the answer type is unsure or below this confidence.",
               "binary_answer_prompt": "Answer yes/no from current candidate states, without entity keep/drop. Missing or ambiguous facts must return unsure. Clear to restore the default.",
-              "binary_answer_confidence": "Stop if the yes/no answer is unsure or below this confidence. The answer model only translates a confirmed yes/no."
+              "binary_answer_confidence": "Stop if the yes/no answer is unsure or below this confidence. The answer model only translates a confirmed yes/no.",
+              "parameter_prompt": "One Choice question for optional action fields plus none. Multiple parameters can be retained. Clear to restore the default. No templating.",
+              "parameter_probability_threshold": "Keep each actual parameter strictly above this probability (default 0.15). Uses per-option probabilities, not overall confidence. none never overrides retained parameters."
             }
           },
           "answer": {
@@ -399,7 +407,9 @@
               "query_type_prompt": "State-query answer type prompt",
               "query_type_confidence": "Minimum answer type confidence",
               "binary_answer_prompt": "Yes/no state answer prompt",
-              "binary_answer_confidence": "Minimum yes/no answer confidence"
+              "binary_answer_confidence": "Minimum yes/no answer confidence",
+              "parameter_prompt": "Optional parameter selection prompt",
+              "parameter_probability_threshold": "Optional parameter probability threshold"
             },
             "data_description": {
               "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
@@ -434,7 +444,9 @@
               "query_type_prompt": "Choose yes/no or a detailed answer after area and domain selection. Clear to restore the default. No templating.",
               "query_type_confidence": "Stop if the answer type is unsure or below this confidence.",
               "binary_answer_prompt": "Answer yes/no from current candidate states, without entity keep/drop. Missing or ambiguous facts must return unsure. Clear to restore the default.",
-              "binary_answer_confidence": "Stop if the yes/no answer is unsure or below this confidence. The answer model only translates a confirmed yes/no."
+              "binary_answer_confidence": "Stop if the yes/no answer is unsure or below this confidence. The answer model only translates a confirmed yes/no.",
+              "parameter_prompt": "One Choice question for optional action fields plus none. Multiple parameters can be retained. Clear to restore the default. No templating.",
+              "parameter_probability_threshold": "Keep each actual parameter strictly above this probability (default 0.15). Uses per-option probabilities, not overall confidence. none never overrides retained parameters."
             }
           },
           "answer": {

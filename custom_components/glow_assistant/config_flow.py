@@ -60,7 +60,7 @@ def settings_schema(values):
                 selector = _number(100, 1000000)
             elif field == "temperature":
                 selector = _number(0, 2, 0.1)
-            elif field.endswith("_confidence"):
+            elif field.endswith("_confidence") or field == "parameter_probability_threshold":
                 selector = _number(0, 1, 0.01)
             elif field.endswith("_levels"):
                 selector = _number(2, 10)

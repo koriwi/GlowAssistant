@@ -7,6 +7,7 @@ from .numeric_values import finite_number
 STAGE_LABELS = {
     "context": "Read Home Assistant devices",
     "service": "Choose an action",
+    "optional_parameters": "Choose optional action parameters",
     "area": "Choose a room",
     "domain": "Choose a state-query domain",
     "query_type": "Choose a yes/no or detailed answer",
@@ -118,6 +119,14 @@ def decision_details(questions, answers, config, query=False, targets=None):
             answer = {}
         confidence = answer.get("confidence")
         confidence = confidence if finite_number(confidence) else None
+        if name == "optional_parameters":
+            details[name] = {
+                "type": question["type"], "choice": answer.get("choice"), "confidence": confidence,
+                "probabilities": answer.get("probabilities", {}),
+                "probability_threshold": config["parameter_probability_threshold"],
+                "selection_basis": "per_option_probability; overall confidence is not a filter",
+            }
+            continue
         text_word = name.startswith("word_")
         domain_filter = name.startswith("domain_")
         target_filter = name.startswith("target_") and name.removeprefix("target_").isdigit()

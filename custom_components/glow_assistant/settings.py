@@ -17,6 +17,7 @@ from .const import (
     TARGET_SCOPE_PROMPT,
 )
 from .numeric_values import INSTRUCTIONS
+from .optional_parameters import INSTRUCTIONS as PARAMETER_INSTRUCTIONS
 from .target_selection import INSTRUCTIONS as TARGET_FILTER_INSTRUCTIONS
 from .target_selection import LEGACY_INSTRUCTIONS as LEGACY_TARGET_FILTER_INSTRUCTIONS
 from .text_values import INSTRUCTIONS as TEXT_INSTRUCTIONS
@@ -30,6 +31,7 @@ DEFAULTS = {
         "model": "typesafe/jev-1.14", "api_key": "", "timeout": 60,
         "max_input_chars": 100000,
         "service_prompt": SERVICE_PROMPT,
+        "parameter_prompt": PARAMETER_INSTRUCTIONS, "parameter_probability_threshold": 0.15,
         "domain_prompt": DOMAIN_PROMPT, "domain_confidence": 0.5,
         "query_type_prompt": QUERY_TYPE_PROMPT, "query_type_confidence": 0,
         "binary_answer_prompt": BINARY_ANSWER_PROMPT, "binary_answer_confidence": 0,
@@ -119,6 +121,7 @@ def validate_settings(data):
             _range(config, "max_tokens", 1, 100000, group, integer=True)
             _range(config, "temperature", 0, 2, group)
     decider = settings["decider"]
+    _range(decider, "parameter_probability_threshold", 0, 1, "decider")
     for stage in ("service", "area", "domain", "query_type", "binary_answer", "target_scope", "target", "numeric", "text", "target_filter"):
         _range(decider, f"{stage}_confidence", 0, 1, "decider")
     for field in ("query_target_keep_uncertain", "action_target_keep_uncertain", "text_keep_uncertain"):

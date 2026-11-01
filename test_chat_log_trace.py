@@ -95,6 +95,14 @@ class ChatLogTraceTests(unittest.TestCase):
         self.assertEqual(self.messages[0].tool_calls[0].tool_name, "glow_assistant_select_domain")
         self.assertEqual(self.messages[1].tool_result, result)
 
+    def test_optional_parameter_card_contains_all_probabilities_and_retained_fields(self):
+        result = {"probabilities": {"brightness_pct": 0.3, "hue": 0.2, "none": 0.5},
+                  "selected_parameters": ["brightness_pct", "hue"], "probability_threshold": 0.15}
+        self.trace("optional_parameters", {"service": "light.turn_on"})
+        self.trace("optional_parameters", {}, result)
+        self.assertEqual(self.messages[-2].tool_calls[0].tool_name, "glow_assistant_select_optional_parameters")
+        self.assertEqual(self.messages[-1].tool_result, result)
+
     def test_target_scope_has_its_own_native_tool_card(self):
         result = {"decisions": {"target_scope": {"choice": "area", "confidence": 0.9}}, "duration_ms": 20}
         self.trace("target_scope", {"candidate_counts": {"target_scope": 3}})

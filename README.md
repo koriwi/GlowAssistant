@@ -2,8 +2,7 @@
 
 A Home Assistant conversation agent. Install it with HACS.
 
-GlowAssistant supports state queries, actions that need only a target, brightness changes, and thermostat temperature changes.
-It can add shopping or to-do items, send messages to notify entities, and announce messages on Assist satellites.
+GlowAssistant answers state queries. Action requests currently select the action and optional parameters, then return their metadata and probabilities. No device action is executed.
 It uses Home Assistant's exposed entities. You can exclude additional entities in the integration settings.
 
 Minimum Home Assistant version: **2026.4.2**.
@@ -61,7 +60,7 @@ Expand a **Result for …** entry to see the choices, confidence, time, usage, a
 
 ## Local benchmark
 
-`benchmark.py` uses the same engine as the integration. It plans device actions and reports decision times.
+`benchmark.py` uses the same engine as the integration. It reports decision times and prints the selected action's field metadata.
 See [benchmark setup](benchmark.md) for the one-time addon update and `.env` settings.
 
 ```bash

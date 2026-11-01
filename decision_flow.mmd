@@ -24,27 +24,10 @@ flowchart TD
     States --> Answer["Smart-home answer model"]
     Answer --> Reply
 
-    Service -->|HA action| Todo{"todo.add_item?"}
-    Todo -->|"Yes: skip area"| Filter
-    Todo -->|No| ActionArea["Decider: area — room or no_area"]
-    ActionArea --> Filter["Filter by action domain and selected room"]
-
-    Filter --> Shortcut{"Concrete room and multi-target action?"}
-    Shortcut -->|Yes| Scope{"Decider: target scope"}
-    Scope -->|area| AreaTargets["Use all filtered entities"]
-    Scope -->|entities| ActionTargets["Decider: entity keep/drop"]
-    Shortcut -->|No| Multiple{"Multi-target action?"}
-    Multiple -->|Yes| ActionTargets
-    Multiple -->|No| Single["Decider: single entity"]
-
-    AreaTargets --> Parameter{"Required parameter?"}
-    ActionTargets --> Parameter
-    Single --> Parameter
-
-    Parameter -->|None| Execute["Recheck exposure and execute HA action"]
-    Parameter -->|Numeric| Numeric["Decider: absolute/relative mode + value"]
-    Numeric --> Validate["Validate baseline, range and rounding"]
-    Validate --> Execute
-    Parameter -->|Free text| Text["Decider: word keep/drop"]
-    Text --> Execute
-    Execute --> Answer
+    Service -->|HA action| Metadata["Read selected action field metadata"]
+    Metadata --> Optional{"Optional fields available?"}
+    Optional -->|Yes| Parameters["Decider: one Choice with optional fields + none"]
+    Parameters --> Probability["Keep actual parameters strictly above probability threshold"]
+    Probability --> Console["Print metadata, all probabilities and retained parameters"]
+    Optional -->|No| Console
+    Console --> Stop["Stop: no value extraction or device actions"]

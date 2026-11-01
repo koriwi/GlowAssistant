@@ -1,6 +1,6 @@
 # Local benchmark
 
-`benchmark.py` imports the addon's `AgentEngine` and `ModelClient` directly. Decisions, prompts, filtering and numeric/text extraction share the same implementation.
+`benchmark.py` imports the addon's `AgentEngine` and `ModelClient` directly. Decisions, prompts and state-query filtering share the same implementation.
 
 ## Setup
 
@@ -35,6 +35,8 @@ State queries follow service → area → single-domain selection → answer-typ
 
 Output shows stage timings and decisions. `--json` includes the full engine result, trace and usage. Snapshot fetch, engine and total times are separate.
 
-Add `--show-answer-input` to print the smart-home answer request: model, messages, temperature and output token limit. Messages include the system prompt, pipeline language, history and final state/action facts. For detailed queries and actions, selected entities appear in one `entities` array, with each entity's ID, name, room and query state together. For yes/no replies, only `state_answer` is sent for translation. Nested JSON in `content` is expanded for display; the chat API still receives text. With `--json`, this readable view is available under `answer_input`, and the original messages remain in `trace`. API keys and headers are excluded.
+Add `--show-answer-input` to print the smart-home answer request: model, messages, temperature and output token limit. Messages include the system prompt, pipeline language, history and final state facts. For detailed queries, selected entities appear in one `entities` array, with each entity's ID, name, room and query state together. For yes/no replies, only `state_answer` is sent for translation. Nested JSON in `content` is expanded for display; the chat API still receives text. With `--json`, this readable view is available under `answer_input`, and the original messages remain in `trace`. API keys and headers are excluded.
 
-Device actions are marked `planned`. Parameter extraction and answer generation still run; device-command latency is excluded. General requests with enabled MCP servers stop before connecting or calling tools in plan-only mode.
+Action requests select the service, then use one Choice question to select optional parameters. The console prints the selected action's complete HA metadata, including its target selector, fields, required flags, field selectors, descriptions and examples when supplied by HA. Fields are optional unless `required` is true. `--json` includes this under `result.action_metadata` and the service trace result. Optional parameter selection uses every optional HA field (including fields in nested UI groups) plus a `none` choice. Required fields are listed separately. Each actual field with probability strictly above `parameter_probability_threshold` is retained; overall confidence is not used, and `none` never overrides retained fields. The default threshold is 0.15; set it under Decider or override it with `--parameter-threshold 0.2`. `--confidence` does not change this probability threshold. With no optional fields, the extra call is skipped. Console output lists every option probability and the retained fields; JSON includes `parameter_selection` and `required_parameters`. No area/target selection, value extraction, device execution or answer-model call follows. The existing supported action choices remain in use. General requests with enabled MCP servers stop before connecting or calling tools in plan-only mode.
+
+This is an experimental use of Choice: [its probabilities sum to one](https://docs.typesafe.ai/primitives/choice), so the scores compete with one another rather than representing independent inclusion probabilities.
