@@ -15,20 +15,14 @@ from .const import (
     LEGACY_SERVICE_PROMPT,
     LEGACY_TARGET_SCOPE_PROMPT,
     LEGACY_UNSCOPED_TARGET_SCOPE_PROMPT,
-    NUMERIC_MODE_PROMPT,
     QUERY_TARGET_PROMPT,
     QUERY_TYPE_PROMPT,
     SERVICE_PROMPT,
-    TARGET_PROMPT,
     TARGET_SCOPE_PROMPT,
 )
-from .numeric_values import INSTRUCTIONS
 from .optional_parameters import INSTRUCTIONS as PARAMETER_INSTRUCTIONS
-from .target_selection import INSTRUCTIONS as TARGET_FILTER_INSTRUCTIONS
-from .target_selection import LEGACY_INSTRUCTIONS as LEGACY_TARGET_FILTER_INSTRUCTIONS
 from .text_values import INSTRUCTIONS as TEXT_INSTRUCTIONS
-from .text_values import LEGACY_INSTRUCTIONS as LEGACY_TEXT_INSTRUCTIONS
-from .text_values import MESSAGE_INSTRUCTIONS
+from .text_values import LEGACY_PROMPTS, MESSAGE_INSTRUCTIONS
 
 DEFAULTS = {
     "name": "GlowAssistant",
@@ -44,22 +38,11 @@ DEFAULTS = {
         "query_type_prompt": QUERY_TYPE_PROMPT, "query_type_confidence": 0,
         "query_target_prompt": QUERY_TARGET_PROMPT, "query_target_probability_threshold": 0.02,
         "binary_answer_prompt": BINARY_ANSWER_PROMPT, "binary_answer_confidence": 0,
-        "area_prompt": AREA_PROMPT, "target_prompt": TARGET_PROMPT,
+        "area_prompt": AREA_PROMPT,
         "target_scope_prompt": TARGET_SCOPE_PROMPT, "target_scope_confidence": 0,
-        "target_filter_prompt": TARGET_FILTER_INSTRUCTIONS, "target_filter_confidence": 0.5,
-        "query_target_keep_uncertain": False, "action_target_keep_uncertain": False,
-        "numeric_prompt": INSTRUCTIONS, "numeric_mode_prompt": NUMERIC_MODE_PROMPT,
-        "text_prompt": TEXT_INSTRUCTIONS, "message_prompt": MESSAGE_INSTRUCTIONS, "text_confidence": 0.5,
-        "text_keep_uncertain": False,
+        "text_prompt": TEXT_INSTRUCTIONS, "message_prompt": MESSAGE_INSTRUCTIONS,
+        "text_probability_threshold": 0.02,
         "service_confidence": 0, "area_confidence": 0,
-        "target_confidence": 0, "numeric_confidence": 0,
-        "temperature_min": 16, "temperature_max": 26, "temperature_levels": 9,
-        "temperature_step": 1, "temperature_default_change": 0.5,
-        "temperature_baseline": "target",
-        "brightness_min": 0, "brightness_max": 100, "brightness_levels": 6,
-        "brightness_step": 1, "brightness_default_change": 10,
-        "position_min": 0, "position_max": 100, "position_levels": 6,
-        "position_step": 1, "position_default_change": 10,
     },
     "answer": {
         "url": "https://openrouter.ai/api/v1/chat/completions",
@@ -77,7 +60,6 @@ DEFAULTS = {
     "excluded_entities": [],
     "unsure_reply": "ich bin mir nicht sicher",
     "error_reply": "Ich konnte die Anfrage nicht erfolgreich abschließen.",
-    "answer_error_reply": "Der Befehl wurde übermittelt, aber ich konnte keine Antwort formulieren.",
 }
 
 
@@ -100,19 +82,17 @@ def normalize_settings(data):
     if settings["decider"]["service_prompt"] == LEGACY_SERVICE_PROMPT:
         settings["decider"]["service_prompt"] = SERVICE_PROMPT
     decider = data.get("decider", {})
-    if settings["decider"]["target_filter_prompt"] == LEGACY_TARGET_FILTER_INSTRUCTIONS:
-        settings["decider"]["target_filter_prompt"] = TARGET_FILTER_INSTRUCTIONS
     if settings["decider"]["target_scope_prompt"] in (
         LEGACY_TARGET_SCOPE_PROMPT, LEGACY_ACTION_TARGET_SCOPE_PROMPT, LEGACY_UNSCOPED_TARGET_SCOPE_PROMPT,
     ):
         settings["decider"]["target_scope_prompt"] = TARGET_SCOPE_PROMPT
     if "domain_confidence" not in decider and "domain_filter_confidence" in decider:
         settings["decider"]["domain_confidence"] = decider["domain_filter_confidence"]
-    text_prompt = settings["decider"]["text_prompt"]
-    if text_prompt == LEGACY_TEXT_INSTRUCTIONS:
-        settings["decider"]["text_prompt"] = TEXT_INSTRUCTIONS
-    elif text_prompt != TEXT_INSTRUCTIONS and "message_prompt" not in data.get("decider", {}):
-        settings["decider"]["message_prompt"] = text_prompt
+    for field in ("text_prompt", "message_prompt"):
+        if settings["decider"][field] in LEGACY_PROMPTS:
+            settings["decider"][field] = DEFAULTS["decider"][field]
+    if "message_prompt" not in decider and "text_prompt" in decider and decider["text_prompt"].strip() not in (*LEGACY_PROMPTS, TEXT_INSTRUCTIONS, ""):
+        settings["decider"]["message_prompt"] = settings["decider"]["text_prompt"]
     return settings
 
 
@@ -135,26 +115,10 @@ def validate_settings(data):
             _range(config, "temperature", 0, 2, group)
     decider = settings["decider"]
     for field in ("parameter_probability_threshold", "action_area_probability_threshold", "action_entity_probability_threshold",
-                  "query_target_probability_threshold"):
+                  "query_target_probability_threshold", "text_probability_threshold"):
         _range(decider, field, 0, 1, "decider")
-    for stage in ("service", "area", "domain", "query_type", "binary_answer", "target_scope", "target", "numeric", "text", "target_filter"):
+    for stage in ("service", "area", "domain", "query_type", "binary_answer", "target_scope"):
         _range(decider, f"{stage}_confidence", 0, 1, "decider")
-    for field in ("query_target_keep_uncertain", "action_target_keep_uncertain", "text_keep_uncertain"):
-        if not isinstance(decider[field], bool):
-            raise TypeError(f"decider: {field} must be a boolean.")
-    for parameter in ("temperature", "brightness", "position"):
-        lower = -100 if parameter == "temperature" else 0
-        upper = 200 if parameter == "temperature" else 100
-        for field in ("min", "max"):
-            _range(decider, f"{parameter}_{field}", lower, upper, "decider")
-        if decider[f"{parameter}_min"] >= decider[f"{parameter}_max"]:
-            raise ValueError(f"decider: {parameter} minimum must be smaller than maximum.")
-        _range(decider, f"{parameter}_levels", 2, 10, "decider", integer=True)
-        _range(decider, f"{parameter}_step", 1 if parameter == "position" else 0.01, 100, "decider",
-               integer=parameter == "position")
-        _range(decider, f"{parameter}_default_change", 0.01, 100, "decider")
-    if decider["temperature_baseline"] not in ("target", "measured"):
-        raise ValueError("decider: unknown temperature baseline.")
     if not isinstance(settings["history_enabled"], bool):
         raise TypeError("history_enabled must be a boolean.")
     _range(settings, "history_messages", 1, 100, "history", integer=True)
@@ -188,7 +152,7 @@ def validate_settings(data):
         names.add(server["name"])
         servers.append(server)
     general["mcp_servers"] = servers
-    for field in ("name", "unsure_reply", "error_reply", "answer_error_reply"):
+    for field in ("name", "unsure_reply", "error_reply"):
         if not isinstance(settings[field], str) or not settings[field].strip():
             raise ValueError(f"{field}: text must not be empty.")
     return settings

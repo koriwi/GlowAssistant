@@ -70,29 +70,11 @@ class ScriptedModels:
                 answers[name] = {"type": "choice", "choice": keys[0], "confidence": self.confidence,
                                  "probabilities": probabilities}
                 continue
-            if question["type"] == "score":
-                score = choices[name]
-                probabilities = {str(index): 0 for index in range(len(question["criteria"]))}
-                lower = int(score)
-                probabilities[str(lower)] = 1 - (score - lower)
-                if score != lower:
-                    probabilities[str(lower + 1)] = score - lower
-                answers[name] = {"type": "score", "score": score, "confidence": self.confidence, "probabilities": probabilities}
-            else:
-                if name.startswith("target_") and name.removeprefix("target_").isdigit():
-                    target = state["targets"][int(name.removeprefix("target_"))]
-                    selected = choices.get("targets")
-                    if selected is None:
-                        legacy = choices.get("target", "unsure")
-                        selected = ([legacy.removeprefix("entity:")] if legacy.startswith("entity:")
-                                    else "all" if legacy.startswith("area:") or legacy == "all_areas" else [])
-                    choice = choices.get(name, "keep" if selected == "all" or target["entity_id"] in selected else "drop")
-                else:
-                    choice = choices.get(name, "unsure")
-                probabilities = dict.fromkeys(question["criteria"], 0)
-                if choice in probabilities:
-                    probabilities[choice] = 1
-                answers[name] = {"type": "choice", "choice": choice, "confidence": self.confidence, "probabilities": probabilities}
+            choice = choices.get(name, "unsure")
+            probabilities = dict.fromkeys(question["criteria"], 0)
+            if choice in probabilities:
+                probabilities[choice] = 1
+            answers[name] = {"type": "choice", "choice": choice, "confidence": self.confidence, "probabilities": probabilities}
         return {"answers": answers, "usage": {"input_tokens": 5}}
 
     async def chat(self, config, messages):
@@ -104,30 +86,28 @@ class ScriptedModels:
 
 
 class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
-    async def run_agent(self, choices, snapshot=SNAPSHOT, settings=None, answers=None, executor=None, trace=None, history=None, language="de", prompt="test request", dry_run=False, speaker_area=None):
+    async def run_agent(self, choices, snapshot=SNAPSHOT, settings=None, answers=None, trace=None, history=None, language="de", prompt="test request", dry_run=False, speaker_area=None):
         models = ScriptedModels(choices, answers)
-        execute = executor or AsyncMock()
-        agent = AgentEngine(settings or normalize_settings({}), models, execute, trace=trace, history=history, dry_run=dry_run)
+        agent = AgentEngine(settings or normalize_settings({}), models, trace=trace, history=history, dry_run=dry_run)
         result = await agent.process(prompt, language, snapshot, speaker_area=speaker_area)
-        return result, models, execute
+        return result, models
 
-    async def run_parameter_stage(self, choices, snapshot=SNAPSHOT, settings=None, executor=None, trace=None):
+    async def run_parameter_stage(self, choices, snapshot=SNAPSHOT, settings=None, trace=None):
         models = ScriptedModels(choices[1:])
-        execute = executor or AsyncMock()
         selected = choices[0]["service"]
         service = action_options(snapshot["services"])[selected]["service"]
         result = {"request": "test request", "language": "de", "service": service,
                   "decisions": {}, "usage": {}, "timings_ms": {},
                   "action_metadata": {"service": service, **snapshot["services"][service]}}
-        agent = AgentEngine(settings or normalize_settings({}), models, execute, trace=trace)
+        agent = AgentEngine(settings or normalize_settings({}), models, trace=trace)
         await agent._select_parameters(result, [item for item in snapshot["entities"] if item["domain"] == service.split(".")[0]])
-        return result, models, execute
+        return result, models
 
     async def test_yes_no_query_skips_entity_filter_and_only_translates_the_decision(self):
         for answer, translated in (("yes", "Ja."), ("no", "Nein.")):
             with self.subTest(answer=answer):
                 events = []
-                result, models, execute = await self.run_agent([
+                result, models = await self.run_agent([
                     {"service": "query_state"}, {"area": "area:office"}, {"domain": "light"},
                     {"query_type": "yes_no"}, {"binary_answer": answer},
                 ], prompt="Ist die Lampe im Büro an?", answers=[translated],
@@ -153,7 +133,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(outputs[stage]["decisions"][stage]["confidence"], 0.9)
                     self.assertEqual(outputs[stage]["decisions"][stage]["effective_choice"],
                                      "yes_no" if stage == "query_type" else answer)
-                execute.assert_not_awaited()
+
 
     async def test_whole_home_yes_no_uses_current_states_and_history_with_no_entity_decisions(self):
         snapshot = copy.deepcopy(SNAPSHOT)
@@ -170,7 +150,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
             "query_type_prompt": "Custom type rules", "binary_answer_prompt": "Custom binary rules",
             "query_type_confidence": 0.2, "binary_answer_confidence": 0.3,
         }})
-        result, models, execute = await self.run_agent([
+        result, models = await self.run_agent([
             {"service": "query_state"}, {"area": "all_areas"}, {"domain": "binary_sensor"},
             {"query_type": "yes_no"}, {"binary_answer": "yes"},
         ], snapshot=snapshot, history=history, settings=settings, language="fr-CH", prompt="And now?")
@@ -191,7 +171,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(json.dumps(history), models.chat_requests[0][1][0]["content"])
         self.assertIn("Assist pipeline language: fr-CH", models.chat_requests[0][1][0]["content"])
         self.assertEqual(result["state_answer"], "yes")
-        execute.assert_not_awaited()
+
 
     async def test_uncertain_query_type_or_binary_answer_stops_without_chat_or_entity_filter(self):
         for stage in ("query_type", "binary_answer"):
@@ -203,7 +183,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
                     choices.append({stage: choice})
                     settings = normalize_settings({"decider": {f"{stage}_confidence": threshold}})
                     events = []
-                    result, models, execute = await self.run_agent(
+                    result, models = await self.run_agent(
                         choices, settings=settings, trace=lambda *event: events.append(event),
                     )
                     self.assertEqual(result["route"], "unsure")
@@ -213,10 +193,10 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
                     self.assertNotIn("target", result["decisions"])
                     output = next(output for name, _, output in events if name == stage and output)
                     self.assertEqual(output["decisions"][stage]["minimum_confidence"], threshold)
-                    execute.assert_not_awaited()
+
 
     async def test_yes_no_translation_failure_preserves_decision_and_reports_answer_failure(self):
-        result, models, execute = await self.run_agent([
+        result, models = await self.run_agent([
             {"service": "query_state"}, {"area": "area:office"}, {"domain": "light"},
             {"query_type": "yes_no"}, {"binary_answer": "no"},
         ], answers=[ModelError("Model reply reached its output token limit.")])
@@ -224,7 +204,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["answer"], DEFAULTS["error_reply"])
         self.assertEqual(result["failures"][0]["stage"], "answer")
         self.assertEqual(len(models.chat_requests), 1)
-        execute.assert_not_awaited()
+
 
     async def test_invalid_binary_choice_is_rejected_without_an_answer_or_action(self):
         with self.assertRaisesRegex(ModelError, "Invalid classifier"):
@@ -235,7 +215,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_pipeline_language_reaches_every_decider_and_the_answer_model(self):
         settings = normalize_settings({"answer": {"prompt": "Custom answer rules"}})
-        _, models, _ = await self.run_agent([
+        _, models = await self.run_agent([
             {"service": "query_state"},
             {"area": "area:office"}, {"domain": "light"}, {"query_type": "complex"}, {"target": "entity:light.desk"},
         ], settings=settings, language="fr-CH")
@@ -249,7 +229,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
     async def test_actions_stop_after_selection_in_ha_and_plan_only_mode(self):
         for dry_run in (False, True):
             with self.subTest(dry_run=dry_run):
-                result, models, execute = await self.run_agent([
+                result, models = await self.run_agent([
                     {"service": "light.turn_on"}, {"target_scope": "areas"}, {"action_areas": "area:office"}, {"optional_parameters": "none"},
                 ], dry_run=dry_run, prompt="Turn on the office lights")
                 self.assertEqual(result["service"], "light.turn_on")
@@ -265,10 +245,11 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("execution", result)
                 self.assertNotIn("failures", result)
                 self.assertIn("No action was executed", result["answer"])
-                execute.assert_not_awaited()
+
 
     async def test_action_target_scope_choices_and_speaker_context(self):
-        with patch.object(AgentEngine, "_select_action_targets", new_callable=AsyncMock, return_value=SNAPSHOT["entities"]):
+        with patch.object(AgentEngine, "_select_action_targets", new_callable=AsyncMock, return_value=SNAPSHOT["entities"]), \
+                patch.object(AgentEngine, "_extract_text", new_callable=AsyncMock):
             for scope, location, prompt in (
                 ("entities", None, "Add milk to the shopping list"),
                 ("entities", "Kitchen", "Setze Brot auf die Einkaufsliste"),
@@ -283,7 +264,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
                     snapshot = copy.deepcopy(SNAPSHOT)
                     snapshot["services"]["todo.add_item"] = {"target": {}, "fields": {"item": {"required": True}}}
                     service = "todo.add_item" if scope == "entities" else "light.turn_off"
-                    result, models, execute = await self.run_agent([
+                    result, models = await self.run_agent([
                         {"service": service}, {"target_scope": scope},
                     ], snapshot=snapshot, prompt=prompt, speaker_area=location)
                     self.assertEqual(result["target_scope"], scope)
@@ -297,14 +278,14 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
                     self.assertNotIn("optional_parameters", result["decisions"])
                     self.assertNotIn("execution", result)
                     self.assertFalse(models.chat_requests)
-                    execute.assert_not_awaited()
+
 
     async def test_scope_unsure_or_low_confidence_stops_after_scope_decision(self):
         for choice, threshold in (("unsure", 0), ("areas", 0.95)):
             with self.subTest(choice=choice):
                 settings = normalize_settings({"decider": {"target_scope_confidence": threshold}})
                 events = []
-                result, models, execute = await self.run_agent([
+                result, models = await self.run_agent([
                     {"service": "light.turn_off"}, {"target_scope": choice},
                 ], settings=settings, trace=lambda *event: events.append(event))
                 self.assertEqual(result["route"], "unsure")
@@ -314,7 +295,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(output["decisions"]["target_scope"]["effective_choice"], "unsure")
                 self.assertEqual(output["decisions"]["target_scope"]["minimum_confidence"], threshold)
                 self.assertNotIn("parameter_selection", result)
-                execute.assert_not_awaited()
+
 
     async def test_implied_area_choices_cannot_be_selected_without_supplied_location(self):
         for choice in ("entities_implied_area", "implied_area"):
@@ -336,7 +317,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         original = copy.deepcopy(snapshot)
         history = [{"role": "user", "content": "Set the office to 20 degrees"}, {"role": "assistant", "content": "Selected."}]
         settings = normalize_settings({"history_enabled": True})
-        result, models, execute = await self.run_agent([
+        result, models = await self.run_agent([
             {"service": "climate.set_temperature:temperature"}, {"target_scope": "areas"}, {"action_areas": "area:office"}, {"optional_parameters": "none"},
         ], snapshot=snapshot, settings=settings, history=history, language="fr-CH")
         self.assertEqual(result["action_metadata"], {"service": "climate.set_temperature",
@@ -350,7 +331,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(models.requests[-1][1]["history"], history)
         self.assertEqual(models.requests[-1][1]["language"], "fr-CH")
         self.assertFalse(models.chat_requests)
-        execute.assert_not_awaited()
+
 
     async def test_optional_parameters_use_all_choice_probabilities_even_when_none_wins(self):
         snapshot = copy.deepcopy(SNAPSHOT)
@@ -362,7 +343,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         probabilities = {"brightness_pct": 0.25, "hue": 0.2, "child_lock": 0.05, "none": 0.5}
         events = []
         settings = normalize_settings({"decider": {"parameter_prompt": "Custom parameter task", "parameter_probability_threshold": 0.15}})
-        result, models, execute = await self.run_parameter_stage([
+        result, models = await self.run_parameter_stage([
             {"service": "light.turn_on"}, {"optional_parameters": {
                 "type": "choice", "choice": "none", "confidence": 0, "probabilities": probabilities,
             }},
@@ -380,57 +361,54 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("minimum_confidence", output["decisions"]["optional_parameters"])
         self.assertNotIn("Custom parameter task", json.dumps(events))
         self.assertFalse(models.chat_requests)
-        execute.assert_not_awaited()
+
 
     async def test_required_only_action_skips_optional_parameter_call(self):
         snapshot = copy.deepcopy(SNAPSHOT)
         snapshot["services"]["todo.add_item"] = {"target": {}, "fields": {
             "item": {"required": True, "selector": {"text": {}}},
         }}
-        result, models, execute = await self.run_parameter_stage([{"service": "todo.add_item"}], snapshot=snapshot)
+        result, models = await self.run_parameter_stage([{"service": "todo.add_item"}], snapshot=snapshot)
         self.assertEqual(result["required_parameters"], ["item"])
         self.assertEqual(result["parameter_selection"]["selected_parameters"], [])
         self.assertEqual(len(models.requests), 0)
         self.assertFalse(models.chat_requests)
-        execute.assert_not_awaited()
+
 
     async def test_invalid_optional_parameter_distribution_stops_without_action_or_answer(self):
         events = []
-        execute = AsyncMock()
         with self.assertRaisesRegex(ModelError, "Malformed optional parameter"):
             await self.run_parameter_stage([
                 {"service": "light.turn_on"}, {"optional_parameters": {
                     "type": "choice", "choice": "brightness_pct", "confidence": 0.9,
                     "probabilities": {"brightness_pct": 1},
                 }},
-            ], executor=execute, trace=lambda *event: events.append(event))
+            ], trace=lambda *event: events.append(event))
         self.assertEqual(events[-1][0], "optional_parameters")
         self.assertEqual(events[-1][2]["status"], "error")
         self.assertFalse(any(stage in ("execution", "answer") for stage, _, _ in events))
-        execute.assert_not_awaited()
 
 
     async def test_plan_only_query_reads_states_without_an_execution_step(self):
-        result, _, execute = await self.run_agent([
+        result, _ = await self.run_agent([
             {"service": "query_state"}, {"area": "area:office"}, {"domain": "light"}, {"query_type": "complex"}, {"targets": ["light.desk"]},
         ], dry_run=True)
-        execute.assert_not_awaited()
+
         self.assertEqual(result["state_info"][0]["entity_id"], "light.desk")
         self.assertNotIn("execution", result)
 
     async def test_plan_only_general_route_cannot_connect_to_or_execute_mcp_tools(self):
         settings = normalize_settings({"general": {"enable": True, "mcp_servers": [{"enable": True}]}})
-        execute = AsyncMock()
         with patch("custom_components.glow_assistant.engine.general_answer", new_callable=AsyncMock) as general:
             with self.assertRaisesRegex(ModelError, "plan-only"):
-                await self.run_agent([{"service": "not-smarthome-related"}], settings=settings, executor=execute, dry_run=True)
+                await self.run_agent([{"service": "not-smarthome-related"}], settings=settings, dry_run=True)
         general.assert_not_awaited()
-        execute.assert_not_awaited()
+
 
     async def test_history_is_sent_to_every_decider_and_the_answer_model(self):
         history = [{"role": "user", "content": "Is the office lamp on?"}, {"role": "assistant", "content": "Yes, it is on."}]
         settings = normalize_settings({"history_enabled": True})
-        result, models, execute = await self.run_agent([
+        result, models = await self.run_agent([
             {"service": "query_state"},
             {"area": "area:office"}, {"domain": "light"}, {"query_type": "complex"}, {"target": "entity:light.desk"},
         ], settings=settings, history=history)
@@ -443,10 +421,10 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(all("resolve references" in item["instructions"] for item in questions.values()))
         self.assertIn(json.dumps(history, ensure_ascii=False), models.chat_requests[0][1][0]["content"])
         self.assertEqual(len(models.requests), 5)
-        execute.assert_not_awaited()
+
 
     async def test_disabled_history_is_not_forwarded_even_if_supplied(self):
-        _, models, _ = await self.run_agent([
+        _, models = await self.run_agent([
             {"service": "query_state"},
             {"area": "area:office"}, {"domain": "light"}, {"query_type": "complex"}, {"target": "entity:light.desk"},
         ], history=[{"role": "user", "content": "private previous message"}])
@@ -456,7 +434,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
     async def test_general_history_uses_the_same_plain_message_context(self):
         history = [{"role": "user", "content": "How tall is the Eiffel Tower?"}, {"role": "assistant", "content": "330 metres."}]
         settings = normalize_settings({"history_enabled": True, "general": {"enable": True}})
-        _, models, _ = await self.run_agent([{"service": "not-smarthome-related"}], settings=settings, history=history)
+        _, models = await self.run_agent([{"service": "not-smarthome-related"}], settings=settings, history=history)
         self.assertEqual(models.requests[0][1]["history"], history)
         self.assertIn(json.dumps(history, ensure_ascii=False), models.chat_requests[0][1][0]["content"])
 
@@ -469,7 +447,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         history = [{"role": "assistant", "content": "Previous reply"}]
         with patch("custom_components.glow_assistant.engine.general_answer", new_callable=AsyncMock,
                    return_value=("Answer with tools", [{"completion_tokens": 10}])) as general:
-            result, models, execute = await self.run_agent(
+            result, models = await self.run_agent(
                 [{"service": "not-smarthome-related"}], settings=settings, history=history,
             )
         self.assertEqual(result["answer"], "Answer with tools")
@@ -477,25 +455,25 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Assist pipeline language: de", general.await_args.args[2][0]["content"])
         self.assertEqual(len(models.requests), 1)
         self.assertFalse(models.chat_requests)
-        execute.assert_not_awaited()
+
 
     async def test_enabled_mcp_servers_are_not_contacted_for_smarthome_or_disabled_general(self):
         from unittest.mock import patch
 
         settings = normalize_settings({"general": {"enable": False, "mcp_servers": [{"enable": True}]}})
         with patch("custom_components.glow_assistant.engine.general_answer", new_callable=AsyncMock) as general:
-            result, _, _ = await self.run_agent([
+            result, _ = await self.run_agent([
                 {"service": "query_state"},
                 {"area": "area:office"}, {"domain": "light"}, {"query_type": "complex"}, {"target": "entity:light.desk"},
             ], settings=settings)
             self.assertEqual(result["route"], "smarthome")
-            result, _, _ = await self.run_agent([{"service": "not-smarthome-related"}], settings=settings)
+            result, _ = await self.run_agent([{"service": "not-smarthome-related"}], settings=settings)
             self.assertEqual(result["route"], "unsure")
         general.assert_not_awaited()
 
     async def test_action_selection_trace_contains_metadata_and_no_downstream_calls(self):
         events = []
-        result, models, execute = await self.run_agent([
+        result, models = await self.run_agent([
             {"service": "light.turn_off"}, {"target_scope": "entities_explicit_area"},
             {"action_areas": "area:office"}, {"action_entities": "entity:light.desk"},
         ], trace=lambda *event: events.append(event))
@@ -512,13 +490,12 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["target_scope"], "entities_explicit_area")
         self.assertEqual(result["parameter_selection"]["selected_parameters"], [])
         self.assertNotIn("optional_parameters", result["timings_ms"])
-        execute.assert_not_awaited()
 
 
     async def test_trace_explains_confidence_rejection(self):
         events = []
         settings = normalize_settings({"decider": {"service_confidence": 0.95}})
-        result, _, execute = await self.run_agent(
+        result, _ = await self.run_agent(
             [{"service": "light.turn_off"}], settings=settings, trace=lambda *event: events.append(event),
         )
         choice = next(output["decisions"]["service"] for stage, _, output in events
@@ -535,11 +512,11 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("95%", failure["reason"])
         self.assertEqual(failure["stage"], "service")
         self.assertEqual(failure["device_command"], "not_sent")
-        execute.assert_not_awaited()
+
 
     async def test_trace_retains_failed_answer_timing_and_cause(self):
         events = []
-        result, _, execute = await self.run_agent([
+        result, _ = await self.run_agent([
             {"service": "query_state"},
             {"area": "area:office"}, {"domain": "light"}, {"query_type": "complex"}, {"target": "area:office"},
         ], answers=[ModelError("Model endpoint returned HTTP 401.")], trace=lambda *event: events.append(event))
@@ -552,21 +529,20 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(failure["http_status"], 401)
         self.assertIn("API key", failure["suggestion"])
         self.assertIn("Smart-home answer", failure["suggestion"])
-        execute.assert_not_awaited()
+
 
     async def test_trace_retains_decider_failure_without_running_later_stages(self):
         events = []
         models = ScriptedModels([])
         models.decide = AsyncMock(side_effect=ModelError("Model connection failed."))
-        execute = AsyncMock()
-        agent = AgentEngine(normalize_settings({}), models, execute, trace=lambda *event: events.append(event))
+        agent = AgentEngine(normalize_settings({}), models, trace=lambda *event: events.append(event))
         with self.assertRaisesRegex(ModelError, "connection failed"):
             await agent.process("test", "de", SNAPSHOT)
         self.assertEqual([stage for stage, _, _ in events], ["service", "service", "failure", "failure"])
         self.assertEqual(events[1][2]["status"], "error")
         self.assertIn("duration_ms", events[1][2])
         self.assertIn("could not be reached", events[-1][2]["reason"])
-        execute.assert_not_awaited()
+
 
     async def test_answer_character_limit_reaches_stage_debug_and_failure_summary_with_effective_settings(self):
         settings = normalize_settings({
@@ -580,8 +556,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
             {"domain": "light"}, {"query_type": "complex"}, {"target": "all_areas"},
         ])
         models.chat = ModelClient(session).chat
-        execute = AsyncMock()
-        result = await AgentEngine(settings, models, execute, trace=lambda *event: events.append(event)).process(
+        result = await AgentEngine(settings, models, trace=lambda *event: events.append(event)).process(
             "sind noch fenster im haus offen?", "de", SNAPSHOT,
         )
         output = next(output for stage, _, output in events if stage == "answer" and output is not None)
@@ -598,14 +573,13 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         payload = {key: arguments[key] for key in ("model", "messages", "max_tokens", "temperature")}
         self.assertEqual(len(json.dumps(payload, ensure_ascii=False)), failure["input_chars"])
         session.post.assert_not_called()
-        execute.assert_not_awaited()
+
 
     async def test_decider_character_limit_reaches_the_stage_and_final_failure_summary(self):
         settings = normalize_settings({"decider": {"model": "local-decider", "max_input_chars": 100}})
         session = Mock()
         events = []
-        execute = AsyncMock()
-        agent = AgentEngine(settings, ModelClient(session), execute, trace=lambda *event: events.append(event))
+        agent = AgentEngine(settings, ModelClient(session), trace=lambda *event: events.append(event))
         with self.assertRaises(ModelError):
             await agent.process("sind fenster im haus offen?", "de", SNAPSHOT)
         output = next(output for stage, _, output in events if stage == "service" and output is not None)
@@ -615,7 +589,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(failure["input_chars"], output["input_chars"])
         self.assertEqual(failure["max_input_chars"], 100)
         session.post.assert_not_called()
-        execute.assert_not_awaited()
+
 
     async def test_trace_does_not_include_model_credentials_or_prompt_templates(self):
         events = []
@@ -635,7 +609,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
             "prompt": "Answer rules", "api_key": "private-api-key", "temperature": 0.3,
         }})
         events = []
-        _, models, _ = await self.run_agent([
+        _, models = await self.run_agent([
             {"service": "query_state"}, {"area": "area:office"}, {"domain": "light"}, {"query_type": "complex"}, {"target": "entity:light.desk"},
         ], settings=settings, history=history, trace=lambda *event: events.append(event))
         arguments = next(arguments for stage, arguments, output in events if stage == "answer" and output is None)
@@ -648,22 +622,21 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
 
 
     async def test_state_query_bypasses_area_or_entities_scope_decision(self):
-        result, models, execute = await self.run_agent([
+        result, models = await self.run_agent([
             {"service": "query_state"}, {"area": "area:office"}, {"domain": "light"},
             {"query_type": "complex"}, {"targets": ["light.desk"]},
         ])
         self.assertEqual(len(models.requests), 5)
         self.assertNotIn("target_scope", result["decisions"])
         self.assertEqual(set(models.requests[-1][2]), {"query_targets"})
-        execute.assert_not_awaited()
 
 
     async def test_query_uses_cached_state_and_does_not_execute(self):
-        result, models, execute = await self.run_agent([
+        result, models = await self.run_agent([
             {"service": "query_state"},
             {"area": "area:office"}, {"domain": "sensor"}, {"query_type": "complex"}, {"target": "entity:sensor.office"},
         ], answers=["Es sind 22 Grad."])
-        execute.assert_not_awaited()
+
         self.assertEqual(result["state_info"][0]["state"], "22")
         facts = json.loads(models.chat_requests[0][1][1]["content"])
         self.assertEqual(facts["entities"][0]["attributes"]["unit_of_measurement"], "°C")
@@ -672,7 +645,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
     async def test_unavailable_query_omits_stale_attributes(self):
         snapshot = copy.deepcopy(SNAPSHOT)
         snapshot["entities"][-1]["state"] = "unavailable"
-        result, _, _ = await self.run_agent([
+        result, _ = await self.run_agent([
             {"service": "query_state"},
             {"area": "all_areas"}, {"domain": "sensor"}, {"query_type": "complex"},
             {"target": "entity:sensor.office"},
@@ -688,25 +661,24 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         ]
         for choices, expected_stage in cases:
             with self.subTest(stage=expected_stage):
-                result, models, execute = await self.run_agent(choices)
+                result, models = await self.run_agent(choices)
                 self.assertEqual(result["route"], "unsure")
                 self.assertEqual(result["answer"], DEFAULTS["unsure_reply"])
                 self.assertEqual(result["failures"][0]["stage"], expected_stage)
                 self.assertNotIn("action_metadata", result)
                 self.assertFalse(models.chat_requests)
-                execute.assert_not_awaited()
 
 
     async def test_disabled_general_returns_fixed_unsure(self):
-        result, models, execute = await self.run_agent([{"service": "not-smarthome-related"}])
+        result, models = await self.run_agent([{"service": "not-smarthome-related"}])
         self.assertEqual(result["answer"], "ich bin mir nicht sicher")
         self.assertIn("general model is disabled", result["failures"][0]["reason"])
         self.assertFalse(models.chat_requests)
-        execute.assert_not_awaited()
+
 
     async def test_enabled_general_uses_its_own_model_and_original_request(self):
         settings = normalize_settings({"general": {"enable": True, "model": "smart-model"}})
-        result, models, execute = await self.run_agent(
+        result, models = await self.run_agent(
             [{"service": "not-smarthome-related"}], settings=settings, answers=["330 Meter."],
         )
         self.assertEqual(result["route"], "not-smarthome-related")
@@ -715,23 +687,22 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(models.chat_requests[0][1][1]["content"], "test request")
         self.assertIn("Assist pipeline language: de", models.chat_requests[0][1][0]["content"])
         self.assertEqual(result["answer"], "330 Meter.")
-        execute.assert_not_awaited()
+
 
     async def test_confidence_threshold_stops_action(self):
         settings = normalize_settings({"decider": {"service_confidence": 0.95}})
-        result, models, execute = await self.run_agent([{"service": "light.turn_off"}], settings=settings)
+        result, models = await self.run_agent([{"service": "light.turn_off"}], settings=settings)
         self.assertEqual(result["route"], "unsure")
         self.assertEqual(len(models.requests), 1)
-        execute.assert_not_awaited()
 
 
-    async def test_room_query_selects_one_available_domain_before_entity_keep_drop(self):
+    async def test_room_query_selects_one_available_domain_before_entity_choice(self):
         snapshot = copy.deepcopy(SNAPSHOT)
         snapshot["entities"].extend([
             entity("binary_sensor.office_window", "Office window", device_class="window"),
             entity("fan.bedroom", "Fan", area="bedroom"),
         ])
-        result, models, execute = await self.run_agent([
+        result, models = await self.run_agent([
             {"service": "query_state"}, {"area": "area:office"},
             {"domain": "binary_sensor"}, {"query_type": "complex"}, {"targets": ["binary_sensor.office_window"]},
         ], snapshot=snapshot, prompt="sind fenster im buero offen?")
@@ -745,12 +716,12 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(models.requests[4][1]["domain"], "binary_sensor")
         self.assertEqual(result["domain"], "binary_sensor")
         self.assertEqual(result["state_info"][0]["entity_id"], "binary_sensor.office_window")
-        execute.assert_not_awaited()
+
 
     async def test_room_query_answer_only_receives_the_selected_domain(self):
         snapshot = copy.deepcopy(SNAPSHOT)
         snapshot["entities"].append(entity("binary_sensor.office_window", "Window", device_class="window"))
-        result, models, execute = await self.run_agent([
+        result, models = await self.run_agent([
             {"service": "query_state"}, {"area": "area:office"}, {"domain": "light"}, {"query_type": "complex"}, {"targets": "all"},
         ], snapshot=snapshot)
         facts = json.loads(models.chat_requests[0][1][1]["content"])
@@ -761,7 +732,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["domain"], "light")
         self.assertEqual(result["domain_filter"]["entities_before"], 4)
         self.assertEqual(result["domain_filter"]["entities_after"], 2)
-        execute.assert_not_awaited()
+
 
     async def test_query_choice_receives_current_states_for_state_filtered_questions(self):
         snapshot = copy.deepcopy(SNAPSHOT)
@@ -769,7 +740,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         snapshot["entities"][2]["state"] = "unavailable"
         original = copy.deepcopy(snapshot)
         events = []
-        result, models, execute = await self.run_agent([
+        result, models = await self.run_agent([
             {"service": "query_state"}, {"area": "all_areas"}, {"domain": "light"},
             {"query_type": "complex"}, {"targets": ["light.desk", "light.bed"]},
         ], snapshot=snapshot, prompt="Welche Lichter im Haus sind an?", trace=lambda *event: events.append(event))
@@ -788,10 +759,10 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([(item["entity_id"], item["state"]) for item in facts["entities"]],
                          [("light.desk", "on"), ("light.bed", "unavailable")])
         self.assertEqual(result["target_selection"]["selected_entity_ids"], ["light.desk", "light.bed"])
-        execute.assert_not_awaited()
+
 
     async def test_unspecified_room_query_uses_all_areas_and_filters_domains_before_targets(self):
-        result, models, execute = await self.run_agent([
+        result, models = await self.run_agent([
             {"service": "query_state"}, {"area": "all_areas"},
             {"domain": "light"}, {"query_type": "complex"}, {"target": "entity:light.bed"},
         ], prompt="Is the bed lamp on?")
@@ -808,7 +779,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["domain"], "light")
         self.assertEqual([item["entity_id"] for item in result["state_info"]], ["light.bed"])
         self.assertEqual(len(models.requests), 5)
-        execute.assert_not_awaited()
+
 
     async def test_whole_home_query_includes_all_rooms_and_unassigned_entities(self):
         snapshot = copy.deepcopy(SNAPSHOT)
@@ -817,8 +788,8 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
             entity("binary_sensor.bedroom_window", "Window", area="bedroom", device_class="window"),
             entity("binary_sensor.unassigned_window", "Unassigned window", area=None, device_class="window"),
         ])
-        settings = normalize_settings({"decider": {"area_prompt": "Custom area rules", "target_prompt": "Custom target rules"}})
-        result, models, execute = await self.run_agent([
+        settings = normalize_settings({"decider": {"area_prompt": "Custom area rules", "query_target_prompt": "Custom target rules"}})
+        result, models = await self.run_agent([
             {"service": "query_state"}, {"area": "all_areas"},
             {"domain": "binary_sensor"}, {"query_type": "complex"},
             {"target": "all_areas"},
@@ -845,28 +816,27 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(windows["binary_sensor.office_window"]["area"], "Office")
         self.assertEqual(windows["binary_sensor.bedroom_window"]["area"], "Bedroom")
         self.assertIsNone(windows["binary_sensor.unassigned_window"]["area"])
-        self.assertEqual(settings["decider"]["target_prompt"], "Custom target rules")
-        execute.assert_not_awaited()
+        self.assertEqual(settings["decider"]["query_target_prompt"], "Custom target rules")
+
 
     async def test_named_room_query_skips_domain_filter_and_offers_only_individual_entities(self):
-        result, models, execute = await self.run_agent([
+        result, models = await self.run_agent([
             {"service": "query_state"}, {"area": "area:office"}, {"domain": "sensor"}, {"query_type": "complex"}, {"target": "entity:sensor.office"},
         ])
         self.assertTrue(all(target["type"] == "entity" for target in query_candidates(models.requests[4])))
         self.assertEqual(len(models.requests), 5)
         self.assertIn("domain", result["decisions"])
-        execute.assert_not_awaited()
 
 
     async def test_whole_home_query_without_exposed_entities_stops_before_target_selection(self):
-        result, models, execute = await self.run_agent([
+        result, models = await self.run_agent([
             {"service": "query_state"}, {"area": "all_areas"},
         ], snapshot={"entities": [], "services": {}})
         self.assertEqual(result["route"], "unsure")
         self.assertEqual(result["failures"][0]["stage"], "target")
         self.assertEqual(len(models.requests), 2)
         self.assertFalse(models.chat_requests)
-        execute.assert_not_awaited()
+
 
     async def test_query_keeps_multiple_window_contacts_and_excludes_other_entity_states_from_answer(self):
         snapshot = copy.deepcopy(SNAPSHOT)
@@ -876,7 +846,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
             entity("binary_sensor.motion", "Motion", device_class="motion"),
         ])
         events = []
-        result, _, execute = await self.run_agent([
+        result, _ = await self.run_agent([
             {"service": "query_state"}, {"area": "area:office"},
             {"domain": "binary_sensor"}, {"query_type": "complex"}, {"targets": ["binary_sensor.left_window", "binary_sensor.right_window"]},
         ], snapshot=snapshot, trace=lambda *event: events.append(event), prompt="Sind Fenster im Büro offen?")
@@ -890,14 +860,13 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(output["entities_before"], 3)
         self.assertEqual(output["entities_after"], 2)
         self.assertEqual(output["decisions"]["query_targets"]["probabilities"]["entity:binary_sensor.left_window"], 0.5)
-        execute.assert_not_awaited()
 
 
     async def test_query_choice_uses_all_probabilities_and_editable_prompt(self):
         events = []
         settings = normalize_settings({"decider": {"query_target_prompt": "private-target-task",
                                                   "query_target_probability_threshold": 0.15}})
-        result, models, execute = await self.run_agent([
+        result, models = await self.run_agent([
             {"service": "query_state"}, {"area": "area:office"}, {"domain": "light"}, {"query_type": "complex"},
             {"query_targets": {"type": "choice", "choice": "none", "confidence": 0,
                                "probabilities": {"entity:light.desk": 0.25, "entity:light.ceiling": 0.2, "none": 0.55}}},
@@ -909,11 +878,11 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(output["probability_threshold"], 0.15)
         self.assertEqual(output["decisions"]["query_targets"]["confidence"], 0)
         self.assertNotIn("minimum_confidence", output["decisions"]["query_targets"])
-        execute.assert_not_awaited()
+
 
     async def test_query_choice_threshold_is_strict_and_empty_selection_stops(self):
         settings = normalize_settings({"decider": {"query_target_probability_threshold": 0.3}})
-        result, models, execute = await self.run_agent([
+        result, models = await self.run_agent([
             {"service": "query_state"}, {"area": "area:office"}, {"domain": "light"}, {"query_type": "complex"},
             {"query_targets": {"type": "choice", "choice": "none", "confidence": 0.9,
                                "probabilities": {"entity:light.desk": 0.3, "entity:light.ceiling": 0.2, "none": 0.5}}},
@@ -921,7 +890,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["route"], "unsure")
         self.assertEqual(result["target_selection"]["selected_entity_ids"], [])
         self.assertFalse(models.chat_requests)
-        execute.assert_not_awaited()
+
 
     async def test_54_query_candidates_use_one_choice_and_retain_multiple_matching_states(self):
         snapshot = {"services": {}, "entities": [
@@ -933,7 +902,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         probabilities["none"] = 0.01
         settings = normalize_settings({"decider": {"target_filter_confidence": 1, "query_target_keep_uncertain": True}})
         events = []
-        result, models, execute = await self.run_agent([
+        result, models = await self.run_agent([
             {"service": "query_state"}, {"area": "all_areas"}, {"domain": "sensor"}, {"query_type": "complex"},
             {"query_targets": {"type": "choice", "choice": "entity:sensor.value_0", "confidence": 0.001,
                                "probabilities": probabilities}},
@@ -951,21 +920,18 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(output["entities_before"], 54)
         self.assertEqual(output["entities_after"], 18)
         self.assertEqual(output["decisions"]["query_targets"]["probability_threshold"], 0.02)
-        execute.assert_not_awaited()
 
 
     async def test_malformed_query_choice_stops_before_answer(self):
         events = []
-        execute = AsyncMock()
         with self.assertRaises(ModelError):
             await self.run_agent([
                 {"service": "query_state"}, {"area": "area:office"}, {"domain": "light"}, {"query_type": "complex"},
                 {"query_targets": {"type": "choice", "choice": "entity:light.desk", "confidence": 0.9,
                                    "probabilities": {"entity:light.desk": 1}}},
-            ], executor=execute, trace=lambda *event: events.append(event))
+            ], trace=lambda *event: events.append(event))
         self.assertFalse(any(stage in ("execution", "answer") for stage, _, _ in events))
         self.assertEqual(events[-1][2]["stage"], "target")
-        execute.assert_not_awaited()
 
 
     async def test_whole_home_domain_selection_is_one_question_and_reports_reduction(self):
@@ -974,7 +940,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         history = [{"role": "user", "content": "What about the windows?"}]
         settings = normalize_settings({"history_enabled": True, "decider": {"domain_prompt": "private-domain-prompt"}})
         events = []
-        result, models, execute = await self.run_agent([
+        result, models = await self.run_agent([
             {"service": "query_state"}, {"area": "all_areas"}, {"domain": "binary_sensor"}, {"query_type": "complex"}, {"targets": "all"},
         ], snapshot=snapshot, settings=settings, history=history, trace=lambda *event: events.append(event))
         _, state, questions = models.requests[2]
@@ -994,14 +960,14 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(output["decisions"]["domain"]["minimum_confidence"], 0.5)
         self.assertNotIn("keep_uncertain", output["decisions"]["domain"])
         self.assertIn("domain", result["usage"])
-        execute.assert_not_awaited()
+
 
     async def test_uncertain_domain_selection_stops_without_restoring_all_domains(self):
         for choice, threshold in (("unsure", 0.5), ("light", 0.95)):
             with self.subTest(choice=choice, threshold=threshold):
                 settings = normalize_settings({"decider": {"domain_confidence": threshold}})
                 events = []
-                result, models, execute = await self.run_agent([
+                result, models = await self.run_agent([
                     {"service": "query_state"}, {"area": "all_areas"}, {"domain": choice}, {"query_type": "complex"},
                 ], settings=settings, trace=lambda *event: events.append(event))
                 self.assertEqual(result["route"], "unsure")
@@ -1010,24 +976,22 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(len(models.requests), 3)
                 self.assertFalse(models.chat_requests)
                 self.assertEqual(result["failures"][0]["stage"], "domain")
-                execute.assert_not_awaited()
+
 
     async def test_malformed_domain_selection_stops_before_building_the_target_request(self):
         events = []
-        execute = AsyncMock()
         with self.assertRaises(ModelError):
             await self.run_agent([
                 {"service": "query_state"}, {"area": "all_areas"}, {"domain": "invented"}, {"query_type": "complex"},
-            ], executor=execute, trace=lambda *event: events.append(event))
+            ], trace=lambda *event: events.append(event))
         self.assertFalse(any(stage == "target" for stage, _, _ in events))
         output = next(output for stage, _, output in events if stage == "domain" and output is not None)
         self.assertEqual(output["status"], "error")
         self.assertEqual(events[-1][2]["stage"], "domain")
-        execute.assert_not_awaited()
 
 
     async def test_query_answer_failure_preserves_state_and_error_details(self):
-        result, models, execute = await self.run_agent([
+        result, models = await self.run_agent([
             {"service": "query_state"},
             {"area": "area:office"}, {"domain": "light"}, {"query_type": "complex"}, {"target": "entity:light.desk"},
         ], answers=[ModelError("Model reply reached its output token limit.")])
@@ -1036,21 +1000,18 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["state_info"][0]["state"], "on")
         self.assertIn("answer", result["timings_ms"])
         self.assertEqual(len(models.chat_requests), 1)
-        execute.assert_not_awaited()
 
 
     async def test_invalid_decision_after_response_still_emits_a_failure_summary(self):
         events = []
         models = ScriptedModels([])
         models.decide = AsyncMock(return_value={"answers": {}})
-        execute = AsyncMock()
-        agent = AgentEngine(normalize_settings({}), models, execute, trace=lambda *event: events.append(event))
+        agent = AgentEngine(normalize_settings({}), models, trace=lambda *event: events.append(event))
         with self.assertRaises(ModelError):
             await agent.process("test", "de", SNAPSHOT)
         self.assertEqual(events[-1][0], "failure")
         self.assertEqual(events[-1][2]["stage"], "service")
         self.assertIn("invalid decision", events[-1][2]["reason"])
-        execute.assert_not_awaited()
 
 
 class IntegrationSettingsTests(unittest.TestCase):
@@ -1075,18 +1036,30 @@ class IntegrationSettingsTests(unittest.TestCase):
         reset = normalize_settings({"decider": {"parameter_prompt": " "}})
         self.assertEqual(reset["decider"]["parameter_prompt"], DEFAULTS["decider"]["parameter_prompt"])
 
-    def test_stock_target_filter_prompt_upgrades_while_custom_rules_are_preserved(self):
-        from custom_components.glow_assistant.target_selection import (
-            INSTRUCTIONS,
-            LEGACY_INSTRUCTIONS,
-        )
 
-        upgraded = normalize_settings({"decider": {"target_filter_prompt": LEGACY_INSTRUCTIONS}})
-        self.assertEqual(upgraded["decider"]["target_filter_prompt"], INSTRUCTIONS)
-        custom = normalize_settings({"decider": {"target_filter_prompt": "Custom rules"}})
-        self.assertEqual(custom["decider"]["target_filter_prompt"], "Custom rules")
-        reset = normalize_settings({"decider": {"target_filter_prompt": " "}})
-        self.assertEqual(reset["decider"]["target_filter_prompt"], INSTRUCTIONS)
+    def test_removed_settings_are_ignored_and_new_text_cutoff_is_independent(self):
+        removed = {"target_filter_prompt": "old rules", "target_filter_confidence": 1,
+                   "target_prompt": "old target", "target_confidence": 1, "numeric_prompt": "old numeric",
+                   "numeric_confidence": 1, "temperature_min": 27, "position_step": 0.5,
+                   "query_target_keep_uncertain": True, "action_target_keep_uncertain": True,
+                   "text_confidence": 0.9, "text_keep_uncertain": True}
+        saved = normalize_settings({"decider": removed})
+        self.assertFalse(set(removed) & set(saved["decider"]))
+        self.assertEqual(saved["decider"]["text_probability_threshold"], 0.02)
+        self.assertEqual(normalize_settings({"decider": {"text_probability_threshold": 0.05}})["decider"]["text_probability_threshold"], 0.05)
+
+    def test_old_stock_text_prompts_upgrade_and_custom_prompts_are_preserved(self):
+        from custom_components.glow_assistant.text_values import LEGACY_PROMPTS
+
+        for old in LEGACY_PROMPTS:
+            saved = normalize_settings({"decider": {"text_prompt": old, "message_prompt": old}})["decider"]
+            self.assertEqual(saved["text_prompt"], DEFAULTS["decider"]["text_prompt"])
+            self.assertEqual(saved["message_prompt"], DEFAULTS["decider"]["message_prompt"])
+        custom = normalize_settings({"decider": {"text_prompt": "My item rules", "message_prompt": "My message rules"}})["decider"]
+        self.assertEqual(custom["text_prompt"], "My item rules")
+        self.assertEqual(custom["message_prompt"], "My message rules")
+        shared = normalize_settings({"decider": {"text_prompt": "My shared rules"}})["decider"]
+        self.assertEqual(shared["message_prompt"], "My shared rules")
 
     def test_stock_scope_prompt_upgrades_and_custom_prompt_is_preserved(self):
         from custom_components.glow_assistant.const import (
@@ -1109,16 +1082,6 @@ class IntegrationSettingsTests(unittest.TestCase):
         reset = normalize_settings({"decider": {"domain_prompt": " "}})
         self.assertEqual(reset["decider"]["domain_prompt"], DEFAULTS["decider"]["domain_prompt"])
 
-    def test_uncertainty_switches_default_to_false_and_reject_non_boolean_values(self):
-        fields = ("query_target_keep_uncertain", "action_target_keep_uncertain", "text_keep_uncertain")
-        defaults = normalize_settings({})["decider"]
-        for field in fields:
-            self.assertIs(defaults[field], False)
-            for value in ("false", 0, None):
-                settings = self.local_settings()
-                settings["decider"][field] = value
-                with self.subTest(field=field, value=value), self.assertRaises(TypeError):
-                    validate_settings(settings)
 
     def test_domain_selection_migrates_the_previous_threshold_but_not_keep_drop_prompts(self):
         settings = normalize_settings({"decider": {"domain_filter_prompt": "Keep/drop rules", "domain_filter_confidence": 0.3,
@@ -1185,24 +1148,11 @@ class IntegrationSettingsTests(unittest.TestCase):
         saved = normalize_settings({"decider": {"service_prompt": LEGACY_SERVICE_PROMPT}})
         self.assertEqual(saved["decider"]["service_prompt"], SERVICE_PROMPT)
         self.assertIn("todo.add_item", saved["decider"]["service_prompt"])
-        self.assertEqual(saved["decider"]["text_confidence"], 0.5)
+        self.assertEqual(saved["decider"]["text_probability_threshold"], 0.02)
         custom = normalize_settings({"decider": {"service_prompt": "Custom action rules", "text_prompt": "Custom extraction rules"}})
         self.assertEqual(custom["decider"]["service_prompt"], "Custom action rules")
         self.assertEqual(custom["decider"]["text_prompt"], "Custom extraction rules")
 
-    def test_text_prompt_upgrade_restores_probe_wording_and_preserves_custom_shared_prompts(self):
-        from custom_components.glow_assistant.text_values import (
-            INSTRUCTIONS,
-            LEGACY_INSTRUCTIONS,
-            MESSAGE_INSTRUCTIONS,
-        )
-
-        updated = normalize_settings({"decider": {"text_prompt": LEGACY_INSTRUCTIONS}})["decider"]
-        self.assertEqual(updated["text_prompt"], INSTRUCTIONS)
-        self.assertEqual(updated["message_prompt"], MESSAGE_INSTRUCTIONS)
-        custom = normalize_settings({"decider": {"text_prompt": "Shared custom rules"}})["decider"]
-        self.assertEqual(custom["text_prompt"], "Shared custom rules")
-        self.assertEqual(custom["message_prompt"], "Shared custom rules")
 
     def test_ui_numeric_selectors_produce_integer_token_limits(self):
         settings = self.local_settings()
@@ -1213,8 +1163,8 @@ class IntegrationSettingsTests(unittest.TestCase):
         self.assertIsInstance(saved["decider"]["max_input_chars"], int)
 
     def test_prompt_reset_and_customization_survive_normalization(self):
-        settings = normalize_settings({"decider": {"target_prompt": "My rules", "area_prompt": " ", "target_scope_prompt": " "}})
-        self.assertEqual(settings["decider"]["target_prompt"], "My rules")
+        settings = normalize_settings({"decider": {"query_target_prompt": "My rules", "area_prompt": " ", "target_scope_prompt": " "}})
+        self.assertEqual(settings["decider"]["query_target_prompt"], "My rules")
         self.assertEqual(settings["decider"]["area_prompt"], DEFAULTS["decider"]["area_prompt"])
         self.assertEqual(settings["decider"]["target_scope_prompt"], DEFAULTS["decider"]["target_scope_prompt"])
         self.assertNotEqual(id(settings["decider"]), id(DEFAULTS["decider"]))
@@ -1224,20 +1174,14 @@ class IntegrationSettingsTests(unittest.TestCase):
 
     def test_invalid_ranges_and_models_are_rejected(self):
         for group, field, value in (
-            ("decider", "temperature_min", 27), ("decider", "temperature_levels", 11),
-            ("decider", "temperature_levels", 2.5), ("decider", "temperature_step", 0),
             ("decider", "service_confidence", 1.1), ("decider", "url", "localhost:8321"),
-            ("decider", "text_confidence", -0.1), ("decider", "text_confidence", 1.1),
+            ("decider", "text_probability_threshold", -0.1), ("decider", "text_probability_threshold", 1.1),
             ("decider", "domain_confidence", -0.1), ("decider", "domain_confidence", 1.1),
             ("decider", "query_type_confidence", -0.1), ("decider", "query_type_confidence", 1.1),
             ("decider", "binary_answer_confidence", -0.1), ("decider", "binary_answer_confidence", 1.1),
-            ("decider", "target_filter_confidence", -0.1), ("decider", "target_filter_confidence", 1.1),
             ("decider", "target_scope_confidence", -0.1), ("decider", "target_scope_confidence", 1.1),
             ("decider", "action_area_probability_threshold", -0.1), ("decider", "action_area_probability_threshold", 1.1),
             ("decider", "action_entity_probability_threshold", -0.1), ("decider", "action_entity_probability_threshold", 1.1),
-            ("decider", "position_min", -1), ("decider", "position_max", 101),
-            ("decider", "position_min", 100), ("decider", "position_levels", 11),
-            ("decider", "position_step", 0.5), ("decider", "position_default_change", 0),
             ("answer", "model", ""), ("answer", "max_tokens", 0),
             ("answer", "max_input_chars", float("inf")), ("answer", "temperature", True),
         ):

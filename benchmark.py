@@ -41,6 +41,7 @@ def parser():
     result.add_argument("--action-entity-threshold", type=confidence, help="Probability threshold for selecting action entities.")
     result.add_argument("--query-target-threshold", type=confidence,
                         help="Probability threshold for state-query entity selection; independent of --confidence.")
+    result.add_argument("--text-threshold", type=confidence, help="Probability threshold for extracting item/message words.")
     for field in CONFIDENCE_FIELDS:
         flags = ["--" + field.replace("_", "-")]
         if field == "domain_confidence":
@@ -73,6 +74,8 @@ def model_settings(exported, args, env):
         decider["parameter_probability_threshold"] = args.parameter_threshold
     if args.query_target_threshold is not None:
         decider["query_target_probability_threshold"] = args.query_target_threshold
+    if args.text_threshold is not None:
+        decider["text_probability_threshold"] = args.text_threshold
     for kind in ("area", "entity"):
         value = getattr(args, f"action_{kind}_threshold")
         if value is not None:
@@ -122,15 +125,13 @@ async def run(args, env):
     def record(stage, arguments, result=None):
         trace.append({"stage": stage, "input": arguments} if result is None else {"stage": stage, "output": result})
 
-    async def no_execution(action, arguments):
-        raise RuntimeError("A plan-only benchmark must not execute device actions.")
 
     async with aiohttp.ClientSession() as session:
         exported = await fetch_snapshot(session, env)
         snapshot_ms = round((perf_counter() - started) * 1000)
         settings = model_settings(exported["settings"], args, env)
         language = args.language or env.get("BENCHMARK_LANGUAGE", "").strip() or "de"
-        engine = AgentEngine(settings, ModelClient(session), no_execution, trace=record, dry_run=True)
+        engine = AgentEngine(settings, ModelClient(session), trace=record, dry_run=True)
         engine_started = perf_counter()
         try:
             result = await engine.process(args.query, language, exported["snapshot"], speaker_area=args.speaker_area)
@@ -212,10 +213,6 @@ def print_report(report, show_answer_input=False):
         name = target.get("name") or ", ".join(names[:5]) + (f" (+{len(names) - 5} more)" if len(names) > 5 else "")
         identifier = target.get("entity_id") or target.get("area_id")
         summary.append(("target", f"{target['type']}; {name}" + (f" ({identifier})" if identifier else "")))
-    if result.get("execution"):
-        execution = result["execution"]
-        summary.append(("execution", execution["status"]))
-        summary.append(("arguments", json.dumps(execution.get("arguments", {}), ensure_ascii=False)))
     print_table(["Result", "Value"], summary, [14, max(24, columns - 16)])
     print()
     if "parameter_selection" in result:
@@ -240,18 +237,19 @@ def print_report(report, show_answer_input=False):
         if rows:
             print_table(["Parameter", "Probability", "Targets", "Selection"], rows, [40, 12, 9, 18], right_columns=(1, 2))
         print()
+    if result.get("parameters"):
+        print_table(["Parameter", "Value"], list(result["parameters"].items()), [32, max(30, columns - 36)])
+        print()
     stages = [("snapshot", str(report["timings_ms"]["snapshot"]), "Read HA context and settings", "-")]
     for event in report["trace"]:
         output = event.get("output", {})
         if "duration_ms" not in output:
             continue
         decisions = output.get("decisions", {})
-        if decisions and all(info.get("choice") in ("keep", "drop") for info in decisions.values()):
-            kept = sum(info.get("kept", False) for info in decisions.values())
-            detail = f"keep {kept}/{len(decisions)}"
-        else:
-            detail = ", ".join(f"{name}={info.get('effective_choice', info.get('score', info.get('choice')))}"
-                               for name, info in decisions.items()) or output.get("status", "")
+        detail = ", ".join(f"{name}={info.get('effective_choice', info.get('choice'))}"
+                           for name, info in decisions.items()) or output.get("status", "")
+        if event["stage"] == "text" and "value" in output:
+            detail = f"{output['parameter']}={output['value']}"
         if event["stage"] == "optional_parameters" and "selected_parameters" in output:
             detail = "selected: " + (", ".join(output["selected_parameters"]) or "none")
         if event["stage"] in ("action_areas", "action_entities") and "selected_names" in output:

@@ -42,6 +42,11 @@ flowchart TD
     Capabilities --> Required["List applicable required action fields"]
     Required --> HasOptional{"Optional fields available?"}
     HasOptional -->|Yes| Parameters["Decider: optional parameters + none; keep above probability threshold"]
-    HasOptional -->|No| Console["Print targets, required/optional fields and timing"]
-    Parameters --> Console
-    Console --> Stop["Stop: no value extraction or device actions"]
+    HasOptional -->|No| TextField{"Supported required or selected item/message field?"}
+    Parameters --> TextField
+    TextField -->|Yes| Text["Decider: one Choice over word occurrences + none; retain above probability threshold"]
+    Text -->|Empty or invalid| Unsure
+    Text -->|Words retained| TextValue["Join words in original order"]
+    TextValue --> Console["Print targets, parameters, text values and timing"]
+    TextField -->|No| Console
+    Console --> Stop["Stop: no numeric extraction or device actions"]

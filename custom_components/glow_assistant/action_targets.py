@@ -1,7 +1,7 @@
 import json
 
 from .client import ModelError
-from .numeric_values import finite_number
+from .validation import finite_number
 
 AREA_INSTRUCTIONS = (
     "Select the area or areas requested for the selected Home Assistant action. "

@@ -8,7 +8,6 @@ from homeassistant.helpers.selector import (
     EntitySelector,
     NumberSelector,
     ObjectSelector,
-    SelectSelector,
     TextSelector,
 )
 
@@ -42,7 +41,7 @@ def settings_schema(values):
                         "tools": {"label": "Allowed tools (empty = all)", "selector": {"text": {"multiple": True}}},
                     },
                 })
-            elif field == "enable" or field.endswith("_keep_uncertain"):
+            elif field == "enable":
                 selector = BooleanSelector()
             elif field.endswith("_prompt") or field == "prompt":
                 selector = TextSelector({"multiline": True})
@@ -62,24 +61,13 @@ def settings_schema(values):
                 selector = _number(0, 2, 0.1)
             elif field.endswith(("_confidence", "_probability_threshold")):
                 selector = _number(0, 1, 0.01)
-            elif field.endswith("_levels"):
-                selector = _number(2, 10)
-            elif field == "temperature_baseline":
-                selector = SelectSelector({"options": ["target", "measured"], "translation_key": "temperature_baseline"})
-            elif field == "position_step":
-                selector = _number(1, 100)
-            elif field.endswith(("_step", "_default_change")):
-                selector = _number(0.01, 100, 0.01)
-            else:
-                selector = _number(-100 if field.startswith("temperature_") else 0,
-                                   200 if field.startswith("temperature_") else 100, 0.1)
             fields[vol.Optional(field, default=value)] = selector
         fields[vol.Optional("test_connection", default=False)] = BooleanSelector()
         schema[vol.Required(group)] = section(vol.Schema(fields), {"collapsed": False})
     schema[vol.Optional("excluded_entities", default=values["excluded_entities"])] = EntitySelector({"multiple": True})
     schema[vol.Required("history_enabled", default=values["history_enabled"])] = BooleanSelector()
     schema[vol.Required("history_messages", default=values["history_messages"])] = _number(1, 100)
-    for field in ("unsure_reply", "error_reply", "answer_error_reply"):
+    for field in ("unsure_reply", "error_reply"):
         schema[vol.Required(field, default=values[field])] = TextSelector()
     return vol.Schema(schema)
 

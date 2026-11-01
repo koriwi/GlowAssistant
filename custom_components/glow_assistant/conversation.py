@@ -10,7 +10,7 @@ from .chat_log_trace import ChatLogTrace
 from .client import ModelClient, ModelError
 from .debug import failure_details, model_failure
 from .engine import AgentEngine
-from .ha_context import async_execute, async_snapshot, speaker_area
+from .ha_context import async_snapshot, speaker_area
 from .history import conversation_history
 from .settings import normalize_settings
 
@@ -47,14 +47,11 @@ class GlowConversationEntity(conversation.ConversationEntity, conversation.Abstr
         excluded = set(self.settings["excluded_entities"])
         trace = ChatLogTrace(chat_log, user_input.agent_id)
 
-        async def execute(action, arguments):
-            await async_execute(self.hass, excluded, user_input.context, action, arguments)
-
         try:
             snapshot = await async_snapshot(self.hass, excluded)
             client = ModelClient(async_get_clientsession(self.hass))
             history = conversation_history(chat_log.content, self.settings["history_messages"]) if self.settings["history_enabled"] else []
-            result = await AgentEngine(self.settings, client, execute, trace=trace, history=history).process(
+            result = await AgentEngine(self.settings, client, trace=trace, history=history).process(
                 user_input.text, user_input.language, snapshot,
                 speaker_area=speaker_area(self.hass, getattr(user_input, "device_id", None)),
             )
@@ -62,7 +59,8 @@ class GlowConversationEntity(conversation.ConversationEntity, conversation.Abstr
             if "action_metadata" in result:
                 _LOGGER.debug("Selected action metadata: %s", json.dumps(result["action_metadata"], ensure_ascii=False, default=str))
                 _LOGGER.info("Target scope: %s; speaker area: %s", result.get("target_scope"), result.get("speaker_area"))
-                _LOGGER.debug("Parameter detection: %s", result.get("parameter_selection"))
+                _LOGGER.debug("Parameter detection: %s; extracted values: %s",
+                              result.get("parameter_selection"), result.get("parameters"))
             if result.get("answer_error"):
                 _LOGGER.warning("Smart-home answer generation failed: %s", result["answer_error"])
             _LOGGER.debug("route=%s service=%s timings_ms=%s usage=%s",

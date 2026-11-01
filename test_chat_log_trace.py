@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 from uuid import uuid4
 
 from custom_components.glow_assistant.client import ModelError
-from custom_components.glow_assistant.debug import failure_details, model_failure
+from custom_components.glow_assistant.debug import model_failure
 from custom_components.glow_assistant.history import conversation_history
 
 
@@ -82,7 +82,7 @@ class ChatLogTraceTests(unittest.TestCase):
         self.assertEqual(len(set(ids)), 2)
 
     def test_text_stage_uses_a_native_tool_card_with_word_details(self):
-        result = {"duration_ms": 40, "decisions": {"word_1": {"choice": "keep", "confidence": 0.9, "kept": True}}}
+        result = {"duration_ms": 40, "decisions": {"text_words": {"probabilities": {"word:1:Energy": 0.4, "none": 0.6}, "probability_threshold": 0.02}}}
         self.trace("text", {"words": ["Add", "Energy", "Drinks"]})
         self.trace("text", {}, result)
         self.assertEqual(self.messages[0].tool_calls[0].tool_name, "glow_assistant_extract_text")
@@ -168,21 +168,6 @@ class ChatLogTraceTests(unittest.TestCase):
         self.assertEqual(result.tool_result["input_chars"], 123456)
         self.assertEqual(result.tool_result["max_input_chars"], 100000)
         self.assertEqual(result.tool_result["model"], "small-answer-model")
-
-    def test_unexpected_failure_closes_pending_calls_and_retains_command_uncertainty(self):
-        self.trace("execution", {"service": "light.turn_off"})
-        self.trace.failure(failure_details("execution", "An unexpected error occurred.", "Check the logs."))
-        self.assertEqual(self.messages[1].tool_result["status"], "error")
-        self.assertIn("outcome is unconfirmed", self.messages[2].content)
-        self.assertFalse(self.trace.calls)
-
-    def test_answer_failure_after_execution_shows_that_the_command_was_already_sent(self):
-        self.trace("execution", {"service": "light.turn_off"})
-        self.trace("execution", {}, {"status": "completed"})
-        self.trace.failure(model_failure("answer", "Model returned no spoken answer."))
-        self.assertIn("Home Assistant accepted the device command", self.messages[2].content)
-        self.assertIn("Check the device before repeating", self.messages[2].content)
-        self.assertEqual(self.messages[3].tool_result["device_command"], "completed")
 
 
 if __name__ == "__main__":

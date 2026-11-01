@@ -13,24 +13,20 @@ from .const import (
 from .debug import STAGE_LABELS, decision_details, failure_details, model_failure
 from .general import general_answer
 from .history import with_history
-from .numeric_values import finite_number
 from .optional_parameters import (
     action_fields,
     decode_parameters,
     filter_fields,
     parameter_request,
 )
-from .text_values import TEXT_ACTIONS
+from .text_values import TEXT_ACTIONS, decode_text, text_request
+from .validation import finite_number
 
 
 class Uncertain(Exception):
     def __init__(self, stage, reason, suggestion, **details):
         super().__init__(reason)
         self.details = failure_details(stage, reason, suggestion, status="stopped", **details)
-
-
-class ActionError(Exception):
-    pass
 
 
 def choice_question(options, instructions):
@@ -108,10 +104,9 @@ def target_options(entities):
 
 
 class AgentEngine:
-    def __init__(self, settings, client, execute, trace=None, history=None, dry_run=False):
+    def __init__(self, settings, client, trace=None, history=None, dry_run=False):
         self.settings = settings
         self.client = client
-        self.execute = execute
         self.trace = trace
         self.history = list(history or []) if settings["history_enabled"] else []
         self.stage = "service"
@@ -124,9 +119,7 @@ class AgentEngine:
             self.trace(stage, arguments, result)
 
     def _failure(self, result, details):
-        execution = result.get("execution", {}).get("status")
-        details = {**details, "device_command":
-                   "completed" if execution == "completed" else "unconfirmed" if execution == "error" else "not_sent"}
+        details = {**details, "device_command": "not_sent"}
         result.setdefault("failures", []).append(details)
         self._trace("failure", details)
         self._trace("failure", {}, details)
@@ -136,11 +129,10 @@ class AgentEngine:
         state = {**state, "language": result["language"]}
         if self.history:
             state = {**state, "history": self.history}
-            if "task" not in state:
-                questions = {name: {**question, "instructions": f"{question['instructions']} {HISTORY_INSTRUCTIONS}"}
-                             for name, question in questions.items()}
+            questions = {name: {**question, "instructions": f"{question['instructions']} {HISTORY_INSTRUCTIONS}"}
+                         for name, question in questions.items()}
         self._trace(stage, {
-            "model": config["model"], **{key: value for key, value in state.items() if key != "task"},
+            "model": config["model"], **state,
             "candidate_counts": {name: len(question["criteria"]) for name, question in questions.items()},
         })
         started = perf_counter()
@@ -151,8 +143,7 @@ class AgentEngine:
             result["decisions"][stage] = response.get("answers", {})
             details.update(
                 status="completed",
-                decisions=decision_details(questions, result["decisions"][stage], config,
-                                           query=result["service"] == QUERY, targets=state.get("targets")),
+                decisions=decision_details(questions, result["decisions"][stage], config),
                 usage=result["usage"][stage],
             )
             if summarize:
@@ -259,6 +250,7 @@ class AgentEngine:
             result["target_scope"] = self._choice(response, "target_scope", scopes)
             members = await self._select_action_targets(result, entities)
             await self._select_parameters(result, members)
+            await self._extract_text(result)
             return
 
         result["service"] = QUERY
@@ -407,6 +399,31 @@ class AgentEngine:
 
         await self._decide(result, "optional_parameters", payload["state"], payload["questions"], summarize=summarize)
 
+    async def _extract_text(self, result):
+        service = result["service"]
+        if service not in TEXT_ACTIONS:
+            return
+        parameter = TEXT_ACTIONS[service][0]
+        selected = result["required_parameters"] + result["parameter_selection"]["selected_parameters"]
+        if parameter not in selected:
+            return
+        config = self.settings["decider"]
+        prompt = config["text_prompt" if parameter == "item" else "message_prompt"]
+        words, payload = text_request(result["request"], service, prompt)
+        payload["state"]["target"] = result["target"]
+
+        def summarize(response):
+            selection = decode_text(response, words, config["text_probability_threshold"])
+            result["text_extraction"] = {**selection, "parameter": parameter}
+            return result["text_extraction"]
+
+        await self._decide(result, "text", payload["state"], payload["questions"], summarize=summarize)
+        value = result["text_extraction"]["value"]
+        if not value:
+            raise Uncertain("text", "No words were retained for the requested text parameter.",
+                            "Specify the item or message. Review the word probabilities and text probability threshold.")
+        result["parameters"] = {parameter: value}
+
     async def _answer_yes_no(self, result, entities, area, language_instruction):
         candidates = [
             {**target, "state": entity["state"], "attributes":
@@ -432,8 +449,7 @@ class AgentEngine:
         try:
             await self._chat(result, "answer", messages)
         except ModelError as error:
-            completed = result.get("execution", {}).get("status") == "completed"
-            result["answer"] = self.settings["answer_error_reply" if completed else "error_reply"]
+            result["answer"] = self.settings["error_reply"]
             result["answer_error"] = str(error)
             self._failure(result, model_failure("answer", error))
 

@@ -1,9 +1,6 @@
 from homeassistant.components.homeassistant import async_should_expose
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import area_registry, device_registry, entity_registry
 from homeassistant.helpers.service import async_get_all_descriptions
-
-from .engine import ActionError
 
 
 def speaker_area(hass, device_id):
@@ -56,15 +53,3 @@ async def async_snapshot(hass, excluded):
         if description.get("target") is not None and hass.services.has_service(domain, name)
     }
     return {"entities": entities, "services": services}
-
-
-async def async_execute(hass, excluded, context, action, arguments):
-    domain, service = action.split(".", 1)
-    allowed = {entity["entity_id"] for entity in entity_context(hass, excluded) if entity["domain"] == domain}
-    if not arguments["entity_id"] or not set(arguments["entity_id"]) <= allowed:
-        raise ActionError("Selected entities are no longer exposed or available.")
-    # Explicit IDs keep area calls inside the exposed, non-excluded scope
-    try:
-        await hass.services.async_call(domain, service, arguments, blocking=True, context=context)
-    except (HomeAssistantError, TimeoutError) as error:
-        raise ActionError("Action failed; outcome unconfirmed.") from error

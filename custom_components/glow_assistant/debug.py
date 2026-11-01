@@ -1,8 +1,7 @@
 import json
 import re
 
-from .keep_drop import should_keep
-from .numeric_values import finite_number
+from .validation import finite_number
 
 STAGE_LABELS = {
     "context": "Read Home Assistant devices",
@@ -16,12 +15,8 @@ STAGE_LABELS = {
     "target_scope": "Classify entity targets and explicit or implied areas",
     "action_areas": "Select action areas",
     "action_entities": "Select action entities",
-    "domain_filter": "Filter whole-home entity domains",
     "target": "Choose a device or room",
-    "numeric": "Choose a new value",
-    "numeric_mode": "Choose a new value",
     "text": "Extract item or message text",
-    "execution": "Send the device command",
     "answer": "Generate the smart-home answer",
     "general": "Generate the general answer",
     "mcp_connect": "Connect to MCP servers",
@@ -37,12 +32,7 @@ def failure_details(stage, reason, suggestion, status="error", **details):
 
 
 def failure_text(details):
-    text = f"{details['step']}: {details['reason']} Try: {details['suggestion']}"
-    if details.get("device_command") == "completed":
-        text += " Home Assistant accepted the device command; only the spoken answer failed. Check the device before repeating the command."
-    elif details.get("device_command") == "unconfirmed":
-        text += " The device outcome is unconfirmed. Check its state before repeating the command."
-    return text
+    return f"{details['step']}: {details['reason']} Try: {details['suggestion']}"
 
 
 def model_failure(stage, error):
@@ -80,15 +70,12 @@ def model_failure(stage, error):
     elif message == "Model endpoint returned invalid JSON.":
         reason = "The model server returned an unreadable response."
         suggestion = f"Check the endpoint URL and API compatibility under {section}."
-    elif "classifier" in message or message == "Malformed numeric response.":
+    elif "classifier" in message:
         reason = "The decider returned an invalid decision."
         suggestion = "Check that Decider uses a native decision endpoint, such as /v1/systemone on llama.cpp."
     elif message.startswith("Malformed text extraction response"):
         reason = "The decider returned invalid or incomplete word selections."
         suggestion = "Check the Decider endpoint and text extraction prompt. Review the preceding word decisions."
-    elif message.startswith("Malformed domain filter response"):
-        reason = "The decider returned invalid or incomplete domain selections."
-        suggestion = "Check the Decider endpoint and whole-home domain filter prompt. Review the preceding domain decisions."
     elif message.startswith("Malformed target selection response"):
         reason = "The decider returned invalid or incomplete target selections."
         suggestion = "Check the Decider endpoint, target selection prompt and thresholds. Review the preceding target decisions."
@@ -114,7 +101,7 @@ def model_failure(stage, error):
     return failure_details(stage, reason, suggestion, settings_section=section, **details)
 
 
-def decision_details(questions, answers, config, query=False, targets=None):
+def decision_details(questions, answers, config):
     details = {}
     for name, question in questions.items():
         answer = answers.get(name, {}) if isinstance(answers, dict) else {}
@@ -122,75 +109,44 @@ def decision_details(questions, answers, config, query=False, targets=None):
             answer = {}
         confidence = answer.get("confidence")
         confidence = confidence if finite_number(confidence) else None
-        if name == "optional_parameters":
+        probability_fields = {
+            "optional_parameters": "parameter_probability_threshold",
+            "action_areas": "action_area_probability_threshold",
+            "action_entities": "action_entity_probability_threshold",
+            "query_targets": "query_target_probability_threshold",
+            "text_words": "text_probability_threshold",
+        }
+        if name in probability_fields:
             details[name] = {
                 "type": question["type"], "choice": answer.get("choice"), "confidence": confidence,
                 "probabilities": answer.get("probabilities", {}),
-                "probability_threshold": config["parameter_probability_threshold"],
+                "probability_threshold": config[probability_fields[name]],
                 "selection_basis": "per_option_probability; overall confidence is not a filter",
             }
             continue
-        if name in ("action_areas", "action_entities", "query_targets"):
-            details[name] = {"type": question["type"], "choice": answer.get("choice"), "confidence": confidence,
-                             "probabilities": answer.get("probabilities", {}),
-                             "selection_basis": "per_option_probability; overall confidence is not a filter"}
-            if name == "query_targets":
-                details[name]["probability_threshold"] = config["query_target_probability_threshold"]
-            continue
-        text_word = name.startswith("word_")
-        domain_filter = name.startswith("domain_")
-        target_filter = name.startswith("target_") and name.removeprefix("target_").isdigit()
-        if text_word:
-            confidence_stage = "text"
-            uncertain_setting = "text_keep_uncertain"
-        elif domain_filter:
-            confidence_stage = "domain_filter"
-            uncertain_setting = "domain_filter_keep_uncertain"
-        elif target_filter:
-            confidence_stage = "target_filter"
-            uncertain_setting = "query_target_keep_uncertain" if query else "action_target_keep_uncertain"
-        elif name in ("service", "area", "domain", "query_type", "binary_answer", "target_scope", "target"):
-            confidence_stage = name
-            uncertain_setting = None
-        else:
-            confidence_stage = "numeric"
-            uncertain_setting = None
-        threshold = config[f"{confidence_stage}_confidence"]
+        threshold = config[f"{name}_confidence"]
         info = {"type": question["type"], "confidence": confidence, "minimum_confidence": threshold}
-        if question["type"] == "choice":
-            choice = answer.get("choice")
-            choice = choice if isinstance(choice, str) else None
-            probabilities = answer.get("probabilities")
-            probabilities = probabilities if isinstance(probabilities, dict) else {}
-            probability = probabilities.get(choice)
-            info.update(
-                choice=choice, probability=probability if finite_number(probability) else None,
-                effective_choice=choice if confidence is not None and confidence >= threshold else "unsure",
-            )
-            if uncertain_setting:
-                if target_filter and targets is not None:
-                    target = targets[int(name.removeprefix("target_"))]
-                    info.update(entity_id=target["entity_id"], name=target["name"])
-                keep_uncertain = config[uncertain_setting]
-                info["keep_uncertain"] = keep_uncertain
-                info["uncertain"] = confidence is not None and confidence <= threshold
-                info["kept"] = confidence is not None and should_keep(choice, confidence, threshold, keep_uncertain)
-                info["effective_choice"] = "keep" if info["kept"] else "drop"
-            criteria = question["criteria"]
-            if choice in criteria:
-                selected = criteria[choice]
-                try:
-                    selected = json.loads(selected)
-                except (ValueError, TypeError):
-                    pass
-                info["selected"] = selected
-            alternatives = sorted(
-                ((label, value) for label, value in probabilities.items() if label != choice and finite_number(value)),
-                key=lambda item: item[1], reverse=True,
-            )[:3]
-            info["alternatives"] = [{"choice": label, "probability": value} for label, value in alternatives]
-        else:
-            score = answer.get("score")
-            info["score"] = score if finite_number(score) else None
+        choice = answer.get("choice")
+        choice = choice if isinstance(choice, str) else None
+        probabilities = answer.get("probabilities")
+        probabilities = probabilities if isinstance(probabilities, dict) else {}
+        probability = probabilities.get(choice)
+        info.update(
+            choice=choice, probability=probability if finite_number(probability) else None,
+            effective_choice=choice if confidence is not None and confidence >= threshold else "unsure",
+        )
+        criteria = question["criteria"]
+        if choice in criteria:
+            selected = criteria[choice]
+            try:
+                selected = json.loads(selected)
+            except (ValueError, TypeError):
+                pass
+            info["selected"] = selected
+        alternatives = sorted(
+            ((label, value) for label, value in probabilities.items() if label != choice and finite_number(value)),
+            key=lambda item: item[1], reverse=True,
+        )[:3]
+        info["alternatives"] = [{"choice": label, "probability": value} for label, value in alternatives]
         details[name] = info
     return details

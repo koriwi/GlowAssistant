@@ -23,9 +23,9 @@ def settings():
 
 class BenchmarkSettingsTests(unittest.TestCase):
     def test_environment_connections_and_specific_thresholds_override_exported_settings(self):
-        args = benchmark.parser().parse_args(["--query", "test", "--confidence", "0.3", "--target-filter-confidence", "0.7"])
+        args = benchmark.parser().parse_args(["--query", "test", "--confidence", "0.3", "--area-confidence", "0.7"])
         exported = settings()
-        exported["decider"]["target_filter_prompt"] = "Custom rules from HA"
+        exported["decider"]["query_target_prompt"] = "Custom rules from HA"
         result = benchmark.model_settings(exported, args, {
             "DECIDER_URL": "http://localhost:8321/v1/systemone", "DECIDER_MODEL": "local-model",
             "DECIDER_API_KEY": "local-key", "ANSWER_API_KEY": "answer-key",
@@ -34,10 +34,10 @@ class BenchmarkSettingsTests(unittest.TestCase):
         self.assertEqual(result["decider"]["model"], "local-model")
         self.assertEqual(result["decider"]["api_key"], "local-key")
         self.assertEqual(result["answer"]["api_key"], "answer-key")
-        self.assertEqual(result["decider"]["target_filter_prompt"], "Custom rules from HA")
+        self.assertEqual(result["decider"]["query_target_prompt"], "Custom rules from HA")
         for field in benchmark.CONFIDENCE_FIELDS:
-            self.assertEqual(result["decider"][field], 0.7 if field == "target_filter_confidence" else 0.3)
-        self.assertEqual(exported["decider"]["target_filter_confidence"], 0.5)
+            self.assertEqual(result["decider"][field], 0.7 if field == "area_confidence" else 0.3)
+        self.assertEqual(exported["decider"]["area_confidence"], 0)
 
     def test_legacy_openrouter_key_is_only_used_for_openrouter_decider(self):
         args = benchmark.parser().parse_args(["--query", "test"])
@@ -81,6 +81,15 @@ class BenchmarkSettingsTests(unittest.TestCase):
         self.assertEqual(configured["action_area_probability_threshold"], 0.1)
         self.assertEqual(configured["action_entity_probability_threshold"], 0.2)
 
+    def test_text_threshold_is_independent_of_global_confidence_and_old_values(self):
+        args = benchmark.parser().parse_args(["-q", "Add milk", "--confidence", "0.9", "--text-threshold", "0.04"])
+        exported = settings()
+        exported["decider"].update(text_confidence=1, text_keep_uncertain=True)
+        decider = benchmark.model_settings(exported, args, {})["decider"]
+        self.assertEqual(decider["text_probability_threshold"], 0.04)
+        self.assertEqual(decider["service_confidence"], 0.9)
+        self.assertNotIn("text_confidence", decider)
+
     def test_query_target_probability_threshold_is_separate_from_confidence_and_parameter_threshold(self):
         args = benchmark.parser().parse_args(["-q", "test", "--confidence", "0.9", "--query-target-threshold", "0.04"])
         configured = benchmark.model_settings(settings(), args, {})["decider"]
@@ -104,15 +113,15 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
               patch("benchmark.aiohttp.ClientSession", return_value=session),
               patch("benchmark.ModelClient", return_value=local)):
             report = await benchmark.run(args, {})
-        execute = AsyncMock()
-        await AgentEngine(settings(), addon, execute).process(args.query, "en", SNAPSHOT)
+
+        await AgentEngine(settings(), addon).process(args.query, "en", SNAPSHOT)
         self.assertEqual(local.requests, addon.requests)
         self.assertEqual(set(local.requests[-1][2]), {"query_targets"})
         self.assertEqual(report["mode"], "plan_only")
         self.assertEqual(report["result"]["state_info"][0]["entity_id"], "light.desk")
         self.assertEqual({event["stage"] for event in report["trace"]}, {"service", "area", "domain", "query_type", "target", "answer"})
         self.assertIn("engine", report["timings_ms"])
-        execute.assert_not_awaited()
+
 
     async def test_yes_no_benchmark_matches_addon_and_exposes_only_translation_input(self):
         choices = [{"service": "query_state"}, {"area": "area:office"}, {"domain": "light"},
@@ -123,15 +132,54 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
               patch("benchmark.aiohttp.ClientSession", return_value=AsyncMock()),
               patch("benchmark.ModelClient", return_value=local)):
             report = await benchmark.run(args, {})
-        execute = AsyncMock()
-        await AgentEngine(settings(), addon, execute).process(args.query, "en", SNAPSHOT)
+
+        await AgentEngine(settings(), addon).process(args.query, "en", SNAPSHOT)
         self.assertEqual(local.requests, addon.requests)
         self.assertEqual(local.chat_requests, addon.chat_requests)
         self.assertEqual(report["result"]["state_answer"], "yes")
         self.assertEqual({event["stage"] for event in report["trace"]},
                          {"service", "area", "domain", "query_type", "binary_answer", "answer"})
         self.assertEqual(benchmark.answer_input(report, readable=True)["messages"][1]["content"], {"state_answer": "yes"})
-        execute.assert_not_awaited()
+
+
+    async def test_text_benchmark_matches_ha_engine_and_prints_extracted_key_value(self):
+        from custom_components.glow_assistant.text_values import (
+            INSTRUCTIONS,
+            text_request,
+        )
+        from test_integration_engine import entity
+        from test_text_values import response_for
+
+        query = "Schreibe Energy Drinks auf die Einkaufsliste"
+        args = benchmark.parser().parse_args(["-q", query, "--text-threshold", "0.05"])
+        exported = self.exported()
+        exported["snapshot"] = {
+            "entities": [entity("todo.shopping", "Einkaufsliste", area=None)],
+            "services": {"todo.add_item": {"fields": {"item": {"required": True}}}},
+        }
+        words, _ = text_request(query, "todo.add_item", INSTRUCTIONS)
+        probabilities = {key: 0.45 if word["word"] in ("Energy", "Drinks") else 0 for key, word in words.items()}
+        probabilities["none"] = 0.1
+        choices = [{"service": "todo.add_item"}, {"target_scope": "entities"}, {"action_entities": "entity:todo.shopping"},
+                   {"text_words": response_for(probabilities)["answers"]["text_words"]}]
+        local, addon = ScriptedModels(choices), ScriptedModels(choices)
+        with (patch("benchmark.fetch_snapshot", new=AsyncMock(return_value=exported)),
+              patch("benchmark.aiohttp.ClientSession", return_value=AsyncMock()),
+              patch("benchmark.ModelClient", return_value=local)):
+            report = await benchmark.run(args, {})
+        configured = benchmark.model_settings(exported["settings"], args, {})
+        await AgentEngine(configured, addon).process(query, "de", exported["snapshot"])
+        self.assertEqual(local.requests, addon.requests)
+        self.assertEqual(report["result"]["parameters"], {"item": "Energy Drinks"})
+        self.assertEqual(report["result"]["text_extraction"]["probability_threshold"], 0.05)
+        self.assertFalse(local.chat_requests)
+        self.assertNotIn("execution", report["result"])
+        output = io.StringIO()
+        with redirect_stdout(output):
+            benchmark.print_report(report)
+        self.assertRegex(output.getvalue(), r"Parameter\s+Value")
+        self.assertRegex(output.getvalue(), r"item\s+Energy Drinks")
+        self.assertRegex(output.getvalue(), r"text\s+\d+\s+item=Energy Drinks")
 
     async def test_action_benchmark_prints_field_metadata_and_stops_after_selection(self):
         args = benchmark.parser().parse_args(["--query", "Set the office lights to 50 percent"])

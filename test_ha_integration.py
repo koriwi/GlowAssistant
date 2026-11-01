@@ -19,12 +19,6 @@ class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(view.requires_auth)
         self.assertEqual(view.url, "/api/glow_assistant/snapshot")
 
-    async def test_cover_position_feature_matches_ha(self):
-        from homeassistant.components.cover import CoverEntityFeature
-
-        from custom_components.glow_assistant.const import COVER_SET_POSITION
-
-        self.assertEqual(COVER_SET_POSITION, CoverEntityFeature.SET_POSITION)
 
     def settings(self):
         return normalize_settings({
@@ -45,13 +39,10 @@ class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(api_key_selector.config["type"], "password")
             if key.schema == "decider":
                 prompt = next(selector for field, selector in block.schema.schema.items() if field.schema == "text_prompt")
-                confidence = next(selector for field, selector in block.schema.schema.items() if field.schema == "text_confidence")
+                confidence = next(selector for field, selector in block.schema.schema.items() if field.schema == "text_probability_threshold")
                 self.assertTrue(prompt.config["multiline"])
                 self.assertEqual(confidence.config["min"], 0)
                 self.assertEqual(confidence.config["max"], 1)
-                for name in ("query_target_keep_uncertain", "action_target_keep_uncertain", "text_keep_uncertain"):
-                    switch = next(selector for field, selector in block.schema.schema.items() if field.schema == name)
-                    self.assertEqual(switch.selector_type, "boolean")
         validated = form["data_schema"](self.settings())
         self.assertEqual(set(validated) & {"decider", "answer", "general"}, {"decider", "answer", "general"})
         result = await flow.async_step_user(validated)
@@ -76,7 +67,7 @@ class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
         from custom_components.glow_assistant.config_flow import GlowOptionsFlow
 
         data = self.settings()
-        data["decider"]["target_prompt"] = "My custom target instructions"
+        data["decider"]["query_target_prompt"] = "My custom target instructions"
         entry = SimpleNamespace(data=data)
         flow = GlowOptionsFlow()
         flow.hass = Mock()
@@ -87,7 +78,7 @@ class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
             result = await flow.async_step_init(updated)
         self.assertEqual(result["type"], "create_entry")
         saved = flow.hass.config_entries.async_update_entry.call_args.kwargs["data"]
-        self.assertEqual(saved["decider"]["target_prompt"], "My custom target instructions")
+        self.assertEqual(saved["decider"]["query_target_prompt"], "My custom target instructions")
         self.assertEqual(saved["answer"]["model"], "small-model")
 
     async def test_reconfigure_updates_same_entry(self):
@@ -122,19 +113,6 @@ class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(entities[0]["aliases"], ["Alias"])
         self.assertEqual(entities[0]["area_aliases"], ["Study"])
 
-    async def test_direct_calls_preserve_context_and_recheck_exposure(self):
-        from custom_components.glow_assistant import ha_context
-        from custom_components.glow_assistant.engine import ActionError
-
-        hass = SimpleNamespace(services=SimpleNamespace(async_call=AsyncMock()))
-        context = object()
-        with patch.object(ha_context, "entity_context", return_value=[{"entity_id": "light.allowed", "domain": "light"}]):
-            await ha_context.async_execute(hass, set(), context, "light.turn_off", {"entity_id": ["light.allowed"]})
-            with self.assertRaises(ActionError):
-                await ha_context.async_execute(hass, set(), context, "light.turn_off", {"entity_id": ["light.hidden"]})
-        hass.services.async_call.assert_awaited_once_with(
-            "light", "turn_off", {"entity_id": ["light.allowed"]}, blocking=True, context=context,
-        )
 
     async def test_native_target_selector_accepts_multiple_entity_ids(self):
         from homeassistant.helpers.selector import TargetSelector

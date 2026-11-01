@@ -24,10 +24,10 @@ Set model keys with `DECIDER_API_KEY`, `ANSWER_API_KEY` and `GENERAL_API_KEY`. N
 ```bash
 python benchmark.py --query "Ist die Lampe im Büro an?" --language de
 python benchmark.py --query "Mach das Licht im Büro an" --confidence 0.25
-python benchmark.py --query "Sind im Haus Fenster offen?" --domain-confidence 0.4 --target-filter-confidence 0.5 --json
+python benchmark.py --query "Sind im Haus Fenster offen?" --domain-confidence 0.4 --query-target-threshold 0.02 --json
 ```
 
-`--confidence` overrides all decider thresholds. Individual flags override that value: `--service-confidence`, `--area-confidence`, `--target-scope-confidence`, `--domain-confidence`, `--query-type-confidence`, `--binary-answer-confidence`, `--target-confidence`, `--target-filter-confidence`, `--numeric-confidence` and `--text-confidence`.
+`--confidence` overrides the single-choice confidence thresholds; probability cutoffs are separate. Individual flags override that value: `--service-confidence`, `--area-confidence`, `--target-scope-confidence`, `--domain-confidence`, `--query-type-confidence`, `--binary-answer-confidence`.
 
 Match `--language` to the Assist pipeline. It defaults to `BENCHMARK_LANGUAGE` or `de`. Each run starts with no conversation history.
 
@@ -70,7 +70,7 @@ The `parameter_capabilities` debug card/JSON record shows the actual target enti
 
 Parameter detection then runs against the remaining action fields. Required fields are listed automatically. Optional fields use one Choice question plus `none`; every real field strictly above `parameter_probability_threshold` (default 0.3) is kept. Overall confidence is not a filter, and `none` never overrides retained real fields. `--parameter-threshold` overrides this cutoff independently of `--confidence`. No optional fields means no extra model call. The request includes the resolved target, without the entity catalog or current numeric values.
 
-Console output shows required/selected field names and probabilities for retained options plus `none`. `--json` retains the full distribution, including dropped fields. No values are extracted and no device or answer-model call runs.
+Console output shows required/selected field names and probabilities for retained options plus `none`. `--json` retains the full distribution, including dropped fields. Supported item/message fields are extracted next. Numeric values are not extracted. No device or answer-model call runs on action requests.
 
 Supply speaker context explicitly when benchmarking:
 
@@ -82,7 +82,7 @@ python benchmark.py -q "Schalte die Schreibtischlampe aus"
 
 Without `--speaker-area`, the speaker location is unknown and neither `entities_implied_area` nor `implied_area` is offered. HA obtains the room from the requesting device's area assignment when available. Text chat and unassigned devices provide no default room. The editable prompt and confidence threshold are under Decider; `--target-scope-confidence` overrides that threshold locally. The saved stock scope prompt upgrades automatically; custom prompts are preserved.
 
-The default output is compact: selected action, speaker room, target type, area filter, candidate counts, chosen targets, detected parameter names, confidence and timings. `--json` retains full action field metadata and stage inputs/results. Existing supported action choices remain in use. General requests with enabled MCP servers stop before connecting or calling tools in plan-only mode.
+The default output is compact: selected action, speaker room, target type, area filter, candidate counts, chosen targets, detected parameter names, extracted text values, confidence and timings. `--json` retains full action field metadata and stage inputs/results. Existing supported action choices remain in use. General requests with enabled MCP servers stop before connecting or calling tools in plan-only mode.
 
 ## State-query target experiment
 
@@ -94,4 +94,16 @@ The default cutoff is **0.02**. Set it under Decider or override it locally:
 python benchmark.py -q "wie warm ist es?" --query-target-threshold 0.02 --show-answer-input
 ```
 
-The `target` timing row shows `selected N/M (one Choice)`. `--json` includes every option probability, the active threshold and selected entity IDs; `state_info` contains the selected states for quality comparisons. The old `--target-filter-confidence`, target keep/drop prompt and query-target uncertainty switch do not affect this experiment. Use the new state-query Choice prompt and probability threshold. Yes/no queries still bypass entity selection. Area/domain selection and answer generation are unchanged, including the current all_areas fallback for an unspecified room.
+The `target` timing row shows `selected N/M (one Choice)`. `--json` includes every option probability, the active threshold and selected entity IDs; `state_info` contains the selected states for quality comparisons. The old keep/drop helpers, settings and flags have been removed. Use the new state-query Choice prompt and probability threshold. Yes/no queries still bypass entity selection. Area/domain selection and answer generation are unchanged, including the current all_areas fallback for an unspecified room.
+
+## Item and message extraction
+
+After target resolution and parameter detection, extract text only for `todo.add_item.item`, `notify.send_message.message` and `assist_satellite.announce.message`. Required fields are extracted automatically; optional fields must first be selected.
+
+One Choice question contains every word occurrence in the latest request plus `none`. Keep words strictly above `text_probability_threshold` (default **0.02**) and join them in their original order. Repeated words remain separate choices. The selected target, pipeline language and enabled history are supplied; text is copied only from the latest request. Overall confidence is not a filter, and `none` does not override retained words. Empty or malformed selections stop.
+
+```bash
+python benchmark.py -q "Schreibe Energy Drinks auf die Einkaufsliste" --text-threshold 0.02
+```
+
+The console prints a `Parameter / Value` table and a `text` timing row. Native debug and `--json` include word probabilities, cutoff, selected occurrences and extracted value. Edit item/message prompts and the cutoff under Decider. Stock keep/drop prompts upgrade automatically; custom prompts remain. Old text-confidence values are not converted into probabilities. Choice probabilities share one distribution, so longer payloads can require a lower cutoff.

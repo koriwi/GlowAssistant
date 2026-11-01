@@ -1,7 +1,7 @@
 import json
 
 from .client import ModelError
-from .numeric_values import finite_number
+from .validation import finite_number
 
 INSTRUCTIONS = (
     "Which optional parameters of the selected Home Assistant action are relevant to the user's request? "

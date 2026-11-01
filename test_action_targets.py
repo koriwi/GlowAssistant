@@ -1,6 +1,5 @@
 import copy
 import unittest
-from unittest.mock import AsyncMock
 
 from custom_components.glow_assistant.action_targets import decode_selection
 from custom_components.glow_assistant.client import ModelError
@@ -80,13 +79,13 @@ class ProbabilitySelectionTests(unittest.TestCase):
 class ActionRoutingTests(unittest.IsolatedAsyncioTestCase):
     async def run_route(self, scope, later=(), speaker_area=None, service="light.turn_off", data=None, settings=None, history=None, selected_parameters=(), prompt="test request"):
         client = ScriptedModels([{"service": service}, {"target_scope": scope}, *later])
-        execute = AsyncMock()
+
         events = []
-        result = await AgentEngine(settings or normalize_settings({}), client, execute,
+        result = await AgentEngine(settings or normalize_settings({}), client,
                                    trace=lambda *event: events.append(event), history=history).process(
             prompt, "de", data or snapshot(), speaker_area=speaker_area,
         )
-        execute.assert_not_awaited()
+
         self.assertFalse(client.chat_requests)
         self.assertNotIn("execution", result)
         if result["route"] == "unsure":
@@ -121,7 +120,7 @@ class ActionRoutingTests(unittest.IsolatedAsyncioTestCase):
         ], settings=normalize_settings({"decider": {"action_area_probability_threshold": 0.99}}))
         self.assertEqual([area["area_id"] for area in result["selected_areas"]], ["office"])
         self.assertEqual(result["target"]["entity_ids"], ["light.desk", "light.ceiling"])
-        self.assertEqual(set(client.requests[-1][2]["action_entities"]["criteria"]),
+        self.assertEqual(set(next(request for request in client.requests if "action_entities" in request[2])[2]["action_entities"]["criteria"]),
                          {"entity:light.desk", "entity:light.ceiling", "none"})
         self.assertEqual(result["action_areas"]["selection_mode"], "highest_probability")
         output = next(output for stage, _, output in events if stage == "action_entities" and output)
@@ -140,12 +139,12 @@ class ActionRoutingTests(unittest.IsolatedAsyncioTestCase):
     async def test_arealess_targets_filter_only_by_domain_including_assigned_and_unassigned_entities(self):
         result, client, _ = await self.run_route("entities", [{"action_entities": answer({
             "entity:todo.shopping": 0.6, "entity:todo.work": 0.1, "entity:todo.unassigned": 0.2, "none": 0.1,
-        })}], speaker_area="Office", service="todo.add_item")
+        })}, {"text_words": answer({"word:0:test": 0, "word:1:request": 0.9, "none": 0.1})}], speaker_area="Office", service="todo.add_item")
         self.assertEqual(result["target"]["entity_ids"], ["todo.shopping", "todo.unassigned"])
         self.assertEqual(result["selected_areas"], [])
         self.assertEqual(result["action_target_filter"]["entities_after_domain"], 3)
         self.assertEqual(result["action_target_filter"]["entities_after_area"], 3)
-        self.assertEqual(set(client.requests[-1][2]["action_entities"]["criteria"]),
+        self.assertEqual(set(next(request for request in client.requests if "action_entities" in request[2])[2]["action_entities"]["criteria"]),
                          {"entity:todo.shopping", "entity:todo.work", "entity:todo.unassigned", "none"})
         self.assertNotIn("action_areas", result["decisions"])
         self.assertEqual(result["required_parameters"], ["item"])
