@@ -31,7 +31,7 @@ python benchmark.py --query "Sind im Haus Fenster offen?" --domain-confidence 0.
 
 Match `--language` to the Assist pipeline. It defaults to `BENCHMARK_LANGUAGE` or `de`. Each run starts with no conversation history.
 
-State queries follow service → area → single-domain selection → answer-type selection. Yes/no queries ask the decider for yes/no/unsure from all candidate states, without entity keep/drop. The answer model only translates yes/no into the Assist language. Other queries use entity keep/drop → answer model. Unsure decisions stop with the configured unsure reply. Domain selection runs for rooms and `all_areas`; actions get their domain from the service. `--domain-filter-confidence` remains an alias for `--domain-confidence`.
+State queries follow service → area → single-domain selection → answer-type selection. Yes/no queries ask the decider for yes/no/unsure from all candidate states, without entity keep/drop. The answer model only translates yes/no into the Assist language. Other queries use one entity Choice question → probability filtering → answer model. Unsure decisions stop with the configured unsure reply. Domain selection runs for rooms and `all_areas`; actions get their domain from the service. `--domain-filter-confidence` remains an alias for `--domain-confidence`.
 
 Output shows stage timings and decisions. `--json` includes the full engine result, trace and usage. Snapshot fetch, engine and total times are separate.
 
@@ -83,3 +83,15 @@ python benchmark.py -q "Schalte die Schreibtischlampe aus"
 Without `--speaker-area`, the speaker location is unknown and neither `entities_implied_area` nor `implied_area` is offered. HA obtains the room from the requesting device's area assignment when available. Text chat and unassigned devices provide no default room. The editable prompt and confidence threshold are under Decider; `--target-scope-confidence` overrides that threshold locally. The saved stock scope prompt upgrades automatically; custom prompts are preserved.
 
 The default output is compact: selected action, speaker room, target type, area filter, candidate counts, chosen targets, detected parameter names, confidence and timings. `--json` retains full action field metadata and stage inputs/results. Existing supported action choices remain in use. General requests with enabled MCP servers stop before connecting or calling tools in plan-only mode.
+
+## State-query target experiment
+
+Complex state queries use one Choice question containing all area/domain-filtered entities plus `none`, rather than one keep/drop question per entity. Each option includes its entity ID, name, aliases, area, device class, unit and current state; the catalog is not duplicated in the request state. Every actual entity with probability strictly above `query_target_probability_threshold` is retained. Overall confidence does not filter these selections, and `none` never overrides retained entities. An empty selection stops the query.
+
+The default cutoff is **0.02**. Set it under Decider or override it locally:
+
+```bash
+python benchmark.py -q "wie warm ist es?" --query-target-threshold 0.02 --show-answer-input
+```
+
+The `target` timing row shows `selected N/M (one Choice)`. `--json` includes every option probability, the active threshold and selected entity IDs; `state_info` contains the selected states for quality comparisons. The old `--target-filter-confidence`, target keep/drop prompt and query-target uncertainty switch do not affect this experiment. Use the new state-query Choice prompt and probability threshold. Yes/no queries still bypass entity selection. Area/domain selection and answer generation are unchanged, including the current all_areas fallback for an unspecified room.

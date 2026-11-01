@@ -81,6 +81,13 @@ class BenchmarkSettingsTests(unittest.TestCase):
         self.assertEqual(configured["action_area_probability_threshold"], 0.1)
         self.assertEqual(configured["action_entity_probability_threshold"], 0.2)
 
+    def test_query_target_probability_threshold_is_separate_from_confidence_and_parameter_threshold(self):
+        args = benchmark.parser().parse_args(["-q", "test", "--confidence", "0.9", "--query-target-threshold", "0.04"])
+        configured = benchmark.model_settings(settings(), args, {})["decider"]
+        self.assertEqual(configured["query_target_probability_threshold"], 0.04)
+        self.assertEqual(configured["service_confidence"], 0.9)
+        self.assertEqual(configured["parameter_probability_threshold"], 0.3)
+
 
 class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
     def exported(self):
@@ -100,6 +107,7 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
         execute = AsyncMock()
         await AgentEngine(settings(), addon, execute).process(args.query, "en", SNAPSHOT)
         self.assertEqual(local.requests, addon.requests)
+        self.assertEqual(set(local.requests[-1][2]), {"query_targets"})
         self.assertEqual(report["mode"], "plan_only")
         self.assertEqual(report["result"]["state_info"][0]["entity_id"], "light.desk")
         self.assertEqual({event["stage"] for event in report["trace"]}, {"service", "area", "domain", "query_type", "target", "answer"})

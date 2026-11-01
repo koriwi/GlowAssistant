@@ -39,6 +39,8 @@ def parser():
                         help="Keep optional action parameters above this probability; independent of --confidence.")
     result.add_argument("--action-area-threshold", type=confidence, help="Probability threshold for selecting multiple action areas.")
     result.add_argument("--action-entity-threshold", type=confidence, help="Probability threshold for selecting action entities.")
+    result.add_argument("--query-target-threshold", type=confidence,
+                        help="Probability threshold for state-query entity selection; independent of --confidence.")
     for field in CONFIDENCE_FIELDS:
         flags = ["--" + field.replace("_", "-")]
         if field == "domain_confidence":
@@ -69,6 +71,8 @@ def model_settings(exported, args, env):
             decider[field] = specific
     if args.parameter_threshold is not None:
         decider["parameter_probability_threshold"] = args.parameter_threshold
+    if args.query_target_threshold is not None:
+        decider["query_target_probability_threshold"] = args.query_target_threshold
     for kind in ("area", "entity"):
         value = getattr(args, f"action_{kind}_threshold")
         if value is not None:
@@ -253,6 +257,8 @@ def print_report(report, show_answer_input=False):
         if event["stage"] in ("action_areas", "action_entities") and "selected_names" in output:
             names = output["selected_names"]
             detail = "selected: " + (", ".join(names[:5]) or "none") + (f" (+{len(names) - 5} more)" if len(names) > 5 else "")
+        if event["stage"] == "target" and "selected_entity_ids" in output:
+            detail = f"selected {output['entities_after']}/{output['entities_before']} (one Choice)"
         if event["stage"] == "parameter_capabilities" and "fields_after" in output:
             detail = f"{output['fields_before']} → {output['fields_after']} fields; no model call"
         scores = [info["confidence"] for info in decisions.values() if isinstance(info.get("confidence"), (int, float))]

@@ -40,9 +40,9 @@ def decode_selection(response, question, options, threshold=None):
             or not all(finite_number(value) and 0 <= value <= 1
                        for value in [answer["confidence"], *probabilities.values()])
         ):
-            raise ModelError("Malformed action target selection response.")
+            raise ModelError("Malformed target selection response: invalid Choice probabilities.")
     except (KeyError, TypeError, AttributeError) as error:
-        raise ModelError("Malformed action target selection response.") from error
+        raise ModelError("Malformed target selection response: invalid Choice probabilities.") from error
     if threshold is None:
         maximum = max(probabilities.values())
         highest = [label for label, value in probabilities.items() if value == maximum]

@@ -16,6 +16,7 @@ from .const import (
     LEGACY_TARGET_SCOPE_PROMPT,
     LEGACY_UNSCOPED_TARGET_SCOPE_PROMPT,
     NUMERIC_MODE_PROMPT,
+    QUERY_TARGET_PROMPT,
     QUERY_TYPE_PROMPT,
     SERVICE_PROMPT,
     TARGET_PROMPT,
@@ -41,6 +42,7 @@ DEFAULTS = {
         "action_entity_prompt": ACTION_ENTITY_INSTRUCTIONS, "action_entity_probability_threshold": 0.15,
         "domain_prompt": DOMAIN_PROMPT, "domain_confidence": 0.5,
         "query_type_prompt": QUERY_TYPE_PROMPT, "query_type_confidence": 0,
+        "query_target_prompt": QUERY_TARGET_PROMPT, "query_target_probability_threshold": 0.02,
         "binary_answer_prompt": BINARY_ANSWER_PROMPT, "binary_answer_confidence": 0,
         "area_prompt": AREA_PROMPT, "target_prompt": TARGET_PROMPT,
         "target_scope_prompt": TARGET_SCOPE_PROMPT, "target_scope_confidence": 0,
@@ -132,7 +134,8 @@ def validate_settings(data):
             _range(config, "max_tokens", 1, 100000, group, integer=True)
             _range(config, "temperature", 0, 2, group)
     decider = settings["decider"]
-    for field in ("parameter_probability_threshold", "action_area_probability_threshold", "action_entity_probability_threshold"):
+    for field in ("parameter_probability_threshold", "action_area_probability_threshold", "action_entity_probability_threshold",
+                  "query_target_probability_threshold"):
         _range(decider, field, 0, 1, "decider")
     for stage in ("service", "area", "domain", "query_type", "binary_answer", "target_scope", "target", "numeric", "text", "target_filter"):
         _range(decider, f"{stage}_confidence", 0, 1, "decider")

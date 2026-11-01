@@ -75,7 +75,9 @@
               "action_area_prompt": "Action area selection prompt",
               "action_area_probability_threshold": "Action area probability threshold",
               "action_entity_prompt": "Action entity selection prompt",
-              "action_entity_probability_threshold": "Action entity probability threshold"
+              "action_entity_probability_threshold": "Action entity probability threshold",
+              "query_target_prompt": "State-query target Choice prompt",
+              "query_target_probability_threshold": "State-query target probability threshold"
             },
             "data_description": {
               "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
@@ -116,7 +118,9 @@
               "action_area_prompt": "One Choice question for explicitly requested areas. Multiple areas are allowed for area-only targets; specific entities with one explicit area use the unique highest probability. Implied areas use speaker context without this call. Clear to restore the default.",
               "action_area_probability_threshold": "Keep each area strictly above this probability for multiple-area selection (default 0.15). Single explicit areas use the highest probability instead. Overall confidence is not a filter.",
               "action_entity_prompt": "One Choice question for requested specific entities after domain and optional area filtering. Multiple targets are allowed. Clear to restore the default.",
-              "action_entity_probability_threshold": "Keep each entity strictly above this probability (default 0.15), independently of overall confidence. none never overrides retained entities."
+              "action_entity_probability_threshold": "Keep each entity strictly above this probability (default 0.15), independently of overall confidence. none never overrides retained entities.",
+              "query_target_prompt": "One Choice question with every candidate entity and none. Multiple targets can be retained. Clear to restore the default.",
+              "query_target_probability_threshold": "Keep each entity strictly above this probability (default 0.02). Overall confidence and legacy keep/drop uncertainty settings do not apply. none never overrides retained real targets."
             }
           },
           "answer": {
@@ -247,7 +251,9 @@
               "action_area_prompt": "Action area selection prompt",
               "action_area_probability_threshold": "Action area probability threshold",
               "action_entity_prompt": "Action entity selection prompt",
-              "action_entity_probability_threshold": "Action entity probability threshold"
+              "action_entity_probability_threshold": "Action entity probability threshold",
+              "query_target_prompt": "State-query target Choice prompt",
+              "query_target_probability_threshold": "State-query target probability threshold"
             },
             "data_description": {
               "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
@@ -288,7 +294,9 @@
               "action_area_prompt": "One Choice question for explicitly requested areas. Multiple areas are allowed for area-only targets; specific entities with one explicit area use the unique highest probability. Implied areas use speaker context without this call. Clear to restore the default.",
               "action_area_probability_threshold": "Keep each area strictly above this probability for multiple-area selection (default 0.15). Single explicit areas use the highest probability instead. Overall confidence is not a filter.",
               "action_entity_prompt": "One Choice question for requested specific entities after domain and optional area filtering. Multiple targets are allowed. Clear to restore the default.",
-              "action_entity_probability_threshold": "Keep each entity strictly above this probability (default 0.15), independently of overall confidence. none never overrides retained entities."
+              "action_entity_probability_threshold": "Keep each entity strictly above this probability (default 0.15), independently of overall confidence. none never overrides retained entities.",
+              "query_target_prompt": "One Choice question with every candidate entity and none. Multiple targets can be retained. Clear to restore the default.",
+              "query_target_probability_threshold": "Keep each entity strictly above this probability (default 0.02). Overall confidence and legacy keep/drop uncertainty settings do not apply. none never overrides retained real targets."
             }
           },
           "answer": {
@@ -429,7 +437,9 @@
               "action_area_prompt": "Action area selection prompt",
               "action_area_probability_threshold": "Action area probability threshold",
               "action_entity_prompt": "Action entity selection prompt",
-              "action_entity_probability_threshold": "Action entity probability threshold"
+              "action_entity_probability_threshold": "Action entity probability threshold",
+              "query_target_prompt": "State-query target Choice prompt",
+              "query_target_probability_threshold": "State-query target probability threshold"
             },
             "data_description": {
               "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
@@ -470,7 +480,9 @@
               "action_area_prompt": "One Choice question for explicitly requested areas. Multiple areas are allowed for area-only targets; specific entities with one explicit area use the unique highest probability. Implied areas use speaker context without this call. Clear to restore the default.",
               "action_area_probability_threshold": "Keep each area strictly above this probability for multiple-area selection (default 0.15). Single explicit areas use the highest probability instead. Overall confidence is not a filter.",
               "action_entity_prompt": "One Choice question for requested specific entities after domain and optional area filtering. Multiple targets are allowed. Clear to restore the default.",
-              "action_entity_probability_threshold": "Keep each entity strictly above this probability (default 0.15), independently of overall confidence. none never overrides retained entities."
+              "action_entity_probability_threshold": "Keep each entity strictly above this probability (default 0.15), independently of overall confidence. none never overrides retained entities.",
+              "query_target_prompt": "One Choice question with every candidate entity and none. Multiple targets can be retained. Clear to restore the default.",
+              "query_target_probability_threshold": "Keep each entity strictly above this probability (default 0.02). Overall confidence and legacy keep/drop uncertainty settings do not apply. none never overrides retained real targets."
             }
           },
           "answer": {

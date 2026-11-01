@@ -91,7 +91,7 @@ def model_failure(stage, error):
         suggestion = "Check the Decider endpoint and whole-home domain filter prompt. Review the preceding domain decisions."
     elif message.startswith("Malformed target selection response"):
         reason = "The decider returned invalid or incomplete target selections."
-        suggestion = "Check the Decider endpoint and target keep/drop prompt. Review the preceding entity decisions."
+        suggestion = "Check the Decider endpoint, target selection prompt and thresholds. Review the preceding target decisions."
     elif "no spoken answer" in message:
         reason = "The model returned no text to speak."
         suggestion = f"Check the prompt and output token limit under {section}."
@@ -130,10 +130,12 @@ def decision_details(questions, answers, config, query=False, targets=None):
                 "selection_basis": "per_option_probability; overall confidence is not a filter",
             }
             continue
-        if name in ("action_areas", "action_entities"):
+        if name in ("action_areas", "action_entities", "query_targets"):
             details[name] = {"type": question["type"], "choice": answer.get("choice"), "confidence": confidence,
                              "probabilities": answer.get("probabilities", {}),
                              "selection_basis": "per_option_probability; overall confidence is not a filter"}
+            if name == "query_targets":
+                details[name]["probability_threshold"] = config["query_target_probability_threshold"]
             continue
         text_word = name.startswith("word_")
         domain_filter = name.startswith("domain_")

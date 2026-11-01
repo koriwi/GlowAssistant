@@ -20,7 +20,6 @@ from .optional_parameters import (
     filter_fields,
     parameter_request,
 )
-from .target_selection import decode_targets, target_request
 from .text_values import TEXT_ACTIONS
 
 
@@ -462,22 +461,25 @@ class AgentEngine:
         config = self.settings["decider"]
         targets = list(target_options(entities).values())
         current_states = {entity["entity_id"]: entity["state"] for entity in entities}
-        targets = [{**target, "state": current_states[target["entity_id"]]} for target in targets]
-        payload = target_request(state, targets, config["target_filter_prompt"])
+        options = {f"entity:{target['entity_id']}": {**target, "state": current_states[target["entity_id"]]} for target in targets}
 
         def summarize(response):
-            selected = decode_targets(response, targets, config["target_filter_confidence"], config["query_target_keep_uncertain"])
-            result["target_selection"] = selected
-            return selected
+            selected = decode_selection(response, "query_targets", options, config["query_target_probability_threshold"])
+            selected_ids = [options[key]["entity_id"] for key in selected["selected_choices"]]
+            result["target_selection"] = {**selected, "selected_entity_ids": selected_ids,
+                                           "entities_before": len(targets), "entities_after": len(selected_ids)}
+            return result["target_selection"]
 
-        await self._decide(result, "target", payload["state"], payload["questions"], summarize=summarize)
+        await self._decide(result, "target", state, {
+            "query_targets": selection_question(options, config["query_target_prompt"]),
+        }, summarize=summarize)
         selected = result["target_selection"]["selected_entity_ids"]
         if not selected:
             raise Uncertain("target", "No matching entities were retained by target selection.",
-                            "Name the requested devices explicitly. Review the target keep/drop decisions and confidence threshold.")
+                            "Name the requested devices explicitly. Review the target probabilities and query-target threshold.")
         members = [entity for entity in entities if entity["entity_id"] in selected]
         if len(members) == 1:
-            result["target"] = next(target for target in targets if target["entity_id"] == selected[0])
+            result["target"] = options[f"entity:{selected[0]}"]
         else:
             result["target"] = {"type": "entities", "entity_ids": selected, "names": [entity["name"] for entity in members]}
         return members

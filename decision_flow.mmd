@@ -18,7 +18,7 @@ flowchart TD
     BinaryAnswer -->|unsure| Unsure
     BinaryAnswer -->|yes / no| Translate["Answer model: translate yes/no into Assist language"]
     Translate --> Reply
-    QueryType -->|No| QueryTargets["Decider: entity keep/drop"]
+    QueryType -->|No| QueryTargets["Decider: one Choice over entities + none; retain above probability threshold"]
     QueryType -->|unsure| Unsure
     QueryTargets --> States["Read selected states from snapshot"]
     States --> Answer["Smart-home answer model"]
