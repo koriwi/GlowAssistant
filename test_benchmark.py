@@ -124,7 +124,7 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
             "fields": {"brightness_pct": {"required": False, "description": "Brightness percentage", "example": 50,
                                           "selector": {"number": {"min": 0, "max": 100, "step": 1}}}},
         }
-        models = ScriptedModels([{"service": "light.turn_on:brightness_pct"}, {"target_scope": "areas"}])
+        models = ScriptedModels([{"service": "light.turn_on:brightness_pct"}, {"target_scope": "areas"}, {"action_areas": "area:office"}])
         with (patch("benchmark.fetch_snapshot", new=AsyncMock(return_value=exported)),
               patch("benchmark.aiohttp.ClientSession", return_value=AsyncMock()),
               patch("benchmark.ModelClient", return_value=models)):
@@ -133,9 +133,9 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report["result"]["action_metadata"]["fields"],
                          exported["snapshot"]["services"]["light.turn_on"]["fields"])
         self.assertNotIn("execution", report["result"])
-        self.assertEqual(len(models.requests), 2)
+        self.assertEqual(len(models.requests), 3)
         self.assertFalse(models.chat_requests)
-        self.assertEqual({event["stage"] for event in report["trace"]}, {"service", "target_scope"})
+        self.assertEqual({event["stage"] for event in report["trace"]}, {"service", "target_scope", "action_areas"})
         output = io.StringIO()
         with redirect_stdout(output):
             benchmark.print_report(report, show_answer_input=True)
@@ -152,13 +152,18 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
     async def test_speaker_area_flag_reaches_scope_decision_and_concise_console_output(self):
         args = benchmark.parser().parse_args(["-q", "Mach das Licht aus", "--speaker-area", "Küche"])
         models = ScriptedModels([{"service": "light.turn_off"}, {"target_scope": "implied_area"}])
-        with (patch("benchmark.fetch_snapshot", new=AsyncMock(return_value=self.exported())),
+        exported = self.exported()
+        exported["snapshot"]["entities"].append({**SNAPSHOT["entities"][0], "entity_id": "light.kitchen",
+                                                 "name": "Kitchen light", "area_id": "kitchen", "area_name": "Küche"})
+        with (patch("benchmark.fetch_snapshot", new=AsyncMock(return_value=exported)),
               patch("benchmark.aiohttp.ClientSession", return_value=AsyncMock()),
               patch("benchmark.ModelClient", return_value=models)):
             report = await benchmark.run(args, {})
         self.assertEqual(models.requests[-1][1]["speaker_area"], "Küche")
         self.assertEqual(report["result"]["target_scope"], "implied_area")
         self.assertIn("action_metadata", report["result"])
+        self.assertEqual(report["result"]["target"]["area_id"], "kitchen")
+        self.assertEqual(len(models.requests), 2)
         output = io.StringIO()
         with redirect_stdout(output):
             benchmark.print_report(report)

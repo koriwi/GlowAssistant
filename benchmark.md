@@ -41,14 +41,14 @@ Action requests currently run only **service → target type → stop**. Target 
 
 | Choice | Meaning |
 | --- | --- |
-| `entities` | Specific entities, without an explicit or implied area restriction |
+| `entities` | Specific arealess entities: room-independent targets such as shopping lists or named timers |
 | `entities_implied_area` | Specific entities within one implied speaker area |
 | `entities_explicit_area` | Specific entities within exactly one explicit area |
 | `areas` | One or more explicit areas, without specific entities |
 | `implied_area` | Implied speaker area only, without specific entities |
 | `unsure` | Unclear target type or an unsupported combination |
 
-Specific entity targets tied to multiple explicit areas return unsure. Globally named devices and logical targets do not inherit a speaker-area restriction automatically. Local roles such as desk/ceiling lamps can imply the supplied speaker area.
+Specific entity targets tied to multiple explicit areas return unsure. Arealess means room-independent, not missing HA area assignments or an omitted room name. A globally named lamp is not automatically arealess. Room-independent logical targets do not inherit a speaker-area restriction automatically. Local roles such as desk/ceiling lamps can imply the supplied speaker area.
 
 No actual devices or rooms are selected. Optional parameter selection remains paused; its helper/settings remain available. No values are extracted and no device or answer-model call runs.
 

@@ -25,7 +25,7 @@ flowchart TD
     Answer --> Reply
 
     Service -->|HA action| Scope{"Decider: intended target type"}
-    Scope -->|"Specific entities: no area"| Console["Print action, speaker room, target type and timing"]
+    Scope -->|"Specific arealess entities"| Console["Print action, speaker room, target type and timing"]
     Scope -->|"Specific entities + one explicit area"| Console
     Scope -->|"Specific entities + one implied speaker area"| Console
     Scope -->|"Explicit area(s): no specific entities"| Console

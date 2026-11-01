@@ -2,6 +2,8 @@ import math
 from copy import deepcopy
 from urllib.parse import urlsplit
 
+from .action_targets import AREA_INSTRUCTIONS as ACTION_AREA_INSTRUCTIONS
+from .action_targets import ENTITY_INSTRUCTIONS as ACTION_ENTITY_INSTRUCTIONS
 from .const import (
     ANSWER_PROMPT,
     AREA_PROMPT,
@@ -12,6 +14,7 @@ from .const import (
     LEGACY_GENERAL_PROMPT,
     LEGACY_SERVICE_PROMPT,
     LEGACY_TARGET_SCOPE_PROMPT,
+    LEGACY_UNSCOPED_TARGET_SCOPE_PROMPT,
     NUMERIC_MODE_PROMPT,
     QUERY_TYPE_PROMPT,
     SERVICE_PROMPT,
@@ -34,6 +37,8 @@ DEFAULTS = {
         "max_input_chars": 100000,
         "service_prompt": SERVICE_PROMPT,
         "parameter_prompt": PARAMETER_INSTRUCTIONS, "parameter_probability_threshold": 0.15,
+        "action_area_prompt": ACTION_AREA_INSTRUCTIONS, "action_area_probability_threshold": 0.15,
+        "action_entity_prompt": ACTION_ENTITY_INSTRUCTIONS, "action_entity_probability_threshold": 0.15,
         "domain_prompt": DOMAIN_PROMPT, "domain_confidence": 0.5,
         "query_type_prompt": QUERY_TYPE_PROMPT, "query_type_confidence": 0,
         "binary_answer_prompt": BINARY_ANSWER_PROMPT, "binary_answer_confidence": 0,
@@ -95,7 +100,9 @@ def normalize_settings(data):
     decider = data.get("decider", {})
     if settings["decider"]["target_filter_prompt"] == LEGACY_TARGET_FILTER_INSTRUCTIONS:
         settings["decider"]["target_filter_prompt"] = TARGET_FILTER_INSTRUCTIONS
-    if settings["decider"]["target_scope_prompt"] in (LEGACY_TARGET_SCOPE_PROMPT, LEGACY_ACTION_TARGET_SCOPE_PROMPT):
+    if settings["decider"]["target_scope_prompt"] in (
+        LEGACY_TARGET_SCOPE_PROMPT, LEGACY_ACTION_TARGET_SCOPE_PROMPT, LEGACY_UNSCOPED_TARGET_SCOPE_PROMPT,
+    ):
         settings["decider"]["target_scope_prompt"] = TARGET_SCOPE_PROMPT
     if "domain_confidence" not in decider and "domain_filter_confidence" in decider:
         settings["decider"]["domain_confidence"] = decider["domain_filter_confidence"]
@@ -125,7 +132,8 @@ def validate_settings(data):
             _range(config, "max_tokens", 1, 100000, group, integer=True)
             _range(config, "temperature", 0, 2, group)
     decider = settings["decider"]
-    _range(decider, "parameter_probability_threshold", 0, 1, "decider")
+    for field in ("parameter_probability_threshold", "action_area_probability_threshold", "action_entity_probability_threshold"):
+        _range(decider, field, 0, 1, "decider")
     for stage in ("service", "area", "domain", "query_type", "binary_answer", "target_scope", "target", "numeric", "text", "target_filter"):
         _range(decider, f"{stage}_confidence", 0, 1, "decider")
     for field in ("query_target_keep_uncertain", "action_target_keep_uncertain", "text_keep_uncertain"):

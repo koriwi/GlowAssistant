@@ -37,6 +37,8 @@ def parser():
     result.add_argument("--confidence", type=confidence, help="Override every decider confidence threshold.")
     result.add_argument("--parameter-threshold", type=confidence,
                         help="Keep optional action parameters above this probability; independent of --confidence.")
+    result.add_argument("--action-area-threshold", type=confidence, help="Probability threshold for selecting multiple action areas.")
+    result.add_argument("--action-entity-threshold", type=confidence, help="Probability threshold for selecting action entities.")
     for field in CONFIDENCE_FIELDS:
         flags = ["--" + field.replace("_", "-")]
         if field == "domain_confidence":
@@ -67,6 +69,10 @@ def model_settings(exported, args, env):
             decider[field] = specific
     if args.parameter_threshold is not None:
         decider["parameter_probability_threshold"] = args.parameter_threshold
+    for kind in ("area", "entity"):
+        value = getattr(args, f"action_{kind}_threshold")
+        if value is not None:
+            decider[f"action_{kind}_probability_threshold"] = value
     return validate_settings(settings)
 
 
@@ -181,15 +187,24 @@ def print_report(report, show_answer_input=False):
             summary.append((field, result[field] if result[field] is not None else "-"))
     if "action_metadata" in result:
         summary.append(("speaker area", result.get("speaker_area") or "unknown"))
-        scopes = {"entities": "Specific entities; no area filter",
+        scopes = {"entities": "Specific arealess entities",
                   "entities_implied_area": "Specific entities + implied area",
                   "entities_explicit_area": "Specific entities + explicit area",
                   "areas": "Explicit area(s); no specific entities",
                   "implied_area": "Implied area; no specific entities"}
         summary.append(("target scope", scopes.get(result.get("target_scope"), "Unsure")))
+        if "selected_areas" in result:
+            names = [area["name"] for area in result["selected_areas"]]
+            summary.append(("area filter", ", ".join(names) or "none"))
+            if result["area_source"] == "speaker_context":
+                summary.append(("area source", "HA speaker context"))
+        if "action_target_filter" in result:
+            counts = result["action_target_filter"]
+            summary.append(("candidates", f"{counts['entities_after_domain']} in domain → {counts['entities_after_area']} after area filter"))
     if result.get("target"):
         target = result["target"]
-        name = target.get("name") or ", ".join(target.get("names", []))
+        names = target.get("names", [])
+        name = target.get("name") or ", ".join(names[:5]) + (f" (+{len(names) - 5} more)" if len(names) > 5 else "")
         identifier = target.get("entity_id") or target.get("area_id")
         summary.append(("target", f"{target['type']}; {name}" + (f" ({identifier})" if identifier else "")))
     if result.get("execution"):
@@ -223,6 +238,9 @@ def print_report(report, show_answer_input=False):
                                for name, info in decisions.items()) or output.get("status", "")
         if event["stage"] == "optional_parameters" and "selected_parameters" in output:
             detail = "selected: " + (", ".join(output["selected_parameters"]) or "none")
+        if event["stage"] in ("action_areas", "action_entities") and "selected_names" in output:
+            names = output["selected_names"]
+            detail = "selected: " + (", ".join(names[:5]) or "none") + (f" (+{len(names) - 5} more)" if len(names) > 5 else "")
         scores = [info["confidence"] for info in decisions.values() if isinstance(info.get("confidence"), (int, float))]
         score = "-"
         if scores:

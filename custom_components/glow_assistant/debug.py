@@ -13,6 +13,8 @@ STAGE_LABELS = {
     "query_type": "Choose a yes/no or detailed answer",
     "binary_answer": "Answer the yes/no state question",
     "target_scope": "Classify entity targets and explicit or implied areas",
+    "action_areas": "Select action areas",
+    "action_entities": "Select action entities",
     "domain_filter": "Filter whole-home entity domains",
     "target": "Choose a device or room",
     "numeric": "Choose a new value",
@@ -126,6 +128,11 @@ def decision_details(questions, answers, config, query=False, targets=None):
                 "probability_threshold": config["parameter_probability_threshold"],
                 "selection_basis": "per_option_probability; overall confidence is not a filter",
             }
+            continue
+        if name in ("action_areas", "action_entities"):
+            details[name] = {"type": question["type"], "choice": answer.get("choice"), "confidence": confidence,
+                             "probabilities": answer.get("probabilities", {}),
+                             "selection_basis": "per_option_probability; overall confidence is not a filter"}
             continue
         text_word = name.startswith("word_")
         domain_filter = name.startswith("domain_")

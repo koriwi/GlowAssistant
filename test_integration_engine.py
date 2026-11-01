@@ -233,50 +233,54 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         for dry_run in (False, True):
             with self.subTest(dry_run=dry_run):
                 result, models, execute = await self.run_agent([
-                    {"service": "light.turn_on"}, {"target_scope": "areas"},
+                    {"service": "light.turn_on"}, {"target_scope": "areas"}, {"action_areas": "area:office"},
                 ], dry_run=dry_run, prompt="Turn on the office lights")
                 self.assertEqual(result["service"], "light.turn_on")
                 self.assertEqual(result["domain"], "light")
                 self.assertEqual(result["action_metadata"], {
                     "selection": "light.turn_on", "service": "light.turn_on", **SNAPSHOT["services"]["light.turn_on"],
                 })
-                self.assertEqual(len(models.requests), 2)
+                self.assertEqual(len(models.requests), 3)
                 self.assertEqual(result["target_scope"], "areas")
                 self.assertNotIn("parameter_selection", result)
                 self.assertFalse(models.chat_requests)
-                self.assertIsNone(result["target"])
+                self.assertEqual(result["target"]["area_id"], "office")
                 self.assertNotIn("execution", result)
                 self.assertNotIn("failures", result)
                 self.assertIn("No action was executed", result["answer"])
                 execute.assert_not_awaited()
 
     async def test_action_target_scope_choices_and_speaker_context(self):
-        for scope, location, prompt in (
-            ("entities", None, "Turn off Aurora and Orion"),
-            ("entities", "Kitchen", "Turn off Aurora"),
-            ("entities_explicit_area", None, "Turn off the desk lamp in the office"),
-            ("entities_explicit_area", "Kitchen", "Schalte die linke und rechte Schreibtischlampe im Büro aus"),
-            ("entities_implied_area", "Kitchen", "Turn off the desk lamp"),
-            ("areas", "Kitchen", "Mach das Licht im Büro aus"),
-            ("areas", None, "Mach das Licht in Küche und Flur aus"),
-            ("implied_area", " Kitchen ", "Turn off the lights"),
-        ):
-            with self.subTest(scope=scope, location=location):
-                result, models, execute = await self.run_agent([
-                    {"service": "light.turn_off"}, {"target_scope": scope},
-                ], prompt=prompt, speaker_area=location)
-                self.assertEqual(result["target_scope"], scope)
-                self.assertEqual(result["speaker_area"], location.strip() if location else None)
-                self.assertEqual(models.requests[-1][1], {
-                    "prompt": prompt, "service": "light.turn_off", "speaker_area": result["speaker_area"], "language": "de",
-                })
-                choices = set(models.requests[-1][2]["target_scope"]["criteria"])
-                self.assertEqual(choices, {"entities", "entities_explicit_area", "areas", "unsure"} | ({"entities_implied_area", "implied_area"} if location else set()))
-                self.assertIsNone(result["target"])
-                self.assertNotIn("optional_parameters", result["decisions"])
-                self.assertNotIn("execution", result)
-                self.assertFalse(models.chat_requests)
-                execute.assert_not_awaited()
+        with patch.object(AgentEngine, "_select_action_targets", new_callable=AsyncMock):
+            for scope, location, prompt in (
+                ("entities", None, "Add milk to the shopping list"),
+                ("entities", "Kitchen", "Setze Brot auf die Einkaufsliste"),
+                ("entities_explicit_area", None, "Turn off the desk lamp in the office"),
+                ("entities_explicit_area", "Kitchen", "Schalte die linke und rechte Schreibtischlampe im Büro aus"),
+                ("entities_implied_area", "Kitchen", "Turn off the desk lamp"),
+                ("areas", "Kitchen", "Mach das Licht im Büro aus"),
+                ("areas", None, "Mach das Licht in Küche und Flur aus"),
+                ("implied_area", " Kitchen ", "Turn off the lights"),
+            ):
+                with self.subTest(scope=scope, location=location):
+                    snapshot = copy.deepcopy(SNAPSHOT)
+                    snapshot["services"]["todo.add_item"] = {"target": {}, "fields": {"item": {"required": True}}}
+                    service = "todo.add_item" if scope == "entities" else "light.turn_off"
+                    result, models, execute = await self.run_agent([
+                        {"service": service}, {"target_scope": scope},
+                    ], snapshot=snapshot, prompt=prompt, speaker_area=location)
+                    self.assertEqual(result["target_scope"], scope)
+                    self.assertEqual(result["speaker_area"], location.strip() if location else None)
+                    self.assertEqual(models.requests[-1][1], {
+                        "prompt": prompt, "service": service, "speaker_area": result["speaker_area"], "language": "de",
+                    })
+                    choices = set(models.requests[-1][2]["target_scope"]["criteria"])
+                    self.assertEqual(choices, {"entities", "entities_explicit_area", "areas", "unsure"} | ({"entities_implied_area", "implied_area"} if location else set()))
+                    self.assertIsNone(result["target"])
+                    self.assertNotIn("optional_parameters", result["decisions"])
+                    self.assertNotIn("execution", result)
+                    self.assertFalse(models.chat_requests)
+                    execute.assert_not_awaited()
 
     async def test_scope_unsure_or_low_confidence_stops_after_scope_decision(self):
         for choice, threshold in (("unsure", 0), ("areas", 0.95)):
@@ -311,20 +315,21 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
             },
         }
         snapshot["services"]["climate.set_temperature"] = description
+        snapshot["entities"].append(entity("climate.office", "Thermostat"))
         original = copy.deepcopy(snapshot)
         history = [{"role": "user", "content": "Set the office to 20 degrees"}, {"role": "assistant", "content": "Selected."}]
         settings = normalize_settings({"history_enabled": True})
         result, models, execute = await self.run_agent([
-            {"service": "climate.set_temperature:temperature"}, {"target_scope": "areas"},
+            {"service": "climate.set_temperature:temperature"}, {"target_scope": "areas"}, {"action_areas": "area:office"},
         ], snapshot=snapshot, settings=settings, history=history, language="fr-CH")
         self.assertEqual(result["action_metadata"], {"service": "climate.set_temperature",
                                                   "selection": "climate.set_temperature:temperature", **description})
         self.assertEqual(snapshot, original)
         self.assertEqual(models.requests[0][1]["history"], history)
         self.assertEqual(models.requests[0][1]["language"], "fr-CH")
-        self.assertEqual(set(result["decisions"]), {"service", "target_scope"})
+        self.assertEqual(set(result["decisions"]), {"service", "target_scope", "action_areas"})
         self.assertNotIn("parameter_selection", result)
-        self.assertEqual(set(models.requests[-1][2]["target_scope"]["criteria"]), {"entities", "entities_explicit_area", "areas", "unsure"})
+        self.assertEqual(set(models.requests[1][2]["target_scope"]["criteria"]), {"entities", "entities_explicit_area", "areas", "unsure"})
         self.assertEqual(models.requests[-1][1]["history"], history)
         self.assertEqual(models.requests[-1][1]["language"], "fr-CH")
         self.assertFalse(models.chat_requests)
@@ -474,9 +479,10 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
     async def test_action_selection_trace_contains_metadata_and_no_downstream_calls(self):
         events = []
         result, models, execute = await self.run_agent([
-            {"service": "light.turn_off"}, {"target_scope": "entities"},
+            {"service": "light.turn_off"}, {"target_scope": "entities_explicit_area"},
+            {"action_areas": "area:office"}, {"action_entities": "entity:light.desk"},
         ], trace=lambda *event: events.append(event))
-        self.assertEqual([stage for stage, _, _ in events], ["service", "service", "target_scope", "target_scope"])
+        self.assertEqual([stage for stage, _, _ in events], ["service", "service", "target_scope", "target_scope", "action_areas", "action_areas", "action_entities", "action_entities"])
         output = events[1][2]
         self.assertEqual(output["action_metadata"], result["action_metadata"])
         self.assertEqual(output["decisions"]["service"]["choice"], "light.turn_off")
@@ -484,9 +490,9 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(output["usage"], {"input_tokens": 5})
         self.assertGreaterEqual(output["duration_ms"], 0)
         self.assertEqual(output["status"], "completed")
-        self.assertEqual(len(models.requests), 2)
+        self.assertEqual(len(models.requests), 4)
         self.assertFalse(models.chat_requests)
-        self.assertEqual(result["target_scope"], "entities")
+        self.assertEqual(result["target_scope"], "entities_explicit_area")
         self.assertNotIn("parameter_selection", result)
         self.assertNotIn("optional_parameters", result["timings_ms"])
         execute.assert_not_awaited()
@@ -1040,10 +1046,11 @@ class IntegrationSettingsTests(unittest.TestCase):
         from custom_components.glow_assistant.const import (
             LEGACY_ACTION_TARGET_SCOPE_PROMPT,
             LEGACY_TARGET_SCOPE_PROMPT,
+            LEGACY_UNSCOPED_TARGET_SCOPE_PROMPT,
             TARGET_SCOPE_PROMPT,
         )
 
-        for previous in (LEGACY_TARGET_SCOPE_PROMPT, LEGACY_ACTION_TARGET_SCOPE_PROMPT):
+        for previous in (LEGACY_TARGET_SCOPE_PROMPT, LEGACY_ACTION_TARGET_SCOPE_PROMPT, LEGACY_UNSCOPED_TARGET_SCOPE_PROMPT):
             upgraded = normalize_settings({"decider": {"target_scope_prompt": previous}})
             self.assertEqual(upgraded["decider"]["target_scope_prompt"], TARGET_SCOPE_PROMPT)
         custom = normalize_settings({"decider": {"target_scope_prompt": "Custom scope rules"}})

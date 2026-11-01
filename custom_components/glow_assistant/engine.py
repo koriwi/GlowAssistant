@@ -1,6 +1,7 @@
 import json
 from time import perf_counter
 
+from .action_targets import decode_selection, selection_question
 from .client import ModelError
 from .const import (
     GENERAL,
@@ -252,6 +253,7 @@ class AgentEngine:
                 "prompt": prompt, "service": result["service"], "speaker_area": speaker_area,
             }, {"target_scope": choice_question(scopes, config["target_scope_prompt"])})
             result["target_scope"] = self._choice(response, "target_scope", scopes)
+            await self._select_action_targets(result, entities)
             return
 
         result["service"] = QUERY
@@ -304,6 +306,70 @@ class AgentEngine:
             {"role": "system", "content": f"{self.settings['answer']['prompt']}\n{language_instruction}"},
             {"role": "user", "content": json.dumps(facts, ensure_ascii=False, default=str)},
         ])
+
+    async def _select_action_targets(self, result, entities):
+        scope = result["target_scope"]
+        areas = {f"area:{key}": {"area_id": key, **value} for key, value in areas_from(entities).items()}
+        selected_areas = []
+        result["area_source"] = "none"
+        if scope in ("entities_implied_area", "implied_area"):
+            location = result["speaker_area"].casefold()
+            selected_areas = [area for area in areas.values()
+                              if location in {str(value).casefold() for value in
+                                              (area["area_id"], area["name"], *area.get("aliases", []))}]
+            if len(selected_areas) != 1:
+                raise Uncertain("action_areas", "The supplied speaker area does not match one exposed snapshot area.",
+                                "Check the speaker's room assignment or --speaker-area. No other room was substituted.")
+            result["area_source"] = "speaker_context"
+        elif scope in ("entities_explicit_area", "areas"):
+            if not areas:
+                raise Uncertain("action_areas", "No areas with exposed entities are available.",
+                                "Check room assignments and Assist exposure settings.")
+            selected = await self._action_selection(result, "action_areas", areas,
+                                                    single=scope == "entities_explicit_area")
+            selected_areas = [areas[key] for key in selected]
+            result["area_source"] = "decider"
+        result["selected_areas"] = selected_areas
+        area_ids = {area["area_id"] for area in selected_areas}
+        domain_entities = [entity for entity in entities if entity["domain"] == result["domain"]]
+        candidates = [entity for entity in domain_entities if not area_ids or entity.get("area_id") in area_ids]
+        result["action_target_filter"] = {"entities_before": len(entities), "entities_after_domain": len(domain_entities),
+                                          "entities_after_area": len(candidates), "area_ids": sorted(area_ids)}
+        if not candidates:
+            raise Uncertain("action_entities", "No exposed entities match the action domain and area filter.",
+                            "Check the selected areas, entity domains and Assist exposure. No broader search was used.")
+        if scope in ("areas", "implied_area"):
+            result["target"] = ({"type": "area", **selected_areas[0]} if len(selected_areas) == 1 else
+                                {"type": "areas", "area_ids": [area["area_id"] for area in selected_areas],
+                                 "names": [area["name"] for area in selected_areas]})
+            return
+        options = target_options(candidates)
+        selected = await self._action_selection(result, "action_entities", options)
+        result["target"] = (options[selected[0]] if len(selected) == 1 else
+                            {"type": "entities", "entity_ids": [options[key]["entity_id"] for key in selected],
+                             "names": [options[key]["name"] for key in selected]})
+
+    async def _action_selection(self, result, stage, options, single=False):
+        config = self.settings["decider"]
+        kind = "area" if stage == "action_areas" else "entity"
+        threshold = None if single else config[f"action_{kind}_probability_threshold"]
+
+        def summarize(response):
+            selection = decode_selection(response, stage, options, threshold)
+            selection["selected_names"] = [options[key]["name"] for key in selection["selected_choices"]]
+            result[stage] = selection
+            return selection
+
+        await self._decide(result, stage, {
+            "prompt": result["request"], "service": result["service"], "target_scope": result["target_scope"],
+            "selected_areas": result.get("selected_areas", []),
+            **({"entity_counts": result["action_target_filter"]} if stage == "action_entities" else {}),
+        }, {stage: selection_question(options, config[f"action_{kind}_prompt"])}, summarize=summarize)
+        selected = result[stage]["selected_choices"]
+        if not selected:
+            raise Uncertain(stage, "No unambiguous action targets were retained.",
+                            "Name the requested rooms or devices. Review the option probabilities and selection threshold.")
+        return selected
 
     async def _select_parameters(self, result):
         config = self.settings["decider"]
