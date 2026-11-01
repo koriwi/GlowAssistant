@@ -36,12 +36,12 @@ def parser():
     result.add_argument("--query", "-q", required=True)
     result.add_argument("--confidence", type=confidence, help="Override every decider confidence threshold.")
     result.add_argument("--parameter-threshold", type=confidence,
-                        help="Keep optional action parameters above this probability; independent of --confidence.")
-    result.add_argument("--action-area-threshold", type=confidence, help="Probability threshold for selecting multiple action areas.")
-    result.add_argument("--action-entity-threshold", type=confidence, help="Probability threshold for selecting action entities.")
+                        help="Relative probability threshold for optional parameters; independent of --confidence.")
+    result.add_argument("--action-area-threshold", type=confidence, help="Relative probability threshold for multiple action areas.")
+    result.add_argument("--action-entity-threshold", type=confidence, help="Relative probability threshold for action entities.")
     result.add_argument("--query-target-threshold", type=confidence,
-                        help="Probability threshold for state-query entity selection; independent of --confidence.")
-    result.add_argument("--text-threshold", type=confidence, help="Probability threshold for extracting item/message words.")
+                        help="Relative probability threshold for state-query entities; independent of --confidence.")
+    result.add_argument("--text-threshold", type=confidence, help="Relative probability threshold for item/message words.")
     for field in CONFIDENCE_FIELDS:
         flags = ["--" + field.replace("_", "-")]
         if field == "domain_confidence":
@@ -223,19 +223,23 @@ def print_report(report, show_answer_input=False):
             removed = list(capabilities["removed_fields"])
             detail = ", ".join(removed[:5]) + (f" (+{len(removed) - 5} more)" if len(removed) > 5 else "")
             print(f"Capability filter: {capabilities['fields_before']} → {capabilities['fields_after']} fields" +
-                  (f"; removed: {detail}" if removed else ""))
+                  (f"; unsupported for selected targets: {detail}" if removed else ""))
         print("Required parameters: " + (", ".join(result["required_parameters"]) or "none"))
         print("Selected optional parameters: " + (", ".join(selected) or "none"))
-        print(f"Probability threshold: {selection['probability_threshold']:g} (strictly above)")
+        threshold = selection["probability_threshold"]
+        cutoff = selection["effective_probability_threshold"]
+        option_count = selection["real_option_count"]
+        print(f"Probability cutoff: {threshold:g} / max(1, {option_count}) = {cutoff:.6g}; keep p >= cutoff")
         capabilities = result.get("parameter_capabilities", {})
         support = capabilities.get("field_support", {})
         total_targets = len(capabilities.get("target_entity_ids", []))
         rows = [(name, f"{probability:.4f}",
                  f"{len(support[name]['supported_entity_ids'])}/{total_targets}" if name in support else "-",
-                 "keep" if name in selected else "not a parameter")
-                for name, probability in selection["probabilities"].items() if name in selected or name == "none"]
+                 "not a parameter" if name == "none" else "keep" if name in selected
+                 else f"drop: p < {cutoff:.6g}")
+                for name, probability in selection["probabilities"].items()]
         if rows:
-            print_table(["Parameter", "Probability", "Targets", "Selection"], rows, [40, 12, 9, 18], right_columns=(1, 2))
+            print_table(["Parameter", "Probability", "Targets", "Decision / reason"], rows, [40, 12, 9, 28], right_columns=(1, 2))
         print()
     if result.get("parameters"):
         print_table(["Parameter", "Value"], list(result["parameters"].items()), [32, max(30, columns - 36)])
@@ -248,8 +252,9 @@ def print_report(report, show_answer_input=False):
         decisions = output.get("decisions", {})
         detail = ", ".join(f"{name}={info.get('effective_choice', info.get('choice'))}"
                            for name, info in decisions.items()) or output.get("status", "")
-        if event["stage"] == "text" and "value" in output:
-            detail = f"{output['parameter']}={output['value']}"
+        if event["stage"].split(":", 1)[0] in ("text", "numeric") and "value" in output:
+            detail = (f"{output['parameter']}: skipped (no text)" if output.get("status") == "skipped"
+                      else f"{output['parameter']}={output['value']}")
         if event["stage"] == "optional_parameters" and "selected_parameters" in output:
             detail = "selected: " + (", ".join(output["selected_parameters"]) or "none")
         if event["stage"] in ("action_areas", "action_entities") and "selected_names" in output:
@@ -271,7 +276,7 @@ def print_report(report, show_answer_input=False):
                 [20, 9, max(24, columns - 50), 12], right_columns=(1, 3))
     print()
     for field in ("answer", "error"):
-        if field in result:
+        if field in result and not (field == "answer" and result.get("error") == result[field]):
             print(f"{field}: {result[field]}")
     for failure in result.get("failures", []):
         print(f"failure [{failure['stage']}]: {failure['reason']}")

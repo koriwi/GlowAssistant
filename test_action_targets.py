@@ -1,5 +1,6 @@
 import copy
 import unittest
+from unittest.mock import AsyncMock, patch
 
 from custom_components.glow_assistant.action_targets import decode_selection
 from custom_components.glow_assistant.client import ModelError
@@ -52,8 +53,43 @@ class ProbabilitySelectionTests(unittest.TestCase):
         data = {"answers": {"action_areas": answer({"office": 0.3, "kitchen": 0.2, "none": 0.5})}}
         selected = decode_selection(data, "action_areas", {"office": {}, "kitchen": {}}, 0.15)
         self.assertEqual(selected["selected_choices"], ["office", "kitchen"])
-        self.assertEqual(selected["selection_mode"], "above_probability_threshold")
-        self.assertEqual(decode_selection(data, "action_areas", {"office": {}, "kitchen": {}}, 0.3)["selected_choices"], [])
+        self.assertEqual(selected["selection_mode"], "at_or_above_probability_threshold")
+        self.assertEqual(decode_selection(data, "action_areas", {"office": {}, "kitchen": {}}, 1)["selected_choices"], [])
+
+    def test_relative_cutoff_retains_ten_valid_targets_in_a_large_choice(self):
+        options = {f"entity:{index}": {} for index in range(11)}
+        probabilities = {key: 0.1 if index < 10 else 0 for index, key in enumerate(options)}
+        probabilities["none"] = 0
+        for question in ("action_areas", "action_entities", "query_targets", "text_words"):
+            with self.subTest(question=question):
+                result = decode_selection({"answers": {question: answer(probabilities)}}, question, options, 0.3)
+                self.assertEqual(result["selected_choices"], list(options)[:10])
+                self.assertEqual(result["real_option_count"], 11)
+                self.assertAlmostEqual(result["effective_probability_threshold"], 0.3 / 11)
+
+    def test_two_real_options_halve_the_cutoff_and_include_the_boundary(self):
+        options = {"first": {}, "second": {}}
+        result = decode_selection({"answers": {"action_entities": answer({"first": 0.75, "second": 0.15, "none": 0.1})}},
+                                  "action_entities", options, 0.3)
+        self.assertEqual(result["selected_choices"], ["first", "second"])
+        self.assertEqual(result["effective_probability_threshold"], 0.15)
+        self.assertEqual(result["real_option_count"], 2)
+        for options, probabilities, expected in (({}, {"none": 1}, []),
+                                                  ({"first": {}}, {"first": 0.3, "none": 0.7}, ["first"]),
+                                                  ({"first": {}}, {"first": 0.29, "none": 0.71}, [])):
+            result = decode_selection({"answers": {"action_entities": answer(probabilities)}}, "action_entities", options, 0.3)
+            self.assertEqual(result["selected_choices"], expected)
+            self.assertEqual(result["effective_probability_threshold"], 0.3)
+
+    def test_threshold_one_retains_uniform_real_options_for_every_multi_select_stage(self):
+        for count in (1, 2, 3, 10):
+            options = {f"option:{index}": {} for index in range(count)}
+            probabilities = {key: 1 / count for key in options} | {"none": 0}
+            for question in ("action_areas", "action_entities", "query_targets", "text_words"):
+                with self.subTest(count=count, question=question):
+                    result = decode_selection({"answers": {question: answer(probabilities)}}, question, options, 1)
+                    self.assertEqual(result["selected_choices"], list(options))
+                    self.assertEqual(result["effective_probability_threshold"], 1 / count)
 
     def test_single_selection_uses_only_unique_highest_probability(self):
         options = {"office": {}, "kitchen": {}}
@@ -81,10 +117,11 @@ class ActionRoutingTests(unittest.IsolatedAsyncioTestCase):
         client = ScriptedModels([{"service": service}, {"target_scope": scope}, *later])
 
         events = []
-        result = await AgentEngine(settings or normalize_settings({}), client,
-                                   trace=lambda *event: events.append(event), history=history).process(
-            prompt, "de", data or snapshot(), speaker_area=speaker_area,
-        )
+        with patch.object(AgentEngine, "_extract_parameters", new_callable=AsyncMock):
+            result = await AgentEngine(settings or normalize_settings({}), client,
+                                       trace=lambda *event: events.append(event), history=history).process(
+                prompt, "de", data or snapshot(), speaker_area=speaker_area,
+            )
 
         self.assertFalse(client.chat_requests)
         self.assertNotIn("execution", result)
@@ -129,7 +166,7 @@ class ActionRoutingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_entities_in_implied_area_skip_area_decision_and_resolve_room_alias(self):
         result, client, _ = await self.run_route("entities_implied_area", [
-            {"action_entities": answer({"entity:light.desk": 0.8, "entity:light.ceiling": 0.1, "none": 0.1})},
+            {"action_entities": answer({"entity:light.desk": 0.85, "entity:light.ceiling": 0.05, "none": 0.1})},
         ], speaker_area="buero")
         self.assertEqual(result["target"]["entity_id"], "light.desk")
         self.assertEqual(result["selected_areas"][0]["area_id"], "office")
@@ -138,7 +175,7 @@ class ActionRoutingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_arealess_targets_filter_only_by_domain_including_assigned_and_unassigned_entities(self):
         result, client, _ = await self.run_route("entities", [{"action_entities": answer({
-            "entity:todo.shopping": 0.6, "entity:todo.work": 0.1, "entity:todo.unassigned": 0.2, "none": 0.1,
+            "entity:todo.shopping": 0.66, "entity:todo.work": 0.04, "entity:todo.unassigned": 0.2, "none": 0.1,
         })}, {"text_words": answer({"word:0:test": 0, "word:1:request": 0.9, "none": 0.1})}], speaker_area="Office", service="todo.add_item")
         self.assertEqual(result["target"]["entity_ids"], ["todo.shopping", "todo.unassigned"])
         self.assertEqual(result["selected_areas"], [])
@@ -153,7 +190,7 @@ class ActionRoutingTests(unittest.IsolatedAsyncioTestCase):
     async def test_parameter_detection_runs_after_resolving_target_for_relative_climate_request(self):
         data = climate_snapshot()
         result, client, events = await self.run_route("implied_area", [{"optional_parameters": answer({
-            "temperature": 0.8, "hvac_mode": 0.1, "none": 0.1,
+            "temperature": 0.89, "hvac_mode": 0.01, "none": 0.1,
         })}], speaker_area="Office", service="climate.set_temperature:temperature", data=data,
             selected_parameters=["temperature"], prompt="mach ein bisschen waermer")
         self.assertEqual([set(questions) for _, _, questions in client.requests],
@@ -176,7 +213,7 @@ class ActionRoutingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_range_target_excludes_single_temperature_before_parameter_detection(self):
         result, client, _ = await self.run_route("implied_area", [{"optional_parameters": answer({
-            "target_temp_low": 0.4, "target_temp_high": 0.35, "hvac_mode": 0.1, "none": 0.15,
+            "target_temp_low": 0.4, "target_temp_high": 0.39, "hvac_mode": 0.01, "none": 0.2,
         })}], speaker_area="Kitchen", service="climate.set_temperature:temperature", data=climate_snapshot(),
             selected_parameters=["target_temp_low", "target_temp_high"])
         self.assertNotIn("temperature", client.requests[-1][2]["optional_parameters"]["criteria"])

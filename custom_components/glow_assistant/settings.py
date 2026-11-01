@@ -14,6 +14,7 @@ from .const import (
     LEGACY_GENERAL_PROMPT,
     LEGACY_SERVICE_PROMPT,
     LEGACY_TARGET_SCOPE_PROMPT,
+    LEGACY_TEXT_SERVICE_PROMPT,
     LEGACY_UNSCOPED_TARGET_SCOPE_PROMPT,
     QUERY_TARGET_PROMPT,
     QUERY_TYPE_PROMPT,
@@ -21,6 +22,12 @@ from .const import (
     TARGET_SCOPE_PROMPT,
 )
 from .optional_parameters import INSTRUCTIONS as PARAMETER_INSTRUCTIONS
+from .parameter_values import (
+    LEGACY_NUMERIC_INSTRUCTIONS,
+    LEGACY_NUMERIC_MODE_INSTRUCTIONS,
+    NUMERIC_INSTRUCTIONS,
+    NUMERIC_MODE_INSTRUCTIONS,
+)
 from .text_values import INSTRUCTIONS as TEXT_INSTRUCTIONS
 from .text_values import LEGACY_PROMPTS, MESSAGE_INSTRUCTIONS
 
@@ -31,7 +38,7 @@ DEFAULTS = {
         "model": "typesafe/jev-1.14", "api_key": "", "timeout": 60,
         "max_input_chars": 100000,
         "service_prompt": SERVICE_PROMPT,
-        "parameter_prompt": PARAMETER_INSTRUCTIONS, "parameter_probability_threshold": 0.3,
+        "parameter_prompt": PARAMETER_INSTRUCTIONS, "parameter_probability_threshold": 0.15,
         "action_area_prompt": ACTION_AREA_INSTRUCTIONS, "action_area_probability_threshold": 0.15,
         "action_entity_prompt": ACTION_ENTITY_INSTRUCTIONS, "action_entity_probability_threshold": 0.15,
         "domain_prompt": DOMAIN_PROMPT, "domain_confidence": 0.5,
@@ -41,7 +48,8 @@ DEFAULTS = {
         "area_prompt": AREA_PROMPT,
         "target_scope_prompt": TARGET_SCOPE_PROMPT, "target_scope_confidence": 0,
         "text_prompt": TEXT_INSTRUCTIONS, "message_prompt": MESSAGE_INSTRUCTIONS,
-        "text_probability_threshold": 0.02,
+        "text_probability_threshold": 0.3,
+        "numeric_prompt": NUMERIC_INSTRUCTIONS, "numeric_mode_prompt": NUMERIC_MODE_INSTRUCTIONS, "numeric_confidence": 0,
         "service_confidence": 0, "area_confidence": 0,
     },
     "answer": {
@@ -79,7 +87,7 @@ def normalize_settings(data):
             settings[key] = data[key]
     if settings["general"]["prompt"] == LEGACY_GENERAL_PROMPT:
         settings["general"]["prompt"] = GENERAL_PROMPT
-    if settings["decider"]["service_prompt"] == LEGACY_SERVICE_PROMPT:
+    if settings["decider"]["service_prompt"] in (LEGACY_SERVICE_PROMPT, LEGACY_TEXT_SERVICE_PROMPT):
         settings["decider"]["service_prompt"] = SERVICE_PROMPT
     decider = data.get("decider", {})
     if settings["decider"]["target_scope_prompt"] in (
@@ -88,6 +96,9 @@ def normalize_settings(data):
         settings["decider"]["target_scope_prompt"] = TARGET_SCOPE_PROMPT
     if "domain_confidence" not in decider and "domain_filter_confidence" in decider:
         settings["decider"]["domain_confidence"] = decider["domain_filter_confidence"]
+    for field, old in (("numeric_prompt", LEGACY_NUMERIC_INSTRUCTIONS), ("numeric_mode_prompt", LEGACY_NUMERIC_MODE_INSTRUCTIONS)):
+        if settings["decider"][field] == old:
+            settings["decider"][field] = DEFAULTS["decider"][field]
     for field in ("text_prompt", "message_prompt"):
         if settings["decider"][field] in LEGACY_PROMPTS:
             settings["decider"][field] = DEFAULTS["decider"][field]
@@ -117,7 +128,7 @@ def validate_settings(data):
     for field in ("parameter_probability_threshold", "action_area_probability_threshold", "action_entity_probability_threshold",
                   "query_target_probability_threshold", "text_probability_threshold"):
         _range(decider, field, 0, 1, "decider")
-    for stage in ("service", "area", "domain", "query_type", "binary_answer", "target_scope"):
+    for stage in ("service", "area", "domain", "query_type", "binary_answer", "target_scope", "numeric"):
         _range(decider, f"{stage}_confidence", 0, 1, "decider")
     if not isinstance(settings["history_enabled"], bool):
         raise TypeError("history_enabled must be a boolean.")

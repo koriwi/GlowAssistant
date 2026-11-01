@@ -74,6 +74,17 @@ class ChatLogTraceTests(unittest.TestCase):
         self.assertEqual(json.loads(json.dumps(asdict(result_message)))["tool_result"], result)
         self.assertFalse(self.trace.calls)
 
+    def test_each_parameter_has_an_independent_native_extraction_card(self):
+        for stage, name, value, tool in (("text:item", "item", "nudeln", "glow_assistant_extract_text"),
+                                        ("text:description", "description", "weizen", "glow_assistant_extract_text"),
+                                        ("numeric:brightness_pct", "brightness_pct", 50, "glow_assistant_extract_number")):
+            self.trace(stage, {"parameter": name})
+            self.trace(stage, {}, {"parameter": name, "value": value})
+            self.assertEqual(self.messages[-2].tool_calls[0].tool_name, tool)
+            self.assertEqual(self.messages[-1].tool_result["value"], value)
+        self.assertEqual(len({message.tool_calls[0].id for message in self.messages if isinstance(message, AssistantContent)}), 3)
+        self.assertFalse(self.trace.calls)
+
     def test_repeated_stages_use_unique_call_ids(self):
         for _ in range(2):
             self.trace("area", {})

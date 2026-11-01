@@ -1,7 +1,7 @@
 import json
 
 from .client import ModelError
-from .validation import finite_number
+from .validation import finite_number, probability_cutoff
 
 INSTRUCTIONS = (
     "Which optional parameters of the selected Home Assistant action are relevant to the user's request? "
@@ -94,7 +94,9 @@ def decode_parameters(response, optional, threshold):
             raise ModelError("Malformed optional parameter response.")
     except (KeyError, TypeError, AttributeError) as error:
         raise ModelError("Malformed optional parameter response.") from error
+    cutoff = probability_cutoff(threshold, len(optional))
     return {
-        "selected_parameters": [name for name in optional if probabilities[name] > threshold],
+        "selected_parameters": [name for name in optional if probabilities[name] >= cutoff],
         "probabilities": probabilities, "probability_threshold": threshold,
+        "effective_probability_threshold": cutoff, "real_option_count": len(optional),
     }

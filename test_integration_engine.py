@@ -249,7 +249,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_action_target_scope_choices_and_speaker_context(self):
         with patch.object(AgentEngine, "_select_action_targets", new_callable=AsyncMock, return_value=SNAPSHOT["entities"]), \
-                patch.object(AgentEngine, "_extract_text", new_callable=AsyncMock):
+                patch.object(AgentEngine, "_extract_parameters", new_callable=AsyncMock):
             for scope, location, prompt in (
                 ("entities", None, "Add milk to the shopping list"),
                 ("entities", "Kitchen", "Setze Brot auf die Einkaufsliste"),
@@ -302,7 +302,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(choice=choice), self.assertRaisesRegex(ModelError, "Invalid classifier"):
                 await self.run_agent([{"service": "light.turn_off"}, {"target_scope": choice}], speaker_area=" ")
 
-    async def test_parameterized_action_returns_all_raw_metadata_without_extraction(self):
+    async def test_parameterized_action_returns_all_raw_metadata_before_value_extraction(self):
         snapshot = copy.deepcopy(SNAPSHOT)
         description = {
             "name": "Set temperature", "description": "Set the thermostat target", "target": {"entity": {"domain": "climate"}},
@@ -317,9 +317,10 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         original = copy.deepcopy(snapshot)
         history = [{"role": "user", "content": "Set the office to 20 degrees"}, {"role": "assistant", "content": "Selected."}]
         settings = normalize_settings({"history_enabled": True})
-        result, models = await self.run_agent([
-            {"service": "climate.set_temperature:temperature"}, {"target_scope": "areas"}, {"action_areas": "area:office"}, {"optional_parameters": "none"},
-        ], snapshot=snapshot, settings=settings, history=history, language="fr-CH")
+        with patch.object(AgentEngine, "_extract_parameters", new_callable=AsyncMock):
+            result, models = await self.run_agent([
+                {"service": "climate.set_temperature:temperature"}, {"target_scope": "areas"}, {"action_areas": "area:office"}, {"optional_parameters": "none"},
+            ], snapshot=snapshot, settings=settings, history=history, language="fr-CH")
         self.assertEqual(result["action_metadata"], {"service": "climate.set_temperature",
                                                   "selection": "climate.set_temperature:temperature", **description})
         self.assertEqual(snapshot, original)
@@ -340,7 +341,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
             "hue": {"selector": {"number": {"min": 0, "max": 360}}},
             "child_lock": {"selector": {"boolean": {}}},
         }
-        probabilities = {"brightness_pct": 0.25, "hue": 0.2, "child_lock": 0.05, "none": 0.5}
+        probabilities = {"brightness_pct": 0.29, "hue": 0.2, "child_lock": 0.01, "none": 0.5}
         events = []
         settings = normalize_settings({"decider": {"parameter_prompt": "Custom parameter task", "parameter_probability_threshold": 0.15}})
         result, models = await self.run_parameter_stage([
@@ -880,12 +881,12 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("minimum_confidence", output["decisions"]["query_targets"])
 
 
-    async def test_query_choice_threshold_is_strict_and_empty_selection_stops(self):
+    async def test_query_choice_below_relative_cutoff_stops_on_empty_selection(self):
         settings = normalize_settings({"decider": {"query_target_probability_threshold": 0.3}})
         result, models = await self.run_agent([
             {"service": "query_state"}, {"area": "area:office"}, {"domain": "light"}, {"query_type": "complex"},
             {"query_targets": {"type": "choice", "choice": "none", "confidence": 0.9,
-                               "probabilities": {"entity:light.desk": 0.3, "entity:light.ceiling": 0.2, "none": 0.5}}},
+                               "probabilities": {"entity:light.desk": 0.1, "entity:light.ceiling": 0.14, "none": 0.76}}},
         ], settings=settings)
         self.assertEqual(result["route"], "unsure")
         self.assertEqual(result["target_selection"]["selected_entity_ids"], [])
@@ -898,8 +899,8 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
                    state="22" if index < 18 else "50", device_class="temperature" if index < 18 else "humidity",
                    unit_of_measurement="°C" if index < 18 else "%") for index in range(54)
         ]}
-        probabilities = {f"entity:sensor.value_{index}": 0.05 if index < 18 else 0.0025 for index in range(54)}
-        probabilities["none"] = 0.01
+        probabilities = {f"entity:sensor.value_{index}": 0.05 if index < 18 else 0.0001 for index in range(54)}
+        probabilities["none"] = 0.0964
         settings = normalize_settings({"decider": {"target_filter_confidence": 1, "query_target_keep_uncertain": True}})
         events = []
         result, models = await self.run_agent([
@@ -1027,7 +1028,7 @@ class IntegrationSettingsTests(unittest.TestCase):
         self.assertEqual(settings["decider"]["api_key"], "")
 
     def test_parameter_probability_setting_is_validated_independently_of_confidence(self):
-        self.assertEqual(self.local_settings()["decider"]["parameter_probability_threshold"], 0.3)
+        self.assertEqual(self.local_settings()["decider"]["parameter_probability_threshold"], 0.15)
         for value in (-0.1, 1.1, True, float("nan")):
             settings = self.local_settings()
             settings["decider"]["parameter_probability_threshold"] = value
@@ -1039,14 +1040,26 @@ class IntegrationSettingsTests(unittest.TestCase):
 
     def test_removed_settings_are_ignored_and_new_text_cutoff_is_independent(self):
         removed = {"target_filter_prompt": "old rules", "target_filter_confidence": 1,
-                   "target_prompt": "old target", "target_confidence": 1, "numeric_prompt": "old numeric",
-                   "numeric_confidence": 1, "temperature_min": 27, "position_step": 0.5,
+                   "target_prompt": "old target", "target_confidence": 1, "temperature_min": 27, "position_step": 0.5,
                    "query_target_keep_uncertain": True, "action_target_keep_uncertain": True,
                    "text_confidence": 0.9, "text_keep_uncertain": True}
         saved = normalize_settings({"decider": removed})
         self.assertFalse(set(removed) & set(saved["decider"]))
-        self.assertEqual(saved["decider"]["text_probability_threshold"], 0.02)
+        self.assertEqual(saved["decider"]["text_probability_threshold"], 0.3)
         self.assertEqual(normalize_settings({"decider": {"text_probability_threshold": 0.05}})["decider"]["text_probability_threshold"], 0.05)
+
+    def test_saved_thresholds_and_custom_prompts_are_preserved(self):
+        from custom_components.glow_assistant.parameter_values import (
+            LEGACY_NUMERIC_INSTRUCTIONS,
+            LEGACY_NUMERIC_MODE_INSTRUCTIONS,
+        )
+
+        saved = normalize_settings({"decider": {"text_probability_threshold": 0.02, "parameter_probability_threshold": 0.3}})["decider"]
+        self.assertEqual(saved["text_probability_threshold"], 0.02)
+        self.assertEqual(saved["parameter_probability_threshold"], 0.3)
+        for name, old in (("numeric_prompt", LEGACY_NUMERIC_INSTRUCTIONS), ("numeric_mode_prompt", LEGACY_NUMERIC_MODE_INSTRUCTIONS)):
+            self.assertEqual(normalize_settings({"decider": {name: old}})["decider"][name], DEFAULTS["decider"][name])
+            self.assertEqual(normalize_settings({"decider": {name: "Custom rules"}})["decider"][name], "Custom rules")
 
     def test_old_stock_text_prompts_upgrade_and_custom_prompts_are_preserved(self):
         from custom_components.glow_assistant.text_values import LEGACY_PROMPTS
@@ -1147,8 +1160,8 @@ class IntegrationSettingsTests(unittest.TestCase):
 
         saved = normalize_settings({"decider": {"service_prompt": LEGACY_SERVICE_PROMPT}})
         self.assertEqual(saved["decider"]["service_prompt"], SERVICE_PROMPT)
-        self.assertIn("todo.add_item", saved["decider"]["service_prompt"])
-        self.assertEqual(saved["decider"]["text_probability_threshold"], 0.02)
+        self.assertIn("field metadata", saved["decider"]["service_prompt"])
+        self.assertEqual(saved["decider"]["text_probability_threshold"], 0.3)
         custom = normalize_settings({"decider": {"service_prompt": "Custom action rules", "text_prompt": "Custom extraction rules"}})
         self.assertEqual(custom["decider"]["service_prompt"], "Custom action rules")
         self.assertEqual(custom["decider"]["text_prompt"], "Custom extraction rules")
@@ -1201,7 +1214,7 @@ class IntegrationSettingsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "answer"):
             validate_settings(settings)
 
-    def test_action_catalog_omits_unsupported_required_values(self):
+    def test_action_catalog_passes_required_fields_to_extraction_and_omits_required_responses(self):
         options = action_options({
             "light.turn_on": {"fields": {}}, "climate.set_temperature": {"fields": {}},
             "climate.set_hvac_mode": {"fields": {"hvac_mode": {"required": True}}},
@@ -1212,12 +1225,12 @@ class IntegrationSettingsTests(unittest.TestCase):
         self.assertIn("light.turn_on:brightness_pct", options)
         self.assertIn("climate.set_temperature:temperature", options)
         self.assertNotIn("climate.set_temperature", options)
-        self.assertNotIn("climate.set_hvac_mode", options)
+        self.assertIn("climate.set_hvac_mode", options)
         self.assertNotIn("todo.get_items", options)
         self.assertIn("cover.set_cover_position:position", options)
         self.assertNotIn("cover.set_cover_position", options)
 
-    def test_text_catalog_is_limited_to_the_three_explicit_action_field_pairs(self):
+    def test_catalog_includes_other_native_actions_with_required_text_fields(self):
         services = {
             name: {"fields": {parameter: {"required": name != "assist_satellite.announce"}}}
             for name, (parameter, _) in TEXT_ACTIONS.items()
@@ -1228,16 +1241,17 @@ class IntegrationSettingsTests(unittest.TestCase):
             "todo.update_item": {"fields": {"item": {"required": True}}},
         })
         options = action_options(services)
-        self.assertEqual(set(options), set(TEXT_ACTIONS))
+        self.assertEqual(set(options), set(services))
         for name, (parameter, _) in TEXT_ACTIONS.items():
             self.assertEqual(options[name]["parameter"], parameter)
             self.assertEqual(options[name]["parameter_type"], "text")
 
-    def test_text_action_is_not_offered_when_another_required_field_is_present(self):
-        self.assertEqual(action_options({
+    def test_text_action_with_extra_required_fields_is_offered_for_typed_extraction(self):
+        options = action_options({
             "notify.send_message": {"fields": {"message": {"required": True}, "title": {"required": True}}},
             "todo.add_item": {"fields": {}},
-        }), {})
+        })
+        self.assertEqual(set(options), {"notify.send_message"})
 
     def test_legacy_other_and_malformed_responses_are_errors(self):
         response = {"answers": {"target": {"type": "choice", "choice": "other", "confidence": 1, "probabilities": {"unsure": 1}}}}

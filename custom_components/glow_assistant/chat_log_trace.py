@@ -19,6 +19,7 @@ STAGE_NAMES = {
     "action_entities": "glow_assistant_select_action_entities",
     "target": "glow_assistant_select_target",
     "text": "glow_assistant_extract_text",
+    "numeric": "glow_assistant_extract_number",
     "answer": "glow_assistant_generate_answer",
     "general": "glow_assistant_general_answer",
     "mcp": "glow_assistant_mcp_tool",
@@ -48,7 +49,7 @@ class ChatLogTrace:
                 self.failure_reported = True
             else:
                 self.stage = stage
-            call = ToolInput(tool_name=STAGE_NAMES[stage], tool_args=arguments, external=True)
+            call = ToolInput(tool_name=STAGE_NAMES[stage.split(":", 1)[0]], tool_args=arguments, external=True)
             self.calls[stage] = call
             self.chat_log.async_add_assistant_content_without_tools(
                 AssistantContent(agent_id=self.agent_id, tool_calls=[call],

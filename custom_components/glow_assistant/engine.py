@@ -19,8 +19,14 @@ from .optional_parameters import (
     filter_fields,
     parameter_request,
 )
+from .parameter_values import (
+    UnsupportedParameter,
+    decode_number,
+    field_type,
+    numeric_request,
+)
 from .text_values import TEXT_ACTIONS, decode_text, text_request
-from .validation import finite_number
+from .validation import finite_number, probability_cutoff
 
 
 class Uncertain(Exception):
@@ -62,20 +68,18 @@ def action_options(services):
         if description.get("response", {}).get("optional") is False:
             continue
         fields = description.get("fields") or {}
-        required = {key for key, field in fields.items() if field.get("required")}
         base = {"service": name, "description": description.get("description", name)}
         if name in TEXT_ACTIONS:
             parameter, explanation = TEXT_ACTIONS[name]
-            if parameter in fields and required <= {parameter}:
+            if parameter in fields:
                 options[name] = {**base, "parameter": parameter, "parameter_type": "text",
-                                 "parameter_description": explanation, "mode": "Only the named free-text parameter; no extra fields."}
+                                 "parameter_description": explanation, "mode": "Required and selected optional fields are extracted from HA metadata."}
             continue
-        if not required and name not in ("climate.set_temperature", "cover.set_cover_position"):
-            options[name] = {**base, "parameter": None, "mode": "target-only; no extra values"}
+        if name not in ("climate.set_temperature", "cover.set_cover_position"):
+            options[name] = {**base, "parameter": None, "mode": "Required and selected optional fields are extracted from HA metadata."}
         parameter = {"climate.set_temperature": "temperature", "light.turn_on": "brightness_pct",
                      "cover.set_cover_position": "position"}.get(name)
-        allowed = {"brightness", "brightness_pct"} if parameter == "brightness_pct" else {parameter}
-        if parameter and required <= allowed:
+        if parameter:
             options[f"{name}:{parameter}"] = {**base, "parameter": parameter}
     return options
 
@@ -148,6 +152,10 @@ class AgentEngine:
             )
             if summarize:
                 details.update(summarize(response))
+                if details.get("selection_mode") == "highest_probability":
+                    for decision in details["decisions"].values():
+                        decision.update(probability_threshold=None, effective_probability_threshold=None,
+                                        selection_basis="unique_highest_probability")
             return response
         except ModelError as error:
             details.update(status="error", error=str(error), **error.details)
@@ -179,7 +187,10 @@ class AgentEngine:
         try:
             await self._process(result, snapshot, (speaker_area or "").strip() or None)
         except Uncertain as error:
-            result.update(route=UNSURE, answer=self.settings["unsure_reply"])
+            if error.details.get("not_supported"):
+                result.update(route="unsupported", answer=error.details["reason"], error=error.details["reason"])
+            else:
+                result.update(route=UNSURE, answer=self.settings["unsure_reply"])
             self._failure(result, error.details)
         except ModelError as error:
             self._failure(result, model_failure(self.stage, error))
@@ -250,7 +261,7 @@ class AgentEngine:
             result["target_scope"] = self._choice(response, "target_scope", scopes)
             members = await self._select_action_targets(result, entities)
             await self._select_parameters(result, members)
-            await self._extract_text(result)
+            await self._extract_parameters(result, members)
             return
 
         result["service"] = QUERY
@@ -389,7 +400,9 @@ class AgentEngine:
         result["required_parameters"] = [name for name, field in fields.items() if field.get("required", False)]
         if not optional:
             result["parameter_selection"] = {"selected_parameters": [], "probabilities": {},
-                                             "probability_threshold": config["parameter_probability_threshold"]}
+                                             "probability_threshold": config["parameter_probability_threshold"],
+                                             "effective_probability_threshold": probability_cutoff(config["parameter_probability_threshold"], 0),
+                                             "real_option_count": 0}
             return
 
         def summarize(response):
@@ -399,30 +412,56 @@ class AgentEngine:
 
         await self._decide(result, "optional_parameters", payload["state"], payload["questions"], summarize=summarize)
 
-    async def _extract_text(self, result):
-        service = result["service"]
-        if service not in TEXT_ACTIONS:
-            return
-        parameter = TEXT_ACTIONS[service][0]
+    async def _extract_parameters(self, result, members):
         selected = result["required_parameters"] + result["parameter_selection"]["selected_parameters"]
-        if parameter not in selected:
+        if not selected:
             return
         config = self.settings["decider"]
-        prompt = config["text_prompt" if parameter == "item" else "message_prompt"]
-        words, payload = text_request(result["request"], service, prompt)
-        payload["state"]["target"] = result["target"]
+        fields = action_fields(result["action_metadata"].get("fields") or {})
+        fields = {name: fields[name] for name in dict.fromkeys(selected)}
+        plans = []
+        try:
+            for name, field in fields.items():
+                kind = field_type(name, field)
+                supported = result["parameter_capabilities"]["field_support"][name]["supported_entity_ids"]
+                targets = [entity for entity in members if entity["entity_id"] in supported]
+                if kind == "text":
+                    prompt = config["message_prompt" if name == "message" else "text_prompt"]
+                    options, payload = text_request(result["request"], result["service"], prompt, name, field, fields)
+                else:
+                    options = None
+                    payload = numeric_request(result["request"], result["service"], name, field, fields,
+                                              targets, config["numeric_prompt"], config["numeric_mode_prompt"])
+                payload["state"]["target"] = result["target"]
+                payload["state"]["supported_entity_ids"] = supported
+                plans.append((name, kind, options, payload))
+        except UnsupportedParameter as error:
+            raise Uncertain("parameters", str(error), "Remove this parameter from the request or use Home Assistant's action UI.",
+                            not_supported=True, parameter=name, field=field) from error
 
-        def summarize(response):
-            selection = decode_text(response, words, config["text_probability_threshold"])
-            result["text_extraction"] = {**selection, "parameter": parameter}
-            return result["text_extraction"]
+        values = {}
+        for name, kind, options, payload in plans:
+            stage = f"{kind if kind == 'text' else 'numeric'}:{name}"
 
-        await self._decide(result, "text", payload["state"], payload["questions"], summarize=summarize)
-        value = result["text_extraction"]["value"]
-        if not value:
-            raise Uncertain("text", "No words were retained for the requested text parameter.",
-                            "Specify the item or message. Review the word probabilities and text probability threshold.")
-        result["parameters"] = {parameter: value}
+            def summarize(response):
+                value = (decode_text(response, options, config["text_probability_threshold"]) if kind == "text" else
+                         decode_number(response, payload["state"], config["numeric_confidence"]))
+                if kind == "text" and value["value"] == "" and name not in result["required_parameters"]:
+                    value.update(status="skipped", reason="No words were retained for this optional text parameter.")
+                result.setdefault("parameter_extractions", {})[name] = {**value, "parameter": name, "type": kind,
+                                                                         "supported_entity_ids": payload["state"]["supported_entity_ids"]}
+                return result["parameter_extractions"][name]
+
+            await self._decide(result, stage, payload["state"], payload["questions"], summarize=summarize)
+            extraction = result["parameter_extractions"][name]
+            if extraction.get("status") == "skipped":
+                continue
+            value = extraction["value"]
+            if value is None or value == "":
+                raise Uncertain(stage, extraction.get("reason", f"No words were retained for parameter '{name}'."),
+                                "Specify the requested value. Review the extraction decisions and thresholds.", parameter=name)
+            values[name] = value
+        result["parameters"] = values
 
     async def _answer_yes_no(self, result, entities, area, language_instruction):
         candidates = [

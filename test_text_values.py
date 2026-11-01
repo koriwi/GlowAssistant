@@ -30,6 +30,18 @@ class TextValuesTests(unittest.TestCase):
         self.assertNotIn("words", request["state"])
         self.assertEqual(str(request).count(INSTRUCTIONS), 1)
         self.assertEqual(request["state"]["parameter"], "item")
+        self.assertEqual(request["state"]["other_parameters"], [])
+
+    def test_default_text_threshold_excludes_command_words_from_the_reported_distribution(self):
+        prompt = "setze zwiebeln auf die einkaufsliste."
+        words, _ = text_request(prompt, "todo.add_item", INSTRUCTIONS)
+        probabilities = dict(zip([*words, "none"], [0.00832102473981359, 0.9511921715845962, 0.007895197376288885,
+                                                   0.0032521662762517627, 0.0030805915038456546, 0.026258848519203994], strict=True))
+        threshold = normalize_settings({})["decider"]["text_probability_threshold"]
+        selection = decode_text(response_for(probabilities), words, threshold)
+        self.assertEqual(selection["value"], "zwiebeln")
+        self.assertEqual(selection["probability_threshold"], 0.3)
+        self.assertEqual(selection["effective_probability_threshold"], 0.06)
 
     def test_message_actions_use_their_own_prompt(self):
         for service in ("notify.send_message", "assist_satellite.announce"):
@@ -41,17 +53,21 @@ class TextValuesTests(unittest.TestCase):
     def test_preserves_word_order_duplicates_punctuation_and_case_ignoring_confidence_and_none(self):
         words, _ = text_request("Sage Hi, Hi! bitte", "assist_satellite.announce", MESSAGE_INSTRUCTIONS)
         probabilities = {"none": 0.5, "word:2:Hi!": 0.2, "word:1:Hi,": 0.2, "word:3:bitte": 0.05, "word:0:Sage": 0.05}
-        selection = decode_text(response_for(probabilities), words, 0.1)
+        selection = decode_text(response_for(probabilities), words, 0.3)
         self.assertEqual(selection["value"], "Hi, Hi!")
         self.assertEqual(selection["selected_choices"], ["word:1:Hi,", "word:2:Hi!"])
         self.assertEqual(selection["probabilities"], probabilities)
+        self.assertEqual(selection["real_option_count"], 4)
+        self.assertAlmostEqual(selection["effective_probability_threshold"], 0.075)
 
-    def test_threshold_is_strict_and_none_can_produce_empty_text(self):
+    def test_threshold_is_inclusive_and_none_can_produce_empty_text(self):
         words, _ = text_request("Add milk", "todo.add_item", INSTRUCTIONS)
-        response = response_for({"word:0:Add": 0, "word:1:milk": 0.2, "none": 0.8})
+        response = response_for({"word:0:Add": 0, "word:1:milk": 0.099, "none": 0.901})
         self.assertEqual(decode_text(response, words, 0.2)["value"], "")
+        response["answers"]["text_words"]["probabilities"].update({"word:1:milk": 0.1, "none": 0.9})
+        self.assertEqual(decode_text(response, words, 0.2)["value"], "milk")
         response["answers"]["text_words"]["probabilities"].update({"word:1:milk": 0, "none": 1})
-        self.assertEqual(decode_text(response, words, 0)["value"], "")
+        self.assertEqual(decode_text(response, words, 0)["value"], "Add milk")
 
     def test_malformed_missing_extra_and_invalid_probabilities_are_rejected(self):
         words, _ = text_request("Add milk", "todo.add_item", INSTRUCTIONS)
@@ -116,9 +132,9 @@ class TextEngineTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(questions, [{"service"}, {"target_scope"}, {"action_entities"}]
                                  + ([{"optional_parameters"}] if optional else []) + [{"text_words"}])
                 self.assertEqual(client.requests[-1][1]["target"], result["target"])
-                text_output = next(output for stage, _, output in events if stage == "text" and output)
+                text_output = next(output for stage, _, output in events if stage.startswith("text:") and output)
                 self.assertEqual(text_output["value"], expected)
-                self.assertEqual(text_output["probability_threshold"], 0.02)
+                self.assertEqual(text_output["probability_threshold"], 0.3)
                 self.assertIn("probabilities", text_output["decisions"]["text_words"])
 
     async def test_language_history_and_custom_prompt_reach_text_step_without_leaking_instructions_to_debug(self):
@@ -137,7 +153,7 @@ class TextEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["route"], "unsure")
         self.assertEqual(result["answer"], "ich bin mir nicht sicher")
         self.assertNotIn("parameters", result)
-        self.assertEqual(result["failures"][0]["stage"], "text")
+        self.assertEqual(result["failures"][0]["stage"], "text:item")
         self.assertEqual(result["failures"][0]["device_command"], "not_sent")
         self.assertFalse(client.chat_requests)
         self.assertEqual(events[-1][0], "failure")
@@ -150,12 +166,12 @@ class TextEngineTests(unittest.IsolatedAsyncioTestCase):
         client = ScriptedModels(choices)
         events = []
         snapshot = {"entities": [entity("todo.shopping", "Shopping", area=None)],
-                    "services": {"todo.add_item": {"fields": {"item": {"required": True}}}}}
+                    "services": {"todo.add_item": {"fields": {"item": {"required": True, "selector": {"text": {}}}}}}}
         with self.assertRaisesRegex(ModelError, "Malformed text extraction response"):
             await AgentEngine(normalize_settings({}), client, trace=lambda *event: events.append(event)).process("Add milk", "en", snapshot)
         self.assertEqual(len(client.requests), 4)
         self.assertFalse(client.chat_requests)
-        self.assertEqual(events[-1][2]["stage"], "text")
+        self.assertEqual(events[-1][2]["stage"], "text:item")
 
     async def test_optional_message_not_selected_skips_extraction(self):
         from test_integration_engine import ScriptedModels, entity
@@ -165,7 +181,7 @@ class TextEngineTests(unittest.IsolatedAsyncioTestCase):
         snapshot = {"entities": [entity("notify.kitchen", "Kitchen", area=None)],
                     "services": {"notify.send_message": {"fields": {"message": {"selector": {"text": {}}}}}}}
         result = await AgentEngine(normalize_settings({}), client).process("Notify Kitchen", "en", snapshot)
-        self.assertNotIn("text_extraction", result)
+        self.assertNotIn("parameter_extractions", result)
         self.assertNotIn("parameters", result)
         self.assertEqual(len(client.requests), 4)
 

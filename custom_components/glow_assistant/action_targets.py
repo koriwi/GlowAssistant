@@ -1,7 +1,7 @@
 import json
 
 from .client import ModelError
-from .validation import finite_number
+from .validation import finite_number, probability_cutoff
 
 AREA_INSTRUCTIONS = (
     "Select the area or areas requested for the selected Home Assistant action. "
@@ -43,12 +43,14 @@ def decode_selection(response, question, options, threshold=None):
             raise ModelError("Malformed target selection response: invalid Choice probabilities.")
     except (KeyError, TypeError, AttributeError) as error:
         raise ModelError("Malformed target selection response: invalid Choice probabilities.") from error
+    cutoff = probability_cutoff(threshold, len(options)) if threshold is not None else None
     if threshold is None:
         maximum = max(probabilities.values())
         highest = [label for label, value in probabilities.items() if value == maximum]
         selected = highest if len(highest) == 1 and highest[0] != "none" else []
     else:
-        selected = [key for key in options if probabilities[key] > threshold]
+        selected = [key for key in options if probabilities[key] >= cutoff]
     return {"selected_choices": selected, "probabilities": probabilities,
-            "selection_mode": "highest_probability" if threshold is None else "above_probability_threshold",
-            "probability_threshold": threshold}
+            "selection_mode": "highest_probability" if threshold is None else "at_or_above_probability_threshold",
+            "probability_threshold": threshold, "effective_probability_threshold": cutoff,
+            "real_option_count": len(options)}

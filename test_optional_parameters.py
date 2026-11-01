@@ -107,18 +107,30 @@ class OptionalParameterTests(unittest.TestCase):
         self.assertEqual(fields, original)
 
     def test_multiple_parameters_are_selected_without_using_overall_confidence_or_none_vote(self):
-        result = decode_parameters(response({"brightness": 0.25, "hue": 0.2, "child_lock": 0.05, "none": 0.5}),
+        result = decode_parameters(response({"brightness": 0.29, "hue": 0.2, "child_lock": 0.01, "none": 0.5}),
                                    {"brightness": {}, "hue": {}, "child_lock": {}}, 0.15)
         self.assertEqual(result["selected_parameters"], ["brightness", "hue"])
         self.assertEqual(result["probabilities"]["none"], 0.5)
         self.assertEqual(result["probability_threshold"], 0.15)
 
-    def test_threshold_is_strict_and_none_is_never_a_parameter(self):
+    def test_three_parameters_use_relative_cutoff_excluding_none(self):
+        parameters = {"name": {}, "description": {}, "child_lock": {}}
+        result = decode_parameters(response({"name": 0.84, "description": 0.16, "child_lock": 0, "none": 0}), parameters, 0.3)
+        self.assertEqual(result["selected_parameters"], ["name", "description"])
+        self.assertEqual(result["real_option_count"], 3)
+        self.assertEqual(result["probability_threshold"], 0.3)
+        self.assertAlmostEqual(result["effective_probability_threshold"], 0.1)
+        result = decode_parameters(response({"name": 0.901, "description": 0.099, "child_lock": 0, "none": 0}), parameters, 0.3)
+        self.assertEqual(result["selected_parameters"], ["name"])
+
+    def test_threshold_is_inclusive_and_none_is_never_a_parameter(self):
         optional = {"brightness": {}, "hue": {}}
-        probabilities = {"brightness": 0.15, "hue": 0, "none": 0.85}
-        self.assertEqual(decode_parameters(response(probabilities), optional, 0.15)["selected_parameters"], [])
-        self.assertEqual(decode_parameters(response(probabilities), optional, 0)["selected_parameters"], ["brightness"])
+        probabilities = {"brightness": 0.075, "hue": 0, "none": 0.925}
+        self.assertEqual(decode_parameters(response(probabilities), optional, 0.15)["selected_parameters"], ["brightness"])
+        self.assertEqual(decode_parameters(response(probabilities), optional, 0)["selected_parameters"], ["brightness", "hue"])
         self.assertEqual(decode_parameters(response(probabilities), optional, 1)["selected_parameters"], [])
+        self.assertEqual(decode_parameters(response({"brightness": 0.5, "hue": 0.5, "none": 0}), optional, 1)["selected_parameters"],
+                         ["brightness", "hue"])
 
     def test_malformed_responses_are_rejected(self):
         valid = response({"brightness": 0.7, "none": 0.3})

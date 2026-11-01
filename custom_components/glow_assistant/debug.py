@@ -1,7 +1,7 @@
 import json
 import re
 
-from .validation import finite_number
+from .validation import finite_number, probability_cutoff
 
 STAGE_LABELS = {
     "context": "Read Home Assistant devices",
@@ -16,7 +16,9 @@ STAGE_LABELS = {
     "action_areas": "Select action areas",
     "action_entities": "Select action entities",
     "target": "Choose a device or room",
-    "text": "Extract item or message text",
+    "text": "Extract text parameter",
+    "numeric": "Extract numeric parameter",
+    "parameters": "Extract action parameter values",
     "answer": "Generate the smart-home answer",
     "general": "Generate the general answer",
     "mcp_connect": "Connect to MCP servers",
@@ -26,7 +28,7 @@ STAGE_LABELS = {
 
 def failure_details(stage, reason, suggestion, status="error", **details):
     return {
-        "status": status, "stage": stage, "step": STAGE_LABELS.get(stage, stage),
+        "status": status, "stage": stage, "step": STAGE_LABELS.get(stage.split(":", 1)[0], stage),
         "reason": reason, "suggestion": suggestion, **details,
     }
 
@@ -73,6 +75,9 @@ def model_failure(stage, error):
     elif "classifier" in message:
         reason = "The decider returned an invalid decision."
         suggestion = "Check that Decider uses a native decision endpoint, such as /v1/systemone on llama.cpp."
+    elif message.startswith("Malformed numeric extraction response"):
+        reason = "The decider returned an invalid numeric value."
+        suggestion = "Check the Decider endpoint and numeric extraction prompt. Review the numeric decisions."
     elif message.startswith("Malformed text extraction response"):
         reason = "The decider returned invalid or incomplete word selections."
         suggestion = "Check the Decider endpoint and text extraction prompt. Review the preceding word decisions."
@@ -117,14 +122,22 @@ def decision_details(questions, answers, config):
             "text_words": "text_probability_threshold",
         }
         if name in probability_fields:
+            threshold = config[probability_fields[name]]
+            option_count = len(set(question["criteria"]) - {"none", "unsure"})
             details[name] = {
                 "type": question["type"], "choice": answer.get("choice"), "confidence": confidence,
                 "probabilities": answer.get("probabilities", {}),
-                "probability_threshold": config[probability_fields[name]],
-                "selection_basis": "per_option_probability; overall confidence is not a filter",
+                "probability_threshold": threshold,
+                "effective_probability_threshold": probability_cutoff(threshold, option_count),
+                "real_option_count": option_count,
+                "selection_basis": "relative_probability_cutoff; overall confidence is not a filter",
             }
             continue
-        threshold = config[f"{name}_confidence"]
+        threshold = config["numeric_confidence"] if name in ("numeric_mode", "numeric_score") else config[f"{name}_confidence"]
+        if question["type"] == "score":
+            details[name] = {"type": "score", "score": answer.get("score"), "confidence": confidence,
+                             "minimum_confidence": threshold, "probabilities": answer.get("probabilities", {})}
+            continue
         info = {"type": question["type"], "confidence": confidence, "minimum_confidence": threshold}
         choice = answer.get("choice")
         choice = choice if isinstance(choice, str) else None

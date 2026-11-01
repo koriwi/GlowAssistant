@@ -70,7 +70,7 @@ class BenchmarkSettingsTests(unittest.TestCase):
         self.assertEqual(configured["decider"]["service_confidence"], 0.9)
         self.assertEqual(configured["decider"]["parameter_probability_threshold"], 0.2)
         args = benchmark.parser().parse_args(["--query", "test", "--confidence", "0"])
-        self.assertEqual(benchmark.model_settings(settings(), args, {})["decider"]["parameter_probability_threshold"], 0.3)
+        self.assertEqual(benchmark.model_settings(settings(), args, {})["decider"]["parameter_probability_threshold"], 0.15)
 
     def test_action_selection_thresholds_are_independent_of_global_confidence(self):
         args = benchmark.parser().parse_args([
@@ -95,7 +95,7 @@ class BenchmarkSettingsTests(unittest.TestCase):
         configured = benchmark.model_settings(settings(), args, {})["decider"]
         self.assertEqual(configured["query_target_probability_threshold"], 0.04)
         self.assertEqual(configured["service_confidence"], 0.9)
-        self.assertEqual(configured["parameter_probability_threshold"], 0.3)
+        self.assertEqual(configured["parameter_probability_threshold"], 0.15)
 
 
 class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
@@ -155,7 +155,7 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
         exported = self.exported()
         exported["snapshot"] = {
             "entities": [entity("todo.shopping", "Einkaufsliste", area=None)],
-            "services": {"todo.add_item": {"fields": {"item": {"required": True}}}},
+            "services": {"todo.add_item": {"fields": {"item": {"required": True, "selector": {"text": {}}}}}},
         }
         words, _ = text_request(query, "todo.add_item", INSTRUCTIONS)
         probabilities = {key: 0.45 if word["word"] in ("Energy", "Drinks") else 0 for key, word in words.items()}
@@ -171,7 +171,9 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
         await AgentEngine(configured, addon).process(query, "de", exported["snapshot"])
         self.assertEqual(local.requests, addon.requests)
         self.assertEqual(report["result"]["parameters"], {"item": "Energy Drinks"})
-        self.assertEqual(report["result"]["text_extraction"]["probability_threshold"], 0.05)
+        self.assertEqual(report["result"]["parameter_extractions"]["item"]["probability_threshold"], 0.05)
+        self.assertEqual(report["result"]["parameter_extractions"]["item"]["real_option_count"], 6)
+        self.assertAlmostEqual(report["result"]["parameter_extractions"]["item"]["effective_probability_threshold"], 0.05 / 6)
         self.assertFalse(local.chat_requests)
         self.assertNotIn("execution", report["result"])
         output = io.StringIO()
@@ -179,7 +181,7 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
             benchmark.print_report(report)
         self.assertRegex(output.getvalue(), r"Parameter\s+Value")
         self.assertRegex(output.getvalue(), r"item\s+Energy Drinks")
-        self.assertRegex(output.getvalue(), r"text\s+\d+\s+item=Energy Drinks")
+        self.assertRegex(output.getvalue(), r"text:item\s+\d+\s+item=Energy Drinks")
 
     async def test_action_benchmark_prints_field_metadata_and_stops_after_selection(self):
         args = benchmark.parser().parse_args(["--query", "Set the office lights to 50 percent"])
@@ -190,7 +192,12 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
                                           "selector": {"number": {"min": 0, "max": 100, "step": 1}}},
                        "hue": {"selector": {"number": {"min": 0, "max": 360}}}},
         }
-        models = ScriptedModels([{"service": "light.turn_on:brightness_pct"}, {"target_scope": "areas"}, {"action_areas": "area:office"}, {"optional_parameters": "brightness_pct"}])
+        models = ScriptedModels([{"service": "light.turn_on:brightness_pct"}, {"target_scope": "areas"}, {"action_areas": "area:office"}, {"optional_parameters": "brightness_pct"}, {
+            "numeric_mode": {"type": "choice", "choice": "absolute", "confidence": 0.9,
+                             "probabilities": {"absolute": 1, "relative": 0, "unsure": 0}},
+            "numeric_score": {"type": "score", "score": 4, "confidence": 0.9,
+                              "probabilities": {str(index): 1 if index == 4 else 0 for index in range(9)}},
+        }])
         with (patch("benchmark.fetch_snapshot", new=AsyncMock(return_value=exported)),
               patch("benchmark.aiohttp.ClientSession", return_value=AsyncMock()),
               patch("benchmark.ModelClient", return_value=models)):
@@ -199,9 +206,9 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report["result"]["action_metadata"]["fields"],
                          exported["snapshot"]["services"]["light.turn_on"]["fields"])
         self.assertNotIn("execution", report["result"])
-        self.assertEqual(len(models.requests), 4)
+        self.assertEqual(len(models.requests), 5)
         self.assertFalse(models.chat_requests)
-        self.assertEqual({event["stage"] for event in report["trace"]}, {"service", "target_scope", "action_areas", "parameter_capabilities", "optional_parameters"})
+        self.assertEqual({event["stage"] for event in report["trace"]}, {"service", "target_scope", "action_areas", "parameter_capabilities", "optional_parameters", "numeric:brightness_pct"})
         output = io.StringIO()
         with redirect_stdout(output):
             benchmark.print_report(report, show_answer_input=True)
@@ -210,8 +217,9 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
         self.assertRegex(printed, r"speaker area\s+unknown")
         self.assertNotIn('"selector"', printed)
         self.assertIn("Selected optional parameters: brightness_pct", printed)
+        self.assertIn("Probability cutoff: 0.15 / max(1, 2) = 0.075", printed)
         self.assertRegex(printed, r"brightness_pct\s+1\.0000\s+2/2\s+keep")
-        self.assertNotIn("hue", printed)
+        self.assertRegex(printed, r"hue\s+0\.0000\s+2/2\s+drop: p < 0\.075")
         self.assertIn("hue", report["result"]["parameter_selection"]["probabilities"])
         self.assertIn("Answer model was not called.", printed)
         self.assertRegex(printed, r"area filter\s+Office")

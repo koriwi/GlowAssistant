@@ -18,7 +18,7 @@ flowchart TD
     BinaryAnswer -->|unsure| Unsure
     BinaryAnswer -->|yes / no| Translate["Answer model: translate yes/no into Assist language"]
     Translate --> Reply
-    QueryType -->|No| QueryTargets["Decider: one Choice over entities + none; retain above probability threshold"]
+    QueryType -->|No| QueryTargets["Decider: one Choice over entities + none; retain at or above relative probability cutoff"]
     QueryType -->|unsure| Unsure
     QueryTargets --> States["Read selected states from snapshot"]
     States --> Answer["Smart-home answer model"]
@@ -30,9 +30,9 @@ flowchart TD
     OneArea --> DomainArea["Filter entities by action domain and selected area"]
     Scope -->|"Entities + implied area"| Speaker["Use speaker area from HA context"]
     Speaker --> DomainArea
-    DomainOnly --> Entities["Decider: one Choice; keep entities above probability threshold"]
+    DomainOnly --> Entities["Decider: one Choice; keep entities at or above relative probability cutoff"]
     DomainArea --> Entities
-    Scope -->|"Explicit area(s), no specific entities"| Areas["Decider: one Choice; keep areas above probability threshold"]
+    Scope -->|"Explicit area(s), no specific entities"| Areas["Decider: one Choice; keep areas at or above relative probability cutoff"]
     Scope -->|"Implied area only"| SpeakerOnly["Use speaker area directly; no area or entity model call"]
     Areas --> AreaTargets["Selected areas are the targets"]
     SpeakerOnly --> AreaTargets
@@ -41,12 +41,18 @@ flowchart TD
     AreaTargets --> Capabilities
     Capabilities --> Required["List applicable required action fields"]
     Required --> HasOptional{"Optional fields available?"}
-    HasOptional -->|Yes| Parameters["Decider: optional parameters + none; keep above probability threshold"]
-    HasOptional -->|No| TextField{"Supported required or selected item/message field?"}
-    Parameters --> TextField
-    TextField -->|Yes| Text["Decider: one Choice over word occurrences + none; retain above probability threshold"]
+    HasOptional -->|Yes| Parameters["Decider: optional parameters + none; keep at or above relative probability cutoff"]
+    HasOptional -->|No| ValueFields["Required + retained optional fields"]
+    Parameters --> ValueFields
+    ValueFields --> Types{"Preflight every HA selector"}
+    Types -->|Unsupported format or range| Unsupported["Error: not yet supported"]
+    Types -->|All supported| Each["For each selected field"]
+    Each -->|Text| Text["Choice over word occurrences + none; p at or above relative cutoff"]
+    Each -->|Number| Numeric["Absolute/relative Choice + Score; HA range, step and current settings"]
     Text -->|Empty or invalid| Unsure
-    Text -->|Words retained| TextValue["Join words in original order"]
-    TextValue --> Console["Print targets, parameters, text values and timing"]
-    TextField -->|No| Console
-    Console --> Stop["Stop: no numeric extraction or device actions"]
+    Numeric -->|Unclear or missing relative baseline| Unsure
+    Text -->|Words retained| Values["Store value for this field"]
+    Numeric -->|Valid number| Values
+    Values -->|More fields| Each
+    Values -->|All complete| Console["Print targets, parameter values and per-field timings"]
+    Console --> Stop["Stop: no device actions"]
