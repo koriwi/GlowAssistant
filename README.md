@@ -2,7 +2,7 @@
 
 A Home Assistant conversation agent. Install it with HACS.
 
-GlowAssistant answers state queries and calls Home Assistant actions. It extracts text and number parameters. Other parameter formats report “not yet supported.” The local benchmark plans actions without executing them.
+GlowAssistant answers state queries and calls Home Assistant actions. It extracts text and number parameters. Other parameter formats report “not yet supported.” The local CLI plans actions by default; `--execute` runs them.
 It uses Home Assistant's exposed entities. You can exclude additional entities in the integration settings.
 
 Minimum Home Assistant version: **2026.4.2**.
@@ -67,15 +67,16 @@ Enable **Save run logs to disk** in the integration settings. Logs are off by de
 Files go to `<HA config>/glow_assistant/runs/successful/` or `unsuccessful/`.
 Each JSON record includes the request, states, settings, model inputs/outputs, decisions and action results. Credentials are redacted. Files are not automatically deleted.
 
-## Local benchmark
+## Local testing
 
-`benchmark.py` uses the same engine as the integration. It reports decision times and prints the selected action's field metadata.
-Add `--log-runs` to save local records under `runs/successful/` or `runs/unsuccessful/`. The benchmark always uses dry-run mode.
-See [benchmark setup](benchmark.md) for the one-time addon update and `.env` settings.
+`local.py` uses the same engine as the integration. It reports decision times and prints the selected action's field metadata.
+Add `--log-runs` to save local records under `runs/successful/` or `runs/unsuccessful/`. Actions run only with `--execute`.
+See [local setup](local.md) for the integration update and `.env` settings. `benchmark.py` remains a compatibility entry point.
 
 ```bash
-python benchmark.py --query "Ist die Lampe im Büro an?"
-python benchmark.py --query "Wie hell ist die Lampe?" --llm-answer
+python local.py --query "Ist die Lampe im Büro an?"
+python local.py --query "Wie hell ist die Lampe?" --llm-answer
+python local.py --query "Was steht auf der Einkaufsliste?" --execute
 ```
 
 ## TODO

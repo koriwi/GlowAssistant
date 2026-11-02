@@ -1,4 +1,5 @@
 from homeassistant.components.homeassistant import async_should_expose
+from homeassistant.core import SupportsResponse
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import area_registry, device_registry, entity_registry
 from homeassistant.helpers.service import async_get_all_descriptions
@@ -69,6 +70,9 @@ async def async_execute(hass, excluded, context, action, arguments):
     if not hass.services.has_service(domain, service):
         raise ActionError("The selected Home Assistant action is no longer available.")
     try:
-        return await hass.services.async_call(domain, service, arguments, blocking=True, context=context)
+        return_response = hass.services.supports_response(domain, service) is not SupportsResponse.NONE
+        return await hass.services.async_call(
+            domain, service, arguments, blocking=True, context=context, return_response=return_response,
+        )
     except (HomeAssistantError, TimeoutError) as error:
         raise ActionError("Home Assistant action failed; the device outcome is unconfirmed.", command_sent=True) from error

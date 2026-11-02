@@ -3,7 +3,7 @@ from copy import deepcopy
 from time import perf_counter
 
 from .action_targets import decode_selection, selection_question
-from .actions import ActionError, action_calls, device_outcome
+from .actions import ActionError, action_calls, device_outcome, format_action_response
 from .client import ModelError
 from .const import (
     GENERAL,
@@ -73,10 +73,13 @@ def read_choice(response, question, options, threshold):
 def action_options(services):
     options = {}
     for name, description in services.items():
-        if description.get("response", {}).get("optional") is False:
-            continue
         fields = description.get("fields") or {}
-        base = {"service": name, "description": description.get("description", name)}
+        base = {"service": name, "description": description.get("description") or name}
+        if "response" in description:
+            base["response"] = description["response"]
+            base["description"] += " Returns action response data."
+        if name == "todo.get_items":
+            base["description"] += " Read the items on a shopping or to-do list, not just its item count."
         if name in TEXT_ACTIONS:
             parameter, explanation = TEXT_ACTIONS[name]
             if parameter in fields:
@@ -288,7 +291,7 @@ class AgentEngine:
                     {"role": "user", "content": json.dumps(facts, ensure_ascii=False)},
                 ])
             else:
-                self._programmatic_answer(result, "ok")
+                self._programmatic_answer(result, format_action_response(result, members))
             return
 
         result["service"] = QUERY
@@ -369,6 +372,9 @@ class AgentEngine:
                     call["status"] = "unconfirmed"
                     try:
                         response = await self.execute(call["service"], deepcopy(call["arguments"]))
+                        call["result"] = response
+                        if "response" in result["action_metadata"] and not isinstance(response, dict):
+                            raise ActionError("Home Assistant did not return the expected action data.", command_sent=True)
                     except ActionError as error:
                         call.update(status="unconfirmed" if error.command_sent else "not_sent", error=str(error), error_type=type(error).__name__)
                         if error.__cause__:
@@ -379,7 +385,7 @@ class AgentEngine:
                         raise ActionError("Action failed; the device outcome is unconfirmed.", command_sent=True) from error
                     finally:
                         call["duration_ms"] = round((perf_counter() - call_started) * 1000)
-                    call.update(status="completed", result=response)
+                    call["status"] = "completed"
                 execution["status"] = "completed"
         except ActionError as error:
             for call in calls:

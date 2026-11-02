@@ -12,6 +12,7 @@ from .const import (
     GENERAL_PROMPT,
     LEGACY_ACTION_TARGET_SCOPE_PROMPT,
     LEGACY_GENERAL_PROMPT,
+    LEGACY_PARAMETER_SERVICE_PROMPT,
     LEGACY_SERVICE_PROMPT,
     LEGACY_TARGET_SCOPE_PROMPT,
     LEGACY_TEXT_SERVICE_PROMPT,
@@ -92,7 +93,7 @@ def normalize_settings(data):
             settings[key] = data[key]
     if settings["general"]["prompt"] == LEGACY_GENERAL_PROMPT:
         settings["general"]["prompt"] = GENERAL_PROMPT
-    if settings["decider"]["service_prompt"] in (LEGACY_SERVICE_PROMPT, LEGACY_TEXT_SERVICE_PROMPT):
+    if settings["decider"]["service_prompt"] in (LEGACY_SERVICE_PROMPT, LEGACY_TEXT_SERVICE_PROMPT, LEGACY_PARAMETER_SERVICE_PROMPT):
         settings["decider"]["service_prompt"] = SERVICE_PROMPT
     decider = data.get("decider", {})
     if settings["decider"]["target_scope_prompt"] in (

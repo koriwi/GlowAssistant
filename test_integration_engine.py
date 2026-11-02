@@ -1162,6 +1162,7 @@ class IntegrationSettingsTests(unittest.TestCase):
 
     def test_stock_action_prompt_is_updated_for_text_but_custom_rules_are_preserved(self):
         from custom_components.glow_assistant.const import (
+            LEGACY_PARAMETER_SERVICE_PROMPT,
             LEGACY_SERVICE_PROMPT,
             SERVICE_PROMPT,
         )
@@ -1170,6 +1171,9 @@ class IntegrationSettingsTests(unittest.TestCase):
         self.assertEqual(saved["decider"]["service_prompt"], SERVICE_PROMPT)
         self.assertIn("field metadata", saved["decider"]["service_prompt"])
         self.assertEqual(saved["decider"]["text_probability_threshold"], 0.3)
+        saved = normalize_settings({"decider": {"service_prompt": LEGACY_PARAMETER_SERVICE_PROMPT}})
+        self.assertEqual(saved["decider"]["service_prompt"], SERVICE_PROMPT)
+        self.assertIn("todo.get_items", saved["decider"]["service_prompt"])
         custom = normalize_settings({"decider": {"service_prompt": "Custom action rules", "text_prompt": "Custom extraction rules"}})
         self.assertEqual(custom["decider"]["service_prompt"], "Custom action rules")
         self.assertEqual(custom["decider"]["text_prompt"], "Custom extraction rules")
@@ -1222,7 +1226,7 @@ class IntegrationSettingsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "answer"):
             validate_settings(settings)
 
-    def test_action_catalog_passes_required_fields_to_extraction_and_omits_required_responses(self):
+    def test_action_catalog_includes_required_fields_and_response_actions(self):
         options = action_options({
             "light.turn_on": {"fields": {}}, "climate.set_temperature": {"fields": {}},
             "climate.set_hvac_mode": {"fields": {"hvac_mode": {"required": True}}},
@@ -1234,7 +1238,8 @@ class IntegrationSettingsTests(unittest.TestCase):
         self.assertIn("climate.set_temperature:temperature", options)
         self.assertNotIn("climate.set_temperature", options)
         self.assertIn("climate.set_hvac_mode", options)
-        self.assertNotIn("todo.get_items", options)
+        self.assertEqual(options["todo.get_items"]["response"], {"optional": False})
+        self.assertIn("Read the items", options["todo.get_items"]["description"])
         self.assertIn("cover.set_cover_position:position", options)
         self.assertNotIn("cover.set_cover_position", options)
 

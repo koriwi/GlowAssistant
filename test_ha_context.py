@@ -12,6 +12,12 @@ class ComputedNameType(Enum):
     COMPUTED_NAME = 0
 
 
+class SupportsResponse(Enum):
+    NONE = "none"
+    OPTIONAL = "optional"
+    ONLY = "only"
+
+
 class EntityContextTests(unittest.TestCase):
     def snapshot(self, entry_aliases, area_aliases, registered=True):
         state = SimpleNamespace(
@@ -32,6 +38,7 @@ class EntityContextTests(unittest.TestCase):
     def load_context(self, helpers):
         dependencies = {
             "homeassistant.components.homeassistant": SimpleNamespace(async_should_expose=lambda *args: True),
+            "homeassistant.core": SimpleNamespace(SupportsResponse=SupportsResponse),
             "homeassistant.exceptions": SimpleNamespace(HomeAssistantError=Exception),
             "homeassistant.helpers": helpers,
             "homeassistant.helpers.service": SimpleNamespace(async_get_all_descriptions=Mock()),
@@ -87,7 +94,8 @@ class HAExecutionTests(unittest.IsolatedAsyncioTestCase):
         from custom_components.glow_assistant.actions import ActionError
 
         module = self.context_module()
-        hass = SimpleNamespace(services=SimpleNamespace(has_service=Mock(return_value=True), async_call=AsyncMock()))
+        hass = SimpleNamespace(services=SimpleNamespace(has_service=Mock(return_value=True), async_call=AsyncMock(),
+                                                       supports_response=Mock(return_value=SupportsResponse.NONE)))
         context = object()
         arguments = {"entity_id": ["light.allowed"], "brightness_pct": 50}
         with patch.object(module, "entity_context", side_effect=[[{"entity_id": "light.allowed", "domain": "light"}], []]) as exposed:
@@ -96,7 +104,25 @@ class HAExecutionTests(unittest.IsolatedAsyncioTestCase):
                 await module.async_execute(hass, {"light.excluded"}, context, "light.turn_on", arguments)
         self.assertFalse(raised.exception.command_sent)
         self.assertEqual(exposed.call_count, 2)
-        hass.services.async_call.assert_awaited_once_with("light", "turn_on", arguments, blocking=True, context=context)
+        hass.services.async_call.assert_awaited_once_with("light", "turn_on", arguments, blocking=True, context=context, return_response=False)
+
+    async def test_collects_mandatory_and_optional_response_data(self):
+        module = self.context_module()
+        data = {"todo.shopping": {"items": [{"summary": "Zwiebeln", "status": "needs_action"}]}}
+        for support in (SupportsResponse.ONLY, SupportsResponse.OPTIONAL):
+            with self.subTest(support=support):
+                hass = SimpleNamespace(services=SimpleNamespace(
+                    has_service=Mock(return_value=True), supports_response=Mock(return_value=support),
+                    async_call=AsyncMock(return_value=data),
+                ))
+                arguments = {"entity_id": ["todo.shopping"]}
+                context = object()
+                with patch.object(module, "entity_context", return_value=[{"entity_id": "todo.shopping", "domain": "todo"}]):
+                    response = await module.async_execute(hass, set(), context, "todo.get_items", arguments)
+                self.assertEqual(response, data)
+                hass.services.async_call.assert_awaited_once_with(
+                    "todo", "get_items", arguments, blocking=True, context=context, return_response=True,
+                )
 
     async def test_invalid_or_broad_targets_and_unavailable_services_are_never_sent(self):
         from custom_components.glow_assistant.actions import ActionError
@@ -119,6 +145,7 @@ class HAExecutionTests(unittest.IsolatedAsyncioTestCase):
 
         module = self.context_module()
         hass = SimpleNamespace(services=SimpleNamespace(has_service=Mock(return_value=True),
+                                                       supports_response=Mock(return_value=SupportsResponse.NONE),
                                                        async_call=AsyncMock(side_effect=module.HomeAssistantError("backend rejected"))))
         with patch.object(module, "entity_context", return_value=[{"entity_id": "light.allowed", "domain": "light"}]):
             with self.assertRaises(ActionError) as raised:

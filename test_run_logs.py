@@ -8,7 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
-import benchmark
+import local as benchmark
 from custom_components.glow_assistant.client import ModelClient, ModelError
 from custom_components.glow_assistant.engine import AgentEngine
 from custom_components.glow_assistant.run_logs import RunRecord, redact, successful
@@ -171,18 +171,18 @@ class RunLogTests(unittest.IsolatedAsyncioTestCase):
     async def test_snapshot_failure_and_unsure_runs_are_saved_by_benchmark_when_enabled(self):
         args = benchmark.parser().parse_args(["-q", "test", "--log-runs"])
         with tempfile.TemporaryDirectory() as directory:
-            with (patch("benchmark.LOG_DIRECTORY", Path(directory)),
-                  patch("benchmark.fetch_snapshot", new=AsyncMock(side_effect=ModelError("Snapshot access denied."))),
-                  patch("benchmark.aiohttp.ClientSession", return_value=AsyncMock())):
+            with (patch("local.LOG_DIRECTORY", Path(directory)),
+                  patch("local.fetch_snapshot", new=AsyncMock(side_effect=ModelError("Snapshot access denied."))),
+                  patch("local.aiohttp.ClientSession", return_value=AsyncMock())):
                 failed = await benchmark.run(args, {"HA_TOKEN": "test-ha-secret"})
             self.assertFalse(failed["success"])
             self.assertEqual(Path(failed["log_file"]).parent.name, "unsuccessful")
             self.assertIn("Snapshot access denied", failed["result"]["error"])
             self.assertIn("traceback", failed["exception"])
             client = ScriptedModels([{"service": "unsure"}])
-            with (patch("benchmark.LOG_DIRECTORY", Path(directory)),
-                  patch("benchmark.fetch_snapshot", new=AsyncMock(return_value={"entry_id": "one", "settings": settings(), "snapshot": SNAPSHOT})),
-                  patch("benchmark.aiohttp.ClientSession", return_value=AsyncMock()), patch("benchmark.ModelClient", return_value=client)):
+            with (patch("local.LOG_DIRECTORY", Path(directory)),
+                  patch("local.fetch_snapshot", new=AsyncMock(return_value={"entry_id": "one", "settings": settings(), "snapshot": SNAPSHOT})),
+                  patch("local.aiohttp.ClientSession", return_value=AsyncMock()), patch("local.ModelClient", return_value=client)):
                 unsure = await benchmark.run(args, {})
             self.assertEqual(unsure["result"]["route"], "unsure")
             self.assertFalse(unsure["success"])
@@ -194,14 +194,36 @@ class RunLogTests(unittest.IsolatedAsyncioTestCase):
                 client = ScriptedModels([{"service": "light.turn_off"}, {"target_scope": "implied_area"}])
                 args = benchmark.parser().parse_args(["-q", "Stop", "--speaker-area", "Office", *(["--log-runs"] if enabled else [])])
                 exported = {"entry_id": "one", "settings": settings(True), "snapshot": copy.deepcopy(SNAPSHOT)}
-                with (patch("benchmark.LOG_DIRECTORY", Path(directory)),
-                      patch("benchmark.fetch_snapshot", new=AsyncMock(return_value=exported)),
-                      patch("benchmark.aiohttp.ClientSession", return_value=AsyncMock()), patch("benchmark.ModelClient", return_value=client)):
+                with (patch("local.LOG_DIRECTORY", Path(directory)),
+                      patch("local.fetch_snapshot", new=AsyncMock(return_value=exported)),
+                      patch("local.aiohttp.ClientSession", return_value=AsyncMock()), patch("local.ModelClient", return_value=client)):
                     report = await benchmark.run(args, {})
                 self.assertTrue(report["success"])
                 self.assertEqual(report["result"]["execution"]["status"], "planned")
                 self.assertEqual("log_file" in report, enabled)
             self.assertEqual(len(list(Path(directory).rglob("*.json"))), 1)
+
+    async def test_executed_local_run_logs_live_mode_and_returned_action_data(self):
+        from test_actions import ActionExecutionTests
+
+        fixture = ActionExecutionTests()
+        args = benchmark.parser().parse_args(["-q", "Read the shopping list", "--execute", "--log-runs"])
+        response = {"todo.shopping": {"items": [{"summary": "Milk", "status": "needs_action"}]}}
+        exported = {"entry_id": "one", "settings": settings(), "snapshot": fixture.todo_snapshot()}
+        with tempfile.TemporaryDirectory() as directory:
+            with (patch("local.LOG_DIRECTORY", Path(directory)),
+                  patch("local.fetch_snapshot", new=AsyncMock(return_value=exported)),
+                  patch("local.aiohttp.ClientSession", return_value=AsyncMock()),
+                  patch("local.ModelClient", return_value=ScriptedModels(fixture.todo_choices())),
+                  patch("local.execute_action", new=AsyncMock(return_value=response)) as execute):
+                report = await benchmark.run(args, {})
+            saved = json.loads(Path(report["log_file"]).read_text())
+            self.assertEqual(Path(report["log_file"]).parent.name, "successful")
+            self.assertEqual(saved["mode"], "live")
+            self.assertEqual(saved["source"], "local")
+            self.assertTrue(saved["local_flags"]["execute"])
+            self.assertEqual(saved["result"]["execution"]["calls"][0]["result"], response)
+            execute.assert_awaited_once()
 
 
 class RunOutcomeTests(unittest.TestCase):

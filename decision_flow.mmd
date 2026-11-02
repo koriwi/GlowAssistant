@@ -68,10 +68,14 @@ flowchart TD
     DryRun -->|Yes| Planned["Record planned calls; never invoke executor"]
     DryRun -->|No| Execute["Recheck exposure/exclusions; call HA sequentially; no retries"]
     Execute -->|Failure or partial| ExecutionError["Error reply; preserve completed/unconfirmed outcomes"]
-    Execute -->|Completed| ActionReplyMode{"LLM answer enabled?"}
+    Execute -->|Completed| ResponseData["Collect action response data when supported; preserve in debug/logs"]
+    ResponseData --> ActionReplyMode{"LLM answer enabled?"}
     Planned --> ActionReplyMode
     ActionReplyMode -->|Yes| PlanAnswer["Answer model: describe actual execution outcome or dry-run plan"]
-    ActionReplyMode -->|No| Ack["ok"]
+    ActionReplyMode -->|No| HasResponse{"Action returns data?"}
+    HasResponse -->|Yes| DataReply["Format returned list items or JSON; dry-run has no result data"]
+    HasResponse -->|No| Ack["ok"]
+    DataReply --> Reply
     PlanAnswer --> Reply
     Ack --> Reply
 

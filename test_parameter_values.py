@@ -159,7 +159,7 @@ class ParameterEngineTests(unittest.IsolatedAsyncioTestCase):
         import io
         from contextlib import redirect_stdout
 
-        import benchmark
+        import local as benchmark
 
         prompt = "setze rote zwiebeln auf die einkaufsliste."
         words, _ = text_request(prompt, "todo.add_item", "test")

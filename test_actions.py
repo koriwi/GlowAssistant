@@ -1,4 +1,5 @@
 import copy
+import json
 import unittest
 from unittest.mock import AsyncMock
 
@@ -54,6 +55,88 @@ class ActionPlanTests(unittest.TestCase):
 
 
 class ActionExecutionTests(unittest.IsolatedAsyncioTestCase):
+    def todo_snapshot(self):
+        return {"entities": [entity("todo.shopping", "Einkaufsliste", area=None, state="2"),
+                             entity("todo.other", "Andere Liste", state="1")],
+                "services": {"todo.get_items": {"target": {}, "response": {"optional": False}, "fields": {
+                    "status": {"selector": {"select": {"multiple": True, "options": ["needs_action", "completed"]}}},
+                }}}}
+
+    def todo_choices(self):
+        return [{"service": "todo.get_items"}, {"target_scope": "entities"},
+                {"action_entities": "entity:todo.shopping"}, {"optional_parameters": "none"}]
+
+    async def test_todo_retrieval_uses_returned_items_and_keeps_full_response_in_trace(self):
+        response = {"todo.shopping": {"items": [
+            {"uid": "a", "summary": "Zwiebeln", "status": "needs_action", "description": "rote"},
+            {"uid": "b", "summary": "Nudeln", "status": "completed"},
+        ]}}
+        execute = AsyncMock(return_value=response)
+        client = ScriptedModels(self.todo_choices())
+        events = []
+        result = await AgentEngine(normalize_settings({}), client, execute=execute,
+                                   trace=lambda *event: events.append(event)).process(
+            "Was steht auf der Einkaufsliste?", "de", self.todo_snapshot())
+        self.assertEqual(result["answer"], "Einkaufsliste: Zwiebeln (rote); Nudeln (erledigt).")
+        self.assertEqual(result["execution"]["status"], "completed")
+        self.assertEqual(result["execution"]["calls"][0]["result"], response)
+        execute.assert_awaited_once_with("todo.get_items", {"entity_id": ["todo.shopping"]})
+        self.assertFalse(client.chat_requests)
+        self.assertEqual([stage for stage, _, _ in events if stage == "area"], [])
+        event = next(output for stage, _, output in events if stage == "execution" and output)
+        self.assertEqual(event["calls"][0]["result"], response)
+
+    async def test_response_action_dry_run_never_executes_or_invents_list_contents(self):
+        execute = AsyncMock()
+        result = await AgentEngine(normalize_settings({}), ScriptedModels(self.todo_choices()),
+                                   dry_run=True, execute=execute).process("Read the shopping list", "en", self.todo_snapshot())
+        self.assertEqual(result["execution"]["status"], "planned")
+        self.assertEqual(result["answer"], "Not executed; no response data available.")
+        self.assertNotIn("result", result["execution"]["calls"][0])
+        execute.assert_not_awaited()
+
+    async def test_empty_list_and_multiple_list_responses_are_rendered_by_name(self):
+        choices = self.todo_choices()
+        choices[2] = {"action_entities": {"type": "choice", "choice": "entity:todo.shopping", "confidence": 0.9,
+                                        "probabilities": {"entity:todo.shopping": 0.5, "entity:todo.other": 0.5, "none": 0}}}
+        execute = AsyncMock(return_value={"todo.shopping": {"items": []}, "todo.other": {"items": [
+            {"summary": "Milch", "status": "needs_action"},
+        ]}})
+        result = await AgentEngine(normalize_settings({}), ScriptedModels(choices), execute=execute).process(
+            "Read both lists", "en", self.todo_snapshot())
+        self.assertEqual(result["answer"], "Einkaufsliste: no items; Andere Liste: Milch.")
+        execute.assert_awaited_once_with("todo.get_items", {"entity_id": ["todo.shopping", "todo.other"]})
+
+    async def test_response_data_is_forwarded_to_enabled_answer_model(self):
+        response = {"todo.shopping": {"items": [{"summary": "Milch", "status": "needs_action"}]}}
+        client = ScriptedModels(self.todo_choices(), answers=["Auf deiner Einkaufsliste steht Milch."])
+        result = await AgentEngine(normalize_settings({"answer": {"enable": True}}), client,
+                                   execute=AsyncMock(return_value=response)).process(
+            "Was steht auf der Einkaufsliste?", "de", self.todo_snapshot())
+        facts = json.loads(client.chat_requests[0][1][1]["content"])
+        self.assertEqual(facts["execution"]["calls"][0]["result"], response)
+        self.assertEqual(result["answer"], "Auf deiner Einkaufsliste steht Milch.")
+
+    async def test_missing_required_response_fails_without_retrying(self):
+        execute = AsyncMock(return_value=None)
+        result = await AgentEngine(normalize_settings({}), ScriptedModels(self.todo_choices()), execute=execute).process(
+            "Read the shopping list", "en", self.todo_snapshot())
+        self.assertEqual(result["route"], "error")
+        self.assertIn("expected action data", result["error"])
+        self.assertNotEqual(result["answer"], "ok")
+        execute.assert_awaited_once()
+
+    async def test_optional_response_action_returns_generic_data_without_an_answer_model(self):
+        snapshot = {"entities": [entity("sensor.meter", "Meter")], "services": {
+            "sensor.read_data": {"target": {}, "fields": {}, "response": {"optional": True}},
+        }}
+        client = ScriptedModels([{"service": "sensor.read_data"}, {"target_scope": "entities"},
+                                 {"action_entities": "entity:sensor.meter"}])
+        response = {"sensor.meter": {"readings": [1, 2, 3]}}
+        result = await AgentEngine(normalize_settings({}), client, execute=AsyncMock(return_value=response)).process(
+            "Read meter data", "en", snapshot)
+        self.assertEqual(result["answer"], 'Meter: {"readings": [1, 2, 3]}.')
+
     async def test_live_commands_execute_once_and_dry_run_never_invokes_the_executor(self):
         for dry_run in (False, True):
             with self.subTest(dry_run=dry_run):

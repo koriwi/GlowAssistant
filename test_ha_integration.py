@@ -11,16 +11,22 @@ from custom_components.glow_assistant.settings import normalize_settings
 
 @unittest.skipUnless(importlib.util.find_spec("homeassistant"), "Home Assistant is not installed; run the HA CI suite")
 class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
-    async def test_setup_registers_the_authenticated_snapshot_view(self):
+    async def test_setup_registers_authenticated_snapshot_and_execution_views(self):
         from custom_components.glow_assistant import async_setup
-        from custom_components.glow_assistant.snapshot_api import SnapshotView
+        from custom_components.glow_assistant.snapshot_api import (
+            ExecuteView,
+            SnapshotView,
+        )
 
         hass = Mock()
         self.assertTrue(await async_setup(hass, {}))
-        view = hass.http.register_view.call_args.args[0]
+        view, execute_view = [call.args[0] for call in hass.http.register_view.call_args_list]
         self.assertIsInstance(view, SnapshotView)
         self.assertTrue(view.requires_auth)
         self.assertEqual(view.url, "/api/glow_assistant/snapshot")
+        self.assertIsInstance(execute_view, ExecuteView)
+        self.assertTrue(execute_view.requires_auth)
+        self.assertEqual(execute_view.url, "/api/glow_assistant/execute")
 
 
     def settings(self):
@@ -128,6 +134,22 @@ class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
         selector = TargetSelector({"entity": {"domain": "light"}})
         self.assertEqual(selector({"entity_id": ["light.desk", "light.ceiling"]}),
                          {"entity_id": ["light.desk", "light.ceiling"]})
+
+    async def test_ha_response_services_return_data_to_the_caller(self):
+        from homeassistant.core import HomeAssistant, SupportsResponse
+
+        from custom_components.glow_assistant import ha_context
+
+        response = {"todo.shopping": {"items": [{"summary": "Milch", "status": "needs_action"}]}}
+        handler = AsyncMock(return_value=response)
+        with tempfile.TemporaryDirectory() as directory:
+            hass = HomeAssistant(directory)
+            hass.services.async_register("todo", "get_items", handler, supports_response=SupportsResponse.ONLY)
+            with patch.object(ha_context, "entity_context", return_value=[{"entity_id": "todo.shopping", "domain": "todo"}]):
+                actual = await ha_context.async_execute(hass, set(), None, "todo.get_items", {"entity_id": ["todo.shopping"]})
+        self.assertEqual(actual, response)
+        handler.assert_awaited_once()
+        self.assertTrue(handler.call_args.args[0].return_response)
 
     async def test_ha_handler_passes_executor_and_writes_opt_in_run_log(self):
         from custom_components.glow_assistant.conversation import GlowConversationEntity

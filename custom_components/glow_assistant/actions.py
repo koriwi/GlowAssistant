@@ -1,3 +1,5 @@
+import json
+
 from .optional_parameters import action_fields
 
 
@@ -44,3 +46,34 @@ def device_outcome(execution):
     if any(call["status"] == "completed" for call in calls):
         return "partially_completed"
     return "not_sent"
+
+
+def format_action_response(result, members):
+    if "response" not in result["action_metadata"]:
+        return "ok"
+    german = result["language"].split("-")[0].lower() == "de"
+    if result["execution"]["dry_run"]:
+        return "Nicht ausgeführt; keine Ergebnisdaten verfügbar." if german else "Not executed; no response data available."
+    names = {member["entity_id"]: member["name"] for member in members}
+    empty = "keine Daten" if german else "no data"
+    parts = []
+    for call in result["execution"]["calls"]:
+        response = call["result"]
+        for key, value in response.items():
+            name = names.get(key, key)
+            if (result["service"] == "todo.get_items" and isinstance(value, dict)
+                    and isinstance(value.get("items"), list)
+                    and all(isinstance(item, dict) and isinstance(item.get("summary"), str) for item in value["items"])):
+                items = []
+                for item in value["items"]:
+                    text = item["summary"]
+                    if item.get("description"):
+                        text += f" ({item['description']})"
+                    if item.get("status") == "completed":
+                        text += " (erledigt)" if german else " (completed)"
+                    items.append(text)
+                text = "; ".join(items) if items else "keine Einträge" if german else "no items"
+            else:
+                text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
+            parts.append(f"{name}: {text}")
+    return "; ".join(parts) + "." if parts else empty.capitalize() + "."

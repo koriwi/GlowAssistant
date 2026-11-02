@@ -1,7 +1,8 @@
 async def async_setup(hass, config):
-    from .snapshot_api import SnapshotView
+    from .snapshot_api import ExecuteView, SnapshotView
 
     hass.http.register_view(SnapshotView(hass))
+    hass.http.register_view(ExecuteView(hass))
     return True
 
 
