@@ -11,14 +11,21 @@ from custom_components.glow_assistant.settings import DEFAULTS, normalize_settin
 
 @unittest.skipUnless(importlib.util.find_spec("homeassistant"), "Home Assistant is not installed; run the HA CI suite")
 class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
-    def test_config_schema_accepts_config_entries_and_rejects_yaml_configuration(self):
-        import voluptuous as vol
+    def test_config_schema_logs_unsupported_yaml_without_raising(self):
+        from homeassistant.exceptions import HomeAssistantError
+        from homeassistant.helpers import config_validation as cv
 
         from custom_components.glow_assistant import CONFIG_SCHEMA
 
-        self.assertEqual(CONFIG_SCHEMA({}), {})
-        with self.assertRaises(vol.Invalid):
-            CONFIG_SCHEMA({"glow_assistant": {}})
+        with (patch.object(cv, "get_integration_logger", return_value=Mock()) as get_logger,
+              patch.object(cv, "async_get_hass", side_effect=HomeAssistantError("No running HA instance"))):
+            empty = {}
+            self.assertIs(CONFIG_SCHEMA(empty), empty)
+            get_logger.assert_not_called()
+            config = {"glow_assistant": {}}
+            self.assertIs(CONFIG_SCHEMA(config), config)
+            get_logger.return_value.error.assert_called_once()
+            self.assertEqual(get_logger.return_value.error.call_args.args[1], "glow_assistant")
 
     async def test_setup_registers_authenticated_snapshot_and_execution_views(self):
         from custom_components.glow_assistant import async_setup
