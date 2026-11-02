@@ -1,5 +1,8 @@
 import importlib.util
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 
@@ -46,6 +49,8 @@ class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
             if key.schema == "answer":
                 enabled = next(selector for field, selector in block.schema.schema.items() if field.schema == "enable")
                 self.assertEqual(enabled.selector_type, "boolean")
+        logging_switch = next(selector for field, selector in form["data_schema"].schema.items() if field.schema == "log_runs")
+        self.assertEqual(logging_switch.selector_type, "boolean")
         validated = form["data_schema"](self.settings())
         self.assertEqual(set(validated) & {"decider", "answer", "general"}, {"decider", "answer", "general"})
         result = await flow.async_step_user(validated)
@@ -124,6 +129,38 @@ class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(selector({"entity_id": ["light.desk", "light.ceiling"]}),
                          {"entity_id": ["light.desk", "light.ceiling"]})
 
+    async def test_ha_handler_passes_executor_and_writes_opt_in_run_log(self):
+        from custom_components.glow_assistant.conversation import GlowConversationEntity
+
+        with tempfile.TemporaryDirectory() as directory:
+            settings = self.settings()
+            settings["log_runs"] = True
+            entry = SimpleNamespace(data=settings, entry_id="test-entry")
+            agent = GlowConversationEntity(entry)
+            agent.hass = Mock()
+            agent.hass.config.path.side_effect = lambda *parts: str(Path(directory).joinpath(*parts))
+            chat_log = Mock(conversation_id="conversation-123")
+            user_input = SimpleNamespace(text="Turn off the light", language="en", agent_id="conversation.glow", context=object())
+            with (patch("custom_components.glow_assistant.conversation.async_snapshot", new_callable=AsyncMock,
+                        return_value={"entities": [], "services": {}}),
+                  patch("custom_components.glow_assistant.conversation.async_get_clientsession", return_value=Mock()),
+                  patch("custom_components.glow_assistant.conversation.speaker_area", return_value="Office"),
+                  patch("custom_components.glow_assistant.conversation.async_execute", new_callable=AsyncMock) as execute,
+                  patch("custom_components.glow_assistant.conversation.AgentEngine") as engine):
+                engine.return_value.process = AsyncMock(return_value={"answer": "ok", "route": "smarthome", "service": "light.turn_off",
+                                                                      "timings_ms": {}, "usage": {}})
+                result = await agent._async_handle_message(user_input, chat_log)
+                callback = engine.call_args.kwargs["execute"]
+                await callback("light.turn_off", {"entity_id": ["light.office"]})
+                execute.assert_awaited_once_with(agent.hass, set(), user_input.context, "light.turn_off", {"entity_id": ["light.office"]})
+            files = list((Path(directory) / "glow_assistant" / "runs" / "successful").glob("*.json"))
+            self.assertEqual(len(files), 1)
+            saved = json.loads(files[0].read_text())
+            self.assertEqual(saved["source"], "home_assistant")
+            self.assertEqual(saved["conversation_id"], "conversation-123")
+            self.assertEqual(saved["result"]["answer"], "ok")
+            self.assertEqual(result.response.speech["plain"]["speech"], "ok")
+
     async def test_conversation_returns_speech_and_preserves_conversation_id(self):
         from custom_components.glow_assistant.conversation import GlowConversationEntity
 
@@ -132,7 +169,7 @@ class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
         agent.hass = Mock()
         chat_log = Mock(conversation_id="conversation-123")
         user_input = SimpleNamespace(text="test", language="de", agent_id="conversation.glow", context=object(), device_id="speaker")
-        with patch("custom_components.glow_assistant.conversation.async_snapshot", new_callable=AsyncMock, return_value={}), \
+        with patch("custom_components.glow_assistant.conversation.async_snapshot", new_callable=AsyncMock, return_value={"entities": [], "services": {}}), \
                 patch("custom_components.glow_assistant.conversation.async_get_clientsession", return_value=Mock()), \
                 patch("custom_components.glow_assistant.conversation.speaker_area", return_value="Küche") as location, \
                 patch("custom_components.glow_assistant.conversation.AgentEngine") as engine:
@@ -154,7 +191,7 @@ class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
         agent.hass = Mock()
         chat_log = Mock(conversation_id="conversation-123")
         user_input = SimpleNamespace(text="ist das licht im buero an?", language="de", agent_id="conversation.glow", context=object())
-        with patch("custom_components.glow_assistant.conversation.async_snapshot", new_callable=AsyncMock, return_value={}), \
+        with patch("custom_components.glow_assistant.conversation.async_snapshot", new_callable=AsyncMock, return_value={"entities": [], "services": {}}), \
                 patch("custom_components.glow_assistant.conversation.async_get_clientsession", return_value=Mock()), \
                 patch("custom_components.glow_assistant.conversation.AgentEngine") as engine, \
                 self.assertLogs("custom_components.glow_assistant.conversation", level="WARNING") as logs:
@@ -254,7 +291,7 @@ class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
         chat_log = SimpleNamespace(content=content, conversation_id="history-test",
                                    async_add_assistant_content_without_tools=Mock())
         user_input = SimpleNamespace(text="now stop it", language="en", agent_id="conversation.glow", context=object())
-        with patch("custom_components.glow_assistant.conversation.async_snapshot", new_callable=AsyncMock, return_value={}), \
+        with patch("custom_components.glow_assistant.conversation.async_snapshot", new_callable=AsyncMock, return_value={"entities": [], "services": {}}), \
                 patch("custom_components.glow_assistant.conversation.async_get_clientsession", return_value=Mock()), \
                 patch("custom_components.glow_assistant.conversation.AgentEngine") as engine:
             engine.return_value.process = AsyncMock(return_value={

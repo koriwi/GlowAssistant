@@ -10,12 +10,16 @@
           "unsure_reply": "Unsure reply",
           "error_reply": "Error reply",
           "history_enabled": "Enable conversation history",
-          "history_messages": "Previous messages to include"
+          "history_messages": "Previous messages to include",
+          "log_runs": "Save run logs to disk",
+          "answer_error_reply": "Reply when the action completed but answer generation failed"
         },
         "data_description": {
           "excluded_entities": "Home Assistant exposed-entity settings are always respected. These entities are additionally excluded.",
           "history_enabled": "Use prior user inputs and final assistant replies in every model step.",
-          "history_messages": "Rolling window for this Assist conversation. Includes only user/assistant text, with no added idle expiry."
+          "history_messages": "Rolling window for this Assist conversation. Includes only user/assistant text, with no added idle expiry.",
+          "log_runs": "Off by default. Save complete run records under glow_assistant/runs/successful or unsuccessful in your HA configuration directory. Includes user text, states, prompts, model requests/responses and execution details; connection credentials are redacted. Files are not automatically deleted.",
+          "answer_error_reply": "Used after HA accepted the command and only answer generation failed; it must not imply the command failed."
         },
         "sections": {
           "decider": {
@@ -154,12 +158,16 @@
           "unsure_reply": "Unsure reply",
           "error_reply": "Error reply",
           "history_enabled": "Enable conversation history",
-          "history_messages": "Previous messages to include"
+          "history_messages": "Previous messages to include",
+          "log_runs": "Save run logs to disk",
+          "answer_error_reply": "Reply when the action completed but answer generation failed"
         },
         "data_description": {
           "excluded_entities": "Home Assistant exposed-entity settings are always respected. These entities are additionally excluded.",
           "history_enabled": "Use prior user inputs and final assistant replies in every model step.",
-          "history_messages": "Rolling window for this Assist conversation. Includes only user/assistant text, with no added idle expiry."
+          "history_messages": "Rolling window for this Assist conversation. Includes only user/assistant text, with no added idle expiry.",
+          "log_runs": "Off by default. Save complete run records under glow_assistant/runs/successful or unsuccessful in your HA configuration directory. Includes user text, states, prompts, model requests/responses and execution details; connection credentials are redacted. Files are not automatically deleted.",
+          "answer_error_reply": "Used after HA accepted the command and only answer generation failed; it must not imply the command failed."
         },
         "sections": {
           "decider": {
@@ -308,12 +316,16 @@
           "unsure_reply": "Unsure reply",
           "error_reply": "Error reply",
           "history_enabled": "Enable conversation history",
-          "history_messages": "Previous messages to include"
+          "history_messages": "Previous messages to include",
+          "log_runs": "Save run logs to disk",
+          "answer_error_reply": "Reply when the action completed but answer generation failed"
         },
         "data_description": {
           "excluded_entities": "Home Assistant exposed-entity settings are always respected. These entities are additionally excluded.",
           "history_enabled": "Use prior user inputs and final assistant replies in every model step.",
-          "history_messages": "Rolling window for this Assist conversation. Includes only user/assistant text, with no added idle expiry."
+          "history_messages": "Rolling window for this Assist conversation. Includes only user/assistant text, with no added idle expiry.",
+          "log_runs": "Off by default. Save complete run records under glow_assistant/runs/successful or unsuccessful in your HA configuration directory. Includes user text, states, prompts, model requests/responses and execution details; connection credentials are redacted. Files are not automatically deleted.",
+          "answer_error_reply": "Used after HA accepted the command and only answer generation failed; it must not imply the command failed."
         },
         "sections": {
           "decider": {

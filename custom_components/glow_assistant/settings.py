@@ -66,11 +66,13 @@ DEFAULTS = {
         "temperature": 0.2, "prompt": GENERAL_PROMPT,
         "mcp_servers": [], "mcp_max_rounds": 5, "mcp_max_calls": 10, "mcp_max_result_chars": 20000,
     },
+    "log_runs": False,
     "history_enabled": False,
     "history_messages": 10,
     "excluded_entities": [],
     "unsure_reply": "ich bin mir nicht sicher",
     "error_reply": "Ich konnte die Anfrage nicht erfolgreich abschließen.",
+    "answer_error_reply": "Der Befehl wurde übermittelt, aber ich konnte keine Antwort formulieren.",
 }
 
 
@@ -135,6 +137,8 @@ def validate_settings(data):
         _range(decider, field, 0, 1, "decider")
     for stage in ("service", "area", "domain", "query_type", "binary_answer", "target_scope", "numeric", "state_property"):
         _range(decider, f"{stage}_confidence", 0, 1, "decider")
+    if not isinstance(settings["log_runs"], bool):
+        raise TypeError("log_runs must be a boolean.")
     if not isinstance(settings["history_enabled"], bool):
         raise TypeError("history_enabled must be a boolean.")
     _range(settings, "history_messages", 1, 100, "history", integer=True)
@@ -168,7 +172,7 @@ def validate_settings(data):
         names.add(server["name"])
         servers.append(server)
     general["mcp_servers"] = servers
-    for field in ("name", "unsure_reply", "error_reply"):
+    for field in ("name", "unsure_reply", "error_reply", "answer_error_reply"):
         if not isinstance(settings[field], str) or not settings[field].strip():
             raise ValueError(f"{field}: text must not be empty.")
     return settings

@@ -20,6 +20,7 @@ STAGE_LABELS = {
     "text": "Extract text parameter",
     "numeric": "Extract numeric parameter",
     "parameters": "Extract action parameter values",
+    "execution": "Call the Home Assistant action",
     "answer": "Generate the smart-home answer",
     "general": "Generate the general answer",
     "mcp_connect": "Connect to MCP servers",
@@ -35,7 +36,12 @@ def failure_details(stage, reason, suggestion, status="error", **details):
 
 
 def failure_text(details):
-    return f"{details['step']}: {details['reason']} Try: {details['suggestion']}"
+    text = f"{details['step']}: {details['reason']} Try: {details['suggestion']}"
+    if details.get("device_command") == "completed":
+        text += " Home Assistant accepted the command; only the reply failed. Check the device before repeating it."
+    elif details.get("device_command") in ("unconfirmed", "partially_completed"):
+        text += " Some device effects may already have happened. Check the devices before repeating the request."
+    return text
 
 
 def model_failure(stage, error):

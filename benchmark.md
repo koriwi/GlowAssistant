@@ -37,7 +37,7 @@ Output shows stage timings and decisions. `--json` includes the full engine resu
 
 With `--llm-answer`, add `--show-answer-input` to print the smart-home answer request: model, messages, temperature and output token limit. Messages include the system prompt, pipeline language, history and final state facts. For detailed queries, selected entities appear in one `entities` array, with each entity's ID, name, room and query state together. For yes/no replies, only `state_answer` is sent for translation. Nested JSON in `content` is expanded for display; the chat API still receives text. With `--json`, this readable view is available under `answer_input`, and the original messages remain in `trace`. API keys and headers are excluded.
 
-Action requests run **service → target type → area resolution/filtering → target resolution → capability prefilter → parameter detection → value extraction → stop**. Target types:
+The shared core runs actions in HA. The benchmark always passes `dry_run=True`, builds the same action calls and never invokes the HA executor. Action requests run **service → target type → area resolution/filtering → target resolution → capability prefilter → parameter detection → value extraction → action plan or execution → reply**. Target types:
 
 | Choice | Meaning |
 | --- | --- |
@@ -113,7 +113,7 @@ python benchmark.py -q "Wie hell sind die Lampen im Büro?" --llm-answer --show-
 
 Default replies:
 
-- Successful commands: `ok`. Device execution remains disabled.
+- Successful commands: `ok`. HA executes selected actions; the benchmark only plans them.
 - Yes/no state queries: Ja/Nein for German pipelines, Yes/No otherwise. Keep the existing binary-answer shortcut; no property selection or answer-model call.
 - Other state queries: one `state_property` single-choice call selects the requested property for all selected entities. Output each name + value, with units. Brightness is shown as percent; hue and saturation come from `hs_color`. Unknown, unavailable or missing attributes are reported explicitly. Never substitute an entity's main state for a missing requested attribute. Duplicate names include room names when available.
 
@@ -123,7 +123,7 @@ The CLI shows `answer mode` and the selected `state property`. JSON includes `st
 
 ## Parameter value extraction
 
-Extract every required field and every retained optional field. Flattened HA selectors choose the extractor; the old item/message-only restriction is removed. Preflight all selected fields before making extraction calls. A boolean, select/enum, date/time, object, list, formatted text, unknown selector or unusable numeric range returns a visible `not yet supported` error. A dropped unsupported optional field does not block the request. No device action is executed.
+Extract every required field and every retained optional field. Flattened HA selectors choose the extractor; the old item/message-only restriction is removed. Preflight all selected fields before making extraction calls. A boolean, select/enum, date/time, object, list, formatted text, unknown selector or unusable numeric range returns a visible `not yet supported` error. A dropped unsupported optional field does not block the request. The benchmark does not execute device actions. HA executes only after required and selected fields have been extracted successfully.
 
 Text fields use one Choice over word occurrences plus `none`, with the existing relative cutoff. Each request includes the current field's HA metadata, all selected fields, the resolved target, pipeline language and enabled history. `other_parameters` explicitly lists the other selected fields; each has its own extractor. Prompts tell each extractor to leave those fields' values alone. Copy words only from the latest request. When both `item` and `description` are selected, extract the short item name separately from its details.
 
@@ -137,3 +137,37 @@ python benchmark.py -q "mach das Licht etwas heller" --speaker-area "Wohnzimmer"
 The console prints every extracted value in one `Parameter / Value` table. Each field has a separate timing row, such as `text:item`, `text:description` or `numeric:brightness_pct`. Native debug shows an extraction card per field. `--json` stores values in `parameters`, per-field details in `parameter_extractions`, and complete decisions, usage and timing under the field's stage name. Empty optional text fields are omitted; their extraction records and timing rows show skipped (no text). Required text fields with no words still stop the request. Invalid responses, unsupported formats and unclear numeric values still stop the request.
 
 Edit the text, message, numeric and numeric-mode prompts under Decider. Saved stock text/service prompts upgrade automatically; custom prompts remain. The configured text threshold defaults to **0.3** (previously 0.02); the optional-parameter threshold defaults to **0.15** (previously 0.3). Existing saved thresholds and explicit flags remain unchanged. Text selection still uses `p >= configured threshold / real option count`, excluding `none`. Numeric confidence is separate from multi-select probability cutoffs.
+
+## Action execution
+
+The core expands selected rooms to explicit exposed entity IDs. It groups targets by the parameters each supports, so an unsupported optional field is not sent to that target. Targets lacking any optional values can receive the base action. Missing required values or a target that cannot accept required fields stop before execution. Parameters cannot add broad `area_id`, `device_id`, `floor_id` or `label_id` selectors.
+
+HA checks current Assist exposure and exclusions before every call, passes the Assist user's context and awaits the native service call. Calls run sequentially. A failed call is never retried, and later groups are not sent after a failure. The `execution` record includes each call's service, arguments, status, response, timing and error/cause. Partial or unconfirmed outcomes remain explicit. A completed call means HA accepted it; device state is not independently verified.
+
+`dry_run=True` performs planning only and never invokes the executor, even if one is supplied. General MCP routes still stop before connecting or calling tools in dry-run mode. If only answer generation fails after successful execution, the reply and debug output say the command was already sent.
+
+## Run logs
+
+Logging is **off by default** and independent of `--json` and `--llm-answer`.
+
+```bash
+python benchmark.py -q "stopp die musik" --speaker-area "Küche" --log-runs
+python benchmark.py -q "Wie hell sind die Lampen im Büro?" --log-runs --json
+```
+
+- Local files: `runs/successful/` and `runs/unsuccessful/`, beside `benchmark.py`.
+- HA files: `<config>/glow_assistant/runs/successful/` and `unsuccessful/`. Enable **Save run logs to disk** in the integration settings.
+- The benchmark requires its own `--log-runs` flag even when HA logging is enabled.
+
+One timestamp/UUID JSON file is written per completed or failed run. Unsure, unsupported, model/context errors, failed/partial actions and answer failures go under `unsuccessful`. A complete dry-run plan goes under `successful`. Success describes pipeline completion, not proof that the classifier understood the user or that a physical device changed state.
+
+The shared `RunRecord` supplies the JSON envelope to both entry points. `--json` prints that report; `--log-runs` writes it regardless of console format. Records contain:
+
+- Schema/run ID, source, integration version, UTC timestamps, mode and success flag.
+- Request, pipeline language, speaker area, enabled history, entry/conversation IDs when available.
+- Effective settings and prompts, full exposed snapshot and action metadata.
+- Stage traces with offsets, decisions/probabilities, thresholds, usage, timings and execution outcomes.
+- Exact model request bodies and JSON responses, including provider errors, HTTP status and timing. Non-JSON error bodies are not stored.
+- Complete or partial results, plus exception details/tracebacks when a run raises.
+
+Model inputs/responses are captured when logging or `--json` is enabled. API keys, bearer tokens, credential URL values and headers are redacted; environment variables are not dumped. Files use private permissions and atomic replacement. Writes run outside the event loop. A log failure is reported separately and never retries a device call or changes its outcome. Files are not automatically deleted. `runs/` is ignored by Git.

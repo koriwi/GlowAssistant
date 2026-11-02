@@ -65,9 +65,10 @@ def settings_schema(values):
         fields[vol.Optional("test_connection", default=False)] = BooleanSelector()
         schema[vol.Required(group)] = section(vol.Schema(fields), {"collapsed": False})
     schema[vol.Optional("excluded_entities", default=values["excluded_entities"])] = EntitySelector({"multiple": True})
+    schema[vol.Required("log_runs", default=values["log_runs"])] = BooleanSelector()
     schema[vol.Required("history_enabled", default=values["history_enabled"])] = BooleanSelector()
     schema[vol.Required("history_messages", default=values["history_messages"])] = _number(1, 100)
-    for field in ("unsure_reply", "error_reply"):
+    for field in ("unsure_reply", "error_reply", "answer_error_reply"):
         schema[vol.Required(field, default=values[field])] = TextSelector()
     return vol.Schema(schema)
 

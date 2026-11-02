@@ -114,7 +114,7 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
               patch("benchmark.ModelClient", return_value=local)):
             report = await benchmark.run(args, {})
 
-        await AgentEngine(settings(), addon).process(args.query, "en", SNAPSHOT)
+        await AgentEngine(settings(), addon, dry_run=True).process(args.query, "en", SNAPSHOT)
         self.assertEqual(local.requests, addon.requests)
         self.assertEqual(set(local.requests[-1][2]), {"query_targets"})
         self.assertEqual(report["mode"], "plan_only")
@@ -133,7 +133,7 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
               patch("benchmark.ModelClient", return_value=local)):
             report = await benchmark.run(args, {})
 
-        await AgentEngine(settings(), addon).process(args.query, "en", SNAPSHOT)
+        await AgentEngine(settings(), addon, dry_run=True).process(args.query, "en", SNAPSHOT)
         self.assertEqual(local.requests, addon.requests)
         self.assertEqual(local.chat_requests, addon.chat_requests)
         self.assertEqual(report["result"]["state_answer"], "yes")
@@ -168,14 +168,14 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
               patch("benchmark.ModelClient", return_value=local)):
             report = await benchmark.run(args, {})
         configured = benchmark.model_settings(exported["settings"], args, {})
-        await AgentEngine(configured, addon).process(query, "de", exported["snapshot"])
+        await AgentEngine(configured, addon, dry_run=True).process(query, "de", exported["snapshot"])
         self.assertEqual(local.requests, addon.requests)
         self.assertEqual(report["result"]["parameters"], {"item": "Energy Drinks"})
         self.assertEqual(report["result"]["parameter_extractions"]["item"]["probability_threshold"], 0.05)
         self.assertEqual(report["result"]["parameter_extractions"]["item"]["real_option_count"], 6)
         self.assertAlmostEqual(report["result"]["parameter_extractions"]["item"]["effective_probability_threshold"], 0.05 / 6)
         self.assertFalse(local.chat_requests)
-        self.assertNotIn("execution", report["result"])
+        self.assertEqual(report["result"]["execution"]["status"], "planned")
         output = io.StringIO()
         with redirect_stdout(output):
             benchmark.print_report(report)
@@ -205,10 +205,10 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report["result"]["service"], "light.turn_on")
         self.assertEqual(report["result"]["action_metadata"]["fields"],
                          exported["snapshot"]["services"]["light.turn_on"]["fields"])
-        self.assertNotIn("execution", report["result"])
+        self.assertEqual(report["result"]["execution"]["status"], "planned")
         self.assertEqual(len(models.requests), 5)
         self.assertFalse(models.chat_requests)
-        self.assertEqual({event["stage"] for event in report["trace"]}, {"service", "target_scope", "action_areas", "parameter_capabilities", "optional_parameters", "numeric:brightness_pct", "answer"})
+        self.assertEqual({event["stage"] for event in report["trace"]}, {"service", "target_scope", "action_areas", "parameter_capabilities", "optional_parameters", "numeric:brightness_pct", "execution", "answer"})
         output = io.StringIO()
         with redirect_stdout(output):
             benchmark.print_report(report, show_answer_input=True)

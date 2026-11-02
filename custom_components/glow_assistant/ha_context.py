@@ -1,6 +1,9 @@
 from homeassistant.components.homeassistant import async_should_expose
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import area_registry, device_registry, entity_registry
 from homeassistant.helpers.service import async_get_all_descriptions
+
+from .actions import ActionError
 
 
 def speaker_area(hass, device_id):
@@ -53,3 +56,19 @@ async def async_snapshot(hass, excluded):
         if description.get("target") is not None and hass.services.has_service(domain, name)
     }
     return {"entities": entities, "services": services}
+
+
+async def async_execute(hass, excluded, context, action, arguments):
+    domain, service = action.split(".", 1)
+    allowed = {entity["entity_id"] for entity in entity_context(hass, excluded) if entity["domain"] == domain}
+    targets = arguments.get("entity_id")
+    if not isinstance(targets, list) or not targets or not set(targets) <= allowed:
+        raise ActionError("Selected targets are no longer exposed or available.")
+    if set(arguments) & {"area_id", "device_id", "floor_id", "label_id"}:
+        raise ActionError("Broad target selectors cannot bypass the exposed entity selection.")
+    if not hass.services.has_service(domain, service):
+        raise ActionError("The selected Home Assistant action is no longer available.")
+    try:
+        return await hass.services.async_call(domain, service, arguments, blocking=True, context=context)
+    except (HomeAssistantError, TimeoutError) as error:
+        raise ActionError("Home Assistant action failed; the device outcome is unconfirmed.", command_sent=True) from error

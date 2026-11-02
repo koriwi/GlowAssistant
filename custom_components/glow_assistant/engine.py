@@ -1,7 +1,9 @@
 import json
+from copy import deepcopy
 from time import perf_counter
 
 from .action_targets import decode_selection, selection_question
+from .actions import ActionError, action_calls, device_outcome
 from .client import ModelError
 from .const import (
     GENERAL,
@@ -114,13 +116,14 @@ def target_options(entities):
 
 
 class AgentEngine:
-    def __init__(self, settings, client, trace=None, history=None, dry_run=False):
+    def __init__(self, settings, client, trace=None, history=None, dry_run=False, execute=None):
         self.settings = settings
         self.client = client
         self.trace = trace
         self.history = list(history or []) if settings["history_enabled"] else []
         self.stage = "service"
         self.dry_run = dry_run
+        self.execute = execute
 
     def _trace(self, stage, arguments, result=None):
         if result is None and stage != "failure":
@@ -129,7 +132,7 @@ class AgentEngine:
             self.trace(stage, arguments, result)
 
     def _failure(self, result, details):
-        details = {**details, "device_command": "not_sent"}
+        details = {**details, "device_command": device_outcome(result.get("execution"))}
         result.setdefault("failures", []).append(details)
         self._trace("failure", details)
         self._trace("failure", {}, details)
@@ -190,6 +193,7 @@ class AgentEngine:
             "service": None, "domain": None, "target": None,
             "decisions": {}, "usage": {}, "timings_ms": {},
         }
+        self.result = result
         try:
             await self._process(result, snapshot, (speaker_area or "").strip() or None)
         except Uncertain as error:
@@ -198,7 +202,12 @@ class AgentEngine:
             else:
                 result.update(route=UNSURE, answer=self.settings["unsure_reply"])
             self._failure(result, error.details)
+        except ActionError as error:
+            result.update(route="error", error=str(error), answer=self.settings["error_reply"])
+            self._failure(result, failure_details("execution", str(error),
+                          "Check the action parameters, target exposure and Home Assistant logs. The action was not retried."))
         except ModelError as error:
+            result.update(error=str(error), answer=self.settings["error_reply"])
             self._failure(result, model_failure(self.stage, error))
             raise
         return result
@@ -268,12 +277,14 @@ class AgentEngine:
             members = await self._select_action_targets(result, entities)
             await self._select_parameters(result, members)
             await self._extract_parameters(result, members)
+            await self._execute_action(result, members)
             if self.settings["answer"]["enable"]:
                 facts = {"request": prompt, "service": result["service"], "target": result["target"],
-                         "parameters": result.get("parameters", {}), "execution": {"status": "not_sent"}}
+                         "parameters": result.get("parameters", {}), "execution": result["execution"]}
                 await self._answer(result, [
                     {"role": "system", "content": f"{self.settings['answer']['prompt']}\n{language_instruction}\n"
-                     "No device command was sent. Describe the selected action as a plan; never claim it completed."},
+                     + ("No device command was sent. Describe the selected action as a plan; never claim it completed."
+                        if self.dry_run else "Home Assistant accepted the service calls; this does not independently verify the device state.")},
                     {"role": "user", "content": json.dumps(facts, ensure_ascii=False)},
                 ])
             else:
@@ -339,6 +350,47 @@ class AgentEngine:
             {"role": "system", "content": f"{self.settings['answer']['prompt']}\n{language_instruction}"},
             {"role": "user", "content": json.dumps(facts, ensure_ascii=False, default=str)},
         ])
+
+    async def _execute_action(self, result, members):
+        self.stage = "execution"
+        calls = action_calls(result, members)
+        execution = {"status": "planned", "dry_run": self.dry_run, "calls": calls}
+        result["execution"] = execution
+        self._trace("execution", {"dry_run": self.dry_run, "calls": [
+            {"service": call["service"], "arguments": call["arguments"]} for call in calls
+        ]})
+        started = perf_counter()
+        try:
+            if not self.dry_run:
+                if self.execute is None:
+                    raise ActionError("No Home Assistant action executor is configured.")
+                for call in calls:
+                    call_started = perf_counter()
+                    call["status"] = "unconfirmed"
+                    try:
+                        response = await self.execute(call["service"], deepcopy(call["arguments"]))
+                    except ActionError as error:
+                        call.update(status="unconfirmed" if error.command_sent else "not_sent", error=str(error), error_type=type(error).__name__)
+                        if error.__cause__:
+                            call["cause"] = {"type": type(error.__cause__).__name__, "message": str(error.__cause__)}
+                        raise
+                    except Exception as error:
+                        call.update(error=str(error), error_type=type(error).__name__)
+                        raise ActionError("Action failed; the device outcome is unconfirmed.", command_sent=True) from error
+                    finally:
+                        call["duration_ms"] = round((perf_counter() - call_started) * 1000)
+                    call.update(status="completed", result=response)
+                execution["status"] = "completed"
+        except ActionError as error:
+            for call in calls:
+                if call["status"] == "planned":
+                    call["status"] = "not_sent"
+            execution.update(status="partial" if any(call["status"] == "completed" for call in calls) else "error", error=str(error))
+            raise
+        finally:
+            result["timings_ms"]["execution"] = round((perf_counter() - started) * 1000)
+            self._trace("execution", {}, {**execution, "device_command": device_outcome(execution),
+                                          "duration_ms": result["timings_ms"]["execution"]})
 
     async def _select_action_targets(self, result, entities):
         scope = result["target_scope"]
@@ -525,7 +577,7 @@ class AgentEngine:
         try:
             await self._chat(result, "answer", messages)
         except ModelError as error:
-            result["answer"] = self.settings["error_reply"]
+            result["answer"] = self.settings["answer_error_reply" if device_outcome(result.get("execution")) == "completed" else "error_reply"]
             result["answer_error"] = str(error)
             self._failure(result, model_failure("answer", error))
 

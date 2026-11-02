@@ -86,12 +86,15 @@ class ScriptedModels:
 
 
 class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
-    async def run_agent(self, choices, snapshot=SNAPSHOT, settings=None, answers=None, trace=None, history=None, language="de", prompt="test request", dry_run=False, speaker_area=None):
+    async def run_agent(self, choices, snapshot=SNAPSHOT, settings=None, answers=None, trace=None, history=None, language="de", prompt="test request", dry_run=None, speaker_area=None):
         models = ScriptedModels(choices, answers)
         config = copy.deepcopy(settings) if settings else normalize_settings({})
         # Existing query tests exercise LLM answer generation.
         config["answer"]["enable"] = bool(choices and choices[0].get("service") == "query_state")
-        agent = AgentEngine(config, models, trace=trace, history=history, dry_run=dry_run)
+        action = bool(choices and choices[0].get("service") not in ("query_state", "not-smarthome-related"))
+        dry_run = action if dry_run is None else dry_run
+        agent = AgentEngine(config, models, trace=trace, history=history, dry_run=dry_run,
+                            execute=AsyncMock(return_value=None) if action else None)
         result = await agent.process(prompt, language, snapshot, speaker_area=speaker_area)
         return result, models
 
@@ -229,7 +232,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Assist pipeline language: fr-CH", system)
         self.assertIn("Write the spoken reply in this language", system)
 
-    async def test_actions_stop_after_selection_in_ha_and_plan_only_mode(self):
+    async def test_actions_execute_in_live_mode_and_only_plan_in_dry_run(self):
         for dry_run in (False, True):
             with self.subTest(dry_run=dry_run):
                 result, models = await self.run_agent([
@@ -245,14 +248,15 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result["parameter_selection"]["selected_parameters"], [])
                 self.assertFalse(models.chat_requests)
                 self.assertEqual(result["target"]["area_id"], "office")
-                self.assertNotIn("execution", result)
+                self.assertEqual(result["execution"]["status"], "planned" if dry_run else "completed")
                 self.assertNotIn("failures", result)
                 self.assertEqual(result["answer"], "ok")
 
 
     async def test_action_target_scope_choices_and_speaker_context(self):
         with patch.object(AgentEngine, "_select_action_targets", new_callable=AsyncMock, return_value=SNAPSHOT["entities"]), \
-                patch.object(AgentEngine, "_extract_parameters", new_callable=AsyncMock):
+                patch.object(AgentEngine, "_extract_parameters", new_callable=AsyncMock), \
+                patch.object(AgentEngine, "_execute_action", new_callable=AsyncMock):
             for scope, location, prompt in (
                 ("entities", None, "Add milk to the shopping list"),
                 ("entities", "Kitchen", "Setze Brot auf die Einkaufsliste"),
@@ -320,7 +324,8 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         original = copy.deepcopy(snapshot)
         history = [{"role": "user", "content": "Set the office to 20 degrees"}, {"role": "assistant", "content": "Selected."}]
         settings = normalize_settings({"history_enabled": True})
-        with patch.object(AgentEngine, "_extract_parameters", new_callable=AsyncMock):
+        with patch.object(AgentEngine, "_extract_parameters", new_callable=AsyncMock), \
+                patch.object(AgentEngine, "_execute_action", new_callable=AsyncMock):
             result, models = await self.run_agent([
                 {"service": "climate.set_temperature:temperature"}, {"target_scope": "areas"}, {"action_areas": "area:office"}, {"optional_parameters": "none"},
             ], snapshot=snapshot, settings=settings, history=history, language="fr-CH")
@@ -481,7 +486,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
             {"service": "light.turn_off"}, {"target_scope": "entities_explicit_area"},
             {"action_areas": "area:office"}, {"action_entities": "entity:light.desk"},
         ], trace=lambda *event: events.append(event))
-        self.assertEqual([stage for stage, _, _ in events], ["service", "service", "target_scope", "target_scope", "action_areas", "action_areas", "action_entities", "action_entities", "parameter_capabilities", "parameter_capabilities", "answer", "answer"])
+        self.assertEqual([stage for stage, _, _ in events], ["service", "service", "target_scope", "target_scope", "action_areas", "action_areas", "action_entities", "action_entities", "parameter_capabilities", "parameter_capabilities", "execution", "execution", "answer", "answer"])
         output = events[1][2]
         self.assertEqual(output["action_metadata"], result["action_metadata"])
         self.assertEqual(output["decisions"]["service"]["choice"], "light.turn_off")

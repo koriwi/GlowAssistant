@@ -22,6 +22,7 @@ STAGE_NAMES = {
     "text": "glow_assistant_extract_text",
     "numeric": "glow_assistant_extract_number",
     "answer": "glow_assistant_generate_answer",
+    "execution": "glow_assistant_execute_action",
     "general": "glow_assistant_general_answer",
     "mcp": "glow_assistant_mcp_tool",
     "mcp_connect": "glow_assistant_connect_mcp_servers",
@@ -36,11 +37,12 @@ class ChatLogTrace:
         self.calls = {}
         self.stage = "context"
         self.failure_reported = False
+        self.device_command = "not_sent"
 
     def failure(self, details):
         for stage in list(self.calls):
             self(stage, {}, {"status": "error", "error": details["reason"]})
-        details = {"device_command": "not_sent", **details}
+        details = {"device_command": self.device_command, **details}
         self("failure", details)
         self("failure", {}, details)
 
@@ -50,6 +52,8 @@ class ChatLogTrace:
                 self.failure_reported = True
             else:
                 self.stage = stage
+            if stage == "execution" and not arguments.get("dry_run"):
+                self.device_command = "unconfirmed"
             call = ToolInput(tool_name=STAGE_NAMES[stage.split(":", 1)[0]], tool_args=arguments, external=True)
             self.calls[stage] = call
             self.chat_log.async_add_assistant_content_without_tools(
@@ -57,6 +61,8 @@ class ChatLogTrace:
                                  content=failure_text(arguments) if stage == "failure" else None),
             )
         else:
+            if stage == "execution":
+                self.device_command = result.get("device_command", self.device_command)
             call = self.calls.pop(stage)
             self.chat_log.async_add_assistant_content_without_tools(ToolResultContent(
                 agent_id=self.agent_id, tool_call_id=call.id,

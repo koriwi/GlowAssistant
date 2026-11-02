@@ -63,9 +63,22 @@ flowchart TD
     Numeric -->|Valid number| Values
     Values -->|More fields| Each
     Values -->|All complete| Console["Print targets, parameter values and per-field timings"]
-    Console --> Stop["No device actions"]
-    Stop --> ActionReplyMode{"LLM answer enabled?"}
-    ActionReplyMode -->|Yes| PlanAnswer["Answer model: describe the unexecuted plan"]
+    Console --> Plan["Build explicit entity calls; group by supported parameters"]
+    Plan --> DryRun{"dry_run?"}
+    DryRun -->|Yes| Planned["Record planned calls; never invoke executor"]
+    DryRun -->|No| Execute["Recheck exposure/exclusions; call HA sequentially; no retries"]
+    Execute -->|Failure or partial| ExecutionError["Error reply; preserve completed/unconfirmed outcomes"]
+    Execute -->|Completed| ActionReplyMode{"LLM answer enabled?"}
+    Planned --> ActionReplyMode
+    ActionReplyMode -->|Yes| PlanAnswer["Answer model: describe actual execution outcome or dry-run plan"]
     ActionReplyMode -->|No| Ack["ok"]
     PlanAnswer --> Reply
     Ack --> Reply
+
+    Reply --> LogToggle{"Run logging enabled?"}
+    ExecutionError --> LogToggle
+    Unsupported --> LogToggle
+    Unsure --> LogToggle
+    LogToggle -->|No| Finish["Return reply"]
+    LogToggle -->|Yes| Log["Write redacted JSON: successful / unsuccessful; no device retries on log failure"]
+    Log --> Finish

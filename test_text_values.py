@@ -111,7 +111,7 @@ class TextEngineTests(unittest.IsolatedAsyncioTestCase):
         choices.append({"text_words": response_for(probabilities)["answers"]["text_words"]})
         client = ScriptedModels(choices)
         events = []
-        engine = AgentEngine(settings or normalize_settings({}), client, trace=lambda *event: events.append(event), history=history)
+        engine = AgentEngine(settings or normalize_settings({}), client, trace=lambda *event: events.append(event), history=history, dry_run=True)
         result = await engine.process(prompt, "de", snapshot, speaker_area="Office")
         return result, client, events
 
@@ -126,7 +126,7 @@ class TextEngineTests(unittest.IsolatedAsyncioTestCase):
                 result, client, events = await self.run_text(service, prompt, positions, optional=optional)
                 parameter = "item" if service == "todo.add_item" else "message"
                 self.assertEqual(result["parameters"], {parameter: expected})
-                self.assertNotIn("execution", result)
+                self.assertEqual(result["execution"]["status"], "planned")
                 self.assertFalse(client.chat_requests)
                 questions = [set(request[2]) for request in client.requests]
                 self.assertEqual(questions, [{"service"}, {"target_scope"}, {"action_entities"}]
@@ -168,7 +168,7 @@ class TextEngineTests(unittest.IsolatedAsyncioTestCase):
         snapshot = {"entities": [entity("todo.shopping", "Shopping", area=None)],
                     "services": {"todo.add_item": {"fields": {"item": {"required": True, "selector": {"text": {}}}}}}}
         with self.assertRaisesRegex(ModelError, "Malformed text extraction response"):
-            await AgentEngine(normalize_settings({}), client, trace=lambda *event: events.append(event)).process("Add milk", "en", snapshot)
+            await AgentEngine(normalize_settings({}), client, trace=lambda *event: events.append(event), dry_run=True).process("Add milk", "en", snapshot)
         self.assertEqual(len(client.requests), 4)
         self.assertFalse(client.chat_requests)
         self.assertEqual(events[-1][2]["stage"], "text:item")
@@ -180,7 +180,7 @@ class TextEngineTests(unittest.IsolatedAsyncioTestCase):
                                  {"action_entities": "entity:notify.kitchen"}, {"optional_parameters": "none"}])
         snapshot = {"entities": [entity("notify.kitchen", "Kitchen", area=None)],
                     "services": {"notify.send_message": {"fields": {"message": {"selector": {"text": {}}}}}}}
-        result = await AgentEngine(normalize_settings({}), client).process("Notify Kitchen", "en", snapshot)
+        result = await AgentEngine(normalize_settings({}), client, dry_run=True).process("Notify Kitchen", "en", snapshot)
         self.assertNotIn("parameter_extractions", result)
         self.assertNotIn("parameters", result)
         self.assertEqual(len(client.requests), 4)

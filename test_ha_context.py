@@ -5,7 +5,7 @@ import unittest
 from enum import Enum
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 
 class ComputedNameType(Enum):
@@ -77,6 +77,55 @@ class EntityContextTests(unittest.TestCase):
         result = self.snapshot([], [], registered=False)
         self.assertEqual(result[0]["aliases"], [])
         self.assertEqual(result[0]["area_aliases"], [])
+
+
+class HAExecutionTests(unittest.IsolatedAsyncioTestCase):
+    def context_module(self):
+        return EntityContextTests().load_context(SimpleNamespace(area_registry=Mock(), device_registry=Mock(), entity_registry=Mock()))
+
+    async def test_each_service_call_rechecks_exposure_and_preserves_user_context(self):
+        from custom_components.glow_assistant.actions import ActionError
+
+        module = self.context_module()
+        hass = SimpleNamespace(services=SimpleNamespace(has_service=Mock(return_value=True), async_call=AsyncMock()))
+        context = object()
+        arguments = {"entity_id": ["light.allowed"], "brightness_pct": 50}
+        with patch.object(module, "entity_context", side_effect=[[{"entity_id": "light.allowed", "domain": "light"}], []]) as exposed:
+            await module.async_execute(hass, {"light.excluded"}, context, "light.turn_on", arguments)
+            with self.assertRaises(ActionError) as raised:
+                await module.async_execute(hass, {"light.excluded"}, context, "light.turn_on", arguments)
+        self.assertFalse(raised.exception.command_sent)
+        self.assertEqual(exposed.call_count, 2)
+        hass.services.async_call.assert_awaited_once_with("light", "turn_on", arguments, blocking=True, context=context)
+
+    async def test_invalid_or_broad_targets_and_unavailable_services_are_never_sent(self):
+        from custom_components.glow_assistant.actions import ActionError
+
+        module = self.context_module()
+        hass = SimpleNamespace(services=SimpleNamespace(has_service=Mock(return_value=True), async_call=AsyncMock()))
+        with patch.object(module, "entity_context", return_value=[{"entity_id": "light.allowed", "domain": "light"}]):
+            for arguments in ({}, {"entity_id": []}, {"entity_id": "light.allowed"}, {"entity_id": ["light.hidden"]},
+                              {"entity_id": ["light.allowed"], "area_id": "all"}):
+                with self.subTest(arguments=arguments), self.assertRaises(ActionError) as raised:
+                    await module.async_execute(hass, set(), None, "light.turn_on", arguments)
+                self.assertFalse(raised.exception.command_sent)
+            hass.services.has_service.return_value = False
+            with self.assertRaises(ActionError):
+                await module.async_execute(hass, set(), None, "light.turn_on", {"entity_id": ["light.allowed"]})
+        hass.services.async_call.assert_not_awaited()
+
+    async def test_backend_failure_is_unconfirmed_and_not_retried(self):
+        from custom_components.glow_assistant.actions import ActionError
+
+        module = self.context_module()
+        hass = SimpleNamespace(services=SimpleNamespace(has_service=Mock(return_value=True),
+                                                       async_call=AsyncMock(side_effect=module.HomeAssistantError("backend rejected"))))
+        with patch.object(module, "entity_context", return_value=[{"entity_id": "light.allowed", "domain": "light"}]):
+            with self.assertRaises(ActionError) as raised:
+                await module.async_execute(hass, set(), None, "light.turn_on", {"entity_id": ["light.allowed"]})
+        self.assertTrue(raised.exception.command_sent)
+        self.assertIn("backend rejected", str(raised.exception.__cause__))
+        hass.services.async_call.assert_awaited_once()
 
 
 if __name__ == "__main__":

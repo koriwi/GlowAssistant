@@ -71,7 +71,7 @@ class ProgrammaticAnswerTests(unittest.IsolatedAsyncioTestCase):
         history = [{"role": "user", "content": "The office lights"}]
         settings = local_settings()
         settings["history_enabled"] = True
-        result = await AgentEngine(settings, client, trace=lambda *event: events.append(event), history=history).process(
+        result = await AgentEngine(settings, client, trace=lambda *event: events.append(event), history=history, dry_run=True).process(
             "Wie hell sind sie?", "de", snapshot)
         self.assertEqual(result["answer"], "Desk lamp: 100 %; Ceiling lamp: 50 %.")
         self.assertEqual(result["answer_source"], "programmatic")
@@ -92,7 +92,7 @@ class ProgrammaticAnswerTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(language=language, answer=answer):
                 client = ScriptedModels([{"service": "query_state"}, {"area": "area:office"}, {"domain": "light"},
                                          {"query_type": "yes_no"}, {"binary_answer": answer}])
-                result = await AgentEngine(local_settings(), client).process("Is the office light on?", language, SNAPSHOT)
+                result = await AgentEngine(local_settings(), client, dry_run=True).process("Is the office light on?", language, SNAPSHOT)
                 self.assertEqual(result["answer"], expected)
                 self.assertEqual(len(client.requests), 5)
                 self.assertNotIn("state_property", result["decisions"])
@@ -101,28 +101,28 @@ class ProgrammaticAnswerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_command_defaults_to_ok_without_chat_or_device_execution(self):
         client = ScriptedModels([{"service": "light.turn_off"}, {"target_scope": "implied_area"}])
-        result = await AgentEngine(local_settings(), client).process("Turn off the lights", "en", SNAPSHOT, speaker_area="Office")
+        result = await AgentEngine(local_settings(), client, dry_run=True).process("Turn off the lights", "en", SNAPSHOT, speaker_area="Office")
         self.assertEqual(result["answer"], "ok")
         self.assertEqual(result["answer_source"], "programmatic")
         self.assertEqual(len(client.requests), 2)
         self.assertFalse(client.chat_requests)
-        self.assertNotIn("execution", result)
+        self.assertEqual(result["execution"]["status"], "planned")
 
     async def test_enabled_answer_llm_receives_a_command_plan_without_claiming_execution(self):
         client = ScriptedModels([{"service": "light.turn_off"}, {"target_scope": "implied_area"}], answers=["I would turn off the lights."])
-        result = await AgentEngine(local_settings(True), client).process("Turn off the lights", "en", SNAPSHOT, speaker_area="Office")
+        result = await AgentEngine(local_settings(True), client, dry_run=True).process("Turn off the lights", "en", SNAPSHOT, speaker_area="Office")
         self.assertEqual(result["answer_source"], "llm")
         self.assertEqual(result["answer"], "I would turn off the lights.")
         self.assertEqual(len(client.chat_requests), 1)
         messages = client.chat_requests[0][1]
         self.assertIn("No device command was sent", messages[0]["content"])
-        self.assertEqual(json.loads(messages[1]["content"])["execution"]["status"], "not_sent")
-        self.assertNotIn("execution", result)
+        self.assertEqual(json.loads(messages[1]["content"])["execution"]["status"], "planned")
+        self.assertEqual(result["execution"]["status"], "planned")
 
     async def test_unsure_property_stops_instead_of_answering_with_an_unrelated_value(self):
         client = ScriptedModels([{"service": "query_state"}, {"area": "area:office"}, {"domain": "sensor"},
                                  {"query_type": "complex"}, {"targets": ["sensor.office"]}, {"state_property": "unsure"}])
-        result = await AgentEngine(local_settings(), client).process("What is its unsupported value?", "en", SNAPSHOT)
+        result = await AgentEngine(local_settings(), client, dry_run=True).process("What is its unsupported value?", "en", SNAPSHOT)
         self.assertEqual(result["route"], "unsure")
         self.assertEqual(result["failures"][0]["stage"], "state_property")
         self.assertNotIn("state_values", result)

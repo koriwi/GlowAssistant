@@ -117,9 +117,10 @@ class ActionRoutingTests(unittest.IsolatedAsyncioTestCase):
         client = ScriptedModels([{"service": service}, {"target_scope": scope}, *later])
 
         events = []
-        with patch.object(AgentEngine, "_extract_parameters", new_callable=AsyncMock):
+        with patch.object(AgentEngine, "_extract_parameters", new_callable=AsyncMock), \
+                patch.object(AgentEngine, "_execute_action", new_callable=AsyncMock):
             result = await AgentEngine(settings or normalize_settings({}), client,
-                                       trace=lambda *event: events.append(event), history=history).process(
+                                       trace=lambda *event: events.append(event), history=history, dry_run=True).process(
                 prompt, "de", data or snapshot(), speaker_area=speaker_area,
             )
 

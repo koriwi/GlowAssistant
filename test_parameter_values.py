@@ -134,7 +134,7 @@ class ParameterEngineTests(unittest.IsolatedAsyncioTestCase):
         events = []
         history = [{"role": "user", "content": "Use the shopping list"}]
         settings = normalize_settings({"history_enabled": True})
-        result = await AgentEngine(settings, client, trace=lambda *event: events.append(event), history=history).process(prompt, "de", snapshot)
+        result = await AgentEngine(settings, client, trace=lambda *event: events.append(event), history=history, dry_run=True).process(prompt, "de", snapshot)
         self.assertEqual(result["parameters"], {"item": "nudeln", "description": "(weizen, fussilli, barilla)"})
         self.assertEqual(set(result["parameter_extractions"]), {"item", "description"})
         for name in fields:
@@ -152,7 +152,7 @@ class ParameterEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([output["parameter"] for stage, _, output in events if stage.startswith("text:") and output],
                          ["item", "description"])
         self.assertNotIn(settings["decider"]["text_prompt"], json.dumps(events))
-        self.assertNotIn("execution", result)
+        self.assertEqual(result["execution"]["status"], "planned")
         self.assertFalse(client.chat_requests)
 
     async def test_empty_optional_description_preserves_required_item_and_reports_skip(self):
@@ -181,14 +181,14 @@ class ParameterEngineTests(unittest.IsolatedAsyncioTestCase):
         def record(stage, arguments, output=None):
             trace.append({"stage": stage, "input": arguments} if output is None else {"stage": stage, "output": output})
 
-        result = await AgentEngine(normalize_settings({}), client, trace=record).process(prompt, "de", snapshot)
+        result = await AgentEngine(normalize_settings({}), client, trace=record, dry_run=True).process(prompt, "de", snapshot)
         self.assertEqual(result["route"], "smarthome")
         self.assertEqual(result["parameters"], {"item": "rote zwiebeln"})
         self.assertEqual(result["parameter_extractions"]["description"]["status"], "skipped")
         self.assertIn("optional", result["parameter_extractions"]["description"]["reason"])
         self.assertNotIn("failures", result)
         self.assertNotIn("error", result)
-        self.assertNotIn("execution", result)
+        self.assertEqual(result["execution"]["status"], "planned")
         self.assertEqual(len(client.requests), 6)
         self.assertFalse(client.chat_requests)
         skipped = next(event["output"] for event in trace if event["stage"] == "text:description" and "output" in event)
@@ -205,12 +205,12 @@ class ParameterEngineTests(unittest.IsolatedAsyncioTestCase):
         client = ScriptedModels([{"service": "number.set_value"}, {"target_scope": "implied_area"}, numeric_answers(4)])
         snapshot = {"entities": [entity("number.setting", "Setting", state="3")], "services": {
             "number.set_value": {"fields": {"value": {"required": True, "selector": {"number": {"min": 0, "max": 10}}}}}}}
-        result = await AgentEngine(normalize_settings({}), client).process("Set the value to five", "en", snapshot, speaker_area="Office")
+        result = await AgentEngine(normalize_settings({}), client, dry_run=True).process("Set the value to five", "en", snapshot, speaker_area="Office")
         self.assertEqual(result["parameters"], {"value": 5})
         self.assertEqual(result["parameter_extractions"]["value"]["type"], "number")
         self.assertEqual(client.requests[-1][1]["current"], 3)
         self.assertIn("numeric:value", result["timings_ms"])
-        self.assertNotIn("execution", result)
+        self.assertEqual(result["execution"]["status"], "planned")
         self.assertFalse(client.chat_requests)
 
     async def test_text_and_numeric_fields_share_the_required_optional_extraction_loop(self):
@@ -222,7 +222,7 @@ class ParameterEngineTests(unittest.IsolatedAsyncioTestCase):
             "message": {"required": True, "selector": {"text": {}}},
             "volume": {"selector": {"number": {"min": 0, "max": 100, "step": 5}}},
         }}}}
-        result = await AgentEngine(normalize_settings({}), client).process(prompt, "en", snapshot)
+        result = await AgentEngine(normalize_settings({}), client, dry_run=True).process(prompt, "en", snapshot)
         self.assertEqual(result["parameters"], {"message": "dinner is ready", "volume": 50})
         self.assertEqual(client.requests[-2][1]["other_parameters"], ["volume"])
         self.assertEqual(client.requests[-1][1]["other_parameters"], ["message"])
@@ -243,7 +243,7 @@ class ParameterEngineTests(unittest.IsolatedAsyncioTestCase):
                         "brightness_step_pct": {"filter": {"supported_features": [1]},
                                                 "selector": {"number": {"min": -100, "max": 100, "step": 1}}},
                     }}}}
-        result = await AgentEngine(normalize_settings({}), client).process("A little brighter", "en", snapshot, speaker_area="Office")
+        result = await AgentEngine(normalize_settings({}), client, dry_run=True).process("A little brighter", "en", snapshot, speaker_area="Office")
         self.assertEqual(result["parameters"], {"brightness_step_pct": 10})
         self.assertEqual(client.requests[-1][1]["supported_entity_ids"], ["light.dimmable"])
         self.assertEqual(set(client.requests[-1][1]["current_values"]), {"light.dimmable"})
@@ -259,7 +259,7 @@ class ParameterEngineTests(unittest.IsolatedAsyncioTestCase):
                                          {"action_entities": "entity:notify.recipient"}])
                 snapshot = {"entities": [entity("notify.recipient", "Recipient", area=None)],
                             "services": {"notify.send_message": {"fields": fields}}}
-                result = await AgentEngine(normalize_settings({}), client).process("Send a message", "en", snapshot)
+                result = await AgentEngine(normalize_settings({}), client, dry_run=True).process("Send a message", "en", snapshot)
                 self.assertEqual(result["route"], "unsupported")
                 self.assertIn("not yet supported", result["answer"])
                 self.assertIn("extra", result["error"])
@@ -276,7 +276,7 @@ class ParameterEngineTests(unittest.IsolatedAsyncioTestCase):
         snapshot = {"entities": [entity("todo.shopping", "Shopping", area=None)], "services": {"todo.add_item": {"fields": {
             "item": {"required": True, "selector": {"text": {}}}, "due_date": {"selector": {"date": {}}},
         }}}}
-        result = await AgentEngine(normalize_settings({}), client).process("Add milk for tomorrow", "en", snapshot)
+        result = await AgentEngine(normalize_settings({}), client, dry_run=True).process("Add milk for tomorrow", "en", snapshot)
         self.assertEqual(result["route"], "unsupported")
         self.assertEqual(result["parameter_selection"]["selected_parameters"], ["due_date"])
         self.assertIn("due_date", result["error"])
@@ -291,7 +291,7 @@ class ParameterEngineTests(unittest.IsolatedAsyncioTestCase):
         snapshot = {"entities": [entity("todo.shopping", "Shopping", area=None)], "services": {"todo.add_item": {"fields": {
             "item": {"required": True, "selector": {"text": {}}}, "due_date": {"selector": {"date": {}}},
         }}}}
-        result = await AgentEngine(normalize_settings({}), client).process(prompt, "en", snapshot)
+        result = await AgentEngine(normalize_settings({}), client, dry_run=True).process(prompt, "en", snapshot)
         self.assertEqual(result["parameters"], {"item": "milk"})
         self.assertNotIn("error", result)
 

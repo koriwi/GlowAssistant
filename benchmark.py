@@ -5,6 +5,7 @@ import os
 import shutil
 import sys
 import textwrap
+import traceback
 from itertools import zip_longest
 from pathlib import Path
 from time import perf_counter
@@ -15,11 +16,14 @@ from dotenv import load_dotenv
 
 from custom_components.glow_assistant.client import ModelClient, ModelError
 from custom_components.glow_assistant.engine import AgentEngine
+from custom_components.glow_assistant.run_logs import RunRecord
 from custom_components.glow_assistant.settings import (
     DEFAULTS,
     normalize_settings,
     validate_settings,
 )
+
+LOG_DIRECTORY = Path(__file__).parent / "runs"
 
 CONFIDENCE_FIELDS = tuple(key for key in DEFAULTS["decider"] if key.endswith("_confidence"))
 
@@ -34,6 +38,7 @@ def confidence(value):
 def parser():
     result = argparse.ArgumentParser(description="Benchmark the shared HA engine locally; device actions are planned only.")
     result.add_argument("--query", "-q", required=True)
+    result.add_argument("--log-runs", action="store_true", help="Save each run to runs/successful or runs/unsuccessful; disabled by default.")
     result.add_argument("--llm-answer", action="store_true", help="Generate smart-home replies with the answer LLM; disabled by default.")
     result.add_argument("--confidence", type=confidence, help="Override every decider confidence threshold.")
     result.add_argument("--parameter-threshold", type=confidence,
@@ -55,7 +60,7 @@ def parser():
     return result
 
 
-def model_settings(exported, args, env):
+def model_settings(exported, args, env, record=None):
     settings = normalize_settings(exported)
     for group, prefix in (("decider", "DECIDER"), ("answer", "ANSWER"), ("general", "GENERAL")):
         for field in ("url", "model", "api_key"):
@@ -63,6 +68,7 @@ def model_settings(exported, args, env):
             if value:
                 settings[group][field] = value
     settings["answer"]["enable"] = args.llm_answer
+    settings["log_runs"] = args.log_runs
     decider = settings["decider"]
     if not decider["api_key"] and urlsplit(decider["url"]).hostname == "openrouter.ai":
         decider["api_key"] = env.get("OPENROUTER_API_KEY", "").strip()
@@ -82,6 +88,8 @@ def model_settings(exported, args, env):
         value = getattr(args, f"action_{kind}_threshold")
         if value is not None:
             decider[f"action_{kind}_probability_threshold"] = value
+    if record is not None:
+        record.settings(settings)
     return validate_settings(settings)
 
 
@@ -122,30 +130,42 @@ async def fetch_snapshot(session, env):
 
 async def run(args, env):
     started = perf_counter()
-    trace = []
-
-    def record(stage, arguments, result=None):
-        trace.append({"stage": stage, "input": arguments} if result is None else {"stage": stage, "output": result})
-
-
-    async with aiohttp.ClientSession() as session:
-        exported = await fetch_snapshot(session, env)
-        snapshot_ms = round((perf_counter() - started) * 1000)
-        settings = model_settings(exported["settings"], args, env)
-        language = args.language or env.get("BENCHMARK_LANGUAGE", "").strip() or "de"
-        engine = AgentEngine(settings, ModelClient(session), trace=record, dry_run=True)
-        engine_started = perf_counter()
-        try:
-            result = await engine.process(args.query, language, exported["snapshot"], speaker_area=args.speaker_area)
-        except ModelError as error:
-            result = {"request": args.query, "error": str(error), "details": error.details}
-        engine_ms = round((perf_counter() - engine_started) * 1000)
-    return {
-        "mode": "plan_only", "entry_id": exported["entry_id"], "language": language,
-        "context": {"entities": len(exported["snapshot"]["entities"]), "actions": len(exported["snapshot"]["services"])},
-        "result": result, "trace": trace,
-        "timings_ms": {"snapshot": snapshot_ms, "engine": engine_ms, "total": round((perf_counter() - started) * 1000)},
-    }
+    language = args.language or env.get("BENCHMARK_LANGUAGE", "").strip() or "de"
+    record = RunRecord("benchmark", args.query, language, dry_run=True, enabled=args.log_runs,
+                       capture_models=args.json, secrets=[env.get("HA_TOKEN", "")])
+    record.data.update(speaker_area=args.speaker_area, benchmark_flags=vars(args))
+    engine = None
+    result = None
+    snapshot_ms = 0
+    engine_ms = 0
+    try:
+        async with aiohttp.ClientSession() as session:
+            exported = await fetch_snapshot(session, env)
+            snapshot_ms = round((perf_counter() - started) * 1000)
+            record.data["entry_id"] = exported["entry_id"]
+            record.snapshot(exported["snapshot"])
+            settings = model_settings(exported["settings"], args, env, record=record)
+            client = ModelClient(session, observer=record.model_call if record.capture_models else None)
+            engine = AgentEngine(settings, client, trace=record.trace, dry_run=True)
+            record.data["history"] = engine.history
+            engine_started = perf_counter()
+            try:
+                result = await engine.process(args.query, language, exported["snapshot"], speaker_area=args.speaker_area)
+            finally:
+                engine_ms = round((perf_counter() - engine_started) * 1000)
+    except Exception as error:
+        result = {**getattr(engine, "result", {}), "request": args.query, "error": str(error),
+                  "details": getattr(error, "details", {})}
+        record.data["exception"] = {"type": type(error).__name__, "traceback": traceback.format_exc()}
+        if engine is None:
+            snapshot_ms = round((perf_counter() - started) * 1000)
+    finally:
+        if result is None:
+            result = {**getattr(engine, "result", {}), "request": args.query, "error": "The run was interrupted."}
+        report = await record.finish(result, LOG_DIRECTORY, timings_ms={
+            "snapshot": snapshot_ms, "engine": engine_ms, "total": round((perf_counter() - started) * 1000),
+        })
+    return report
 
 
 def print_table(headers, rows, limits, right_columns=()):
@@ -192,6 +212,9 @@ def print_report(report, show_answer_input=False):
     for field in ("route", "service", "domain"):
         if field in result:
             summary.append((field, result[field] if result[field] is not None else "-"))
+    if "execution" in result:
+        execution = result["execution"]
+        summary.append(("execution", f"{execution['status']}; {len(execution['calls'])} call(s)"))
     if "answer_source" in result:
         summary.append(("answer mode", result["answer_source"]))
     if "state_property" in result:
@@ -284,6 +307,10 @@ def print_report(report, show_answer_input=False):
     for field in ("answer", "error"):
         if field in result and not (field == "answer" and result.get("error") == result[field]):
             print(f"{field}: {result[field]}")
+    if report.get("log_file"):
+        print(f"run log: {report['log_file']}")
+    if report.get("log_error"):
+        print(f"run log error: {report['log_error']}")
     for failure in result.get("failures", []):
         print(f"failure [{failure['stage']}]: {failure['reason']}")
     if show_answer_input:
@@ -309,7 +336,7 @@ def main(argv=None):
         print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
     else:
         print_report(report, show_answer_input=args.show_answer_input)
-    return int("error" in report["result"])
+    return int(not report.get("success", "error" not in report["result"]))
 
 
 if __name__ == "__main__":
