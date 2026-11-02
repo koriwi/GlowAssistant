@@ -50,6 +50,7 @@ def parser():
     result.add_argument("--query-target-threshold", type=confidence,
                         help="Relative probability threshold for state-query entities; independent of --confidence.")
     result.add_argument("--text-threshold", type=confidence, help="Relative probability threshold for item/message words.")
+    result.add_argument("--select-threshold", type=confidence, help="Relative probability threshold for multi-value select extraction; default 0.3.")
     for field in CONFIDENCE_FIELDS:
         flags = ["--" + field.replace("_", "-")]
         if field == "domain_confidence":
@@ -86,6 +87,8 @@ def model_settings(exported, args, env, record=None):
         decider["query_target_probability_threshold"] = args.query_target_threshold
     if args.text_threshold is not None:
         decider["text_probability_threshold"] = args.text_threshold
+    if args.select_threshold is not None:
+        decider["select_probability_threshold"] = args.select_threshold
     for kind in ("area", "entity"):
         value = getattr(args, f"action_{kind}_threshold")
         if value is not None:
@@ -312,7 +315,8 @@ def print_report(report, show_answer_input=False):
             print_table(["Parameter", "Probability", "Targets", "Decision / reason"], rows, [40, 12, 9, 28], right_columns=(1, 2))
         print()
     if result.get("parameters"):
-        print_table(["Parameter", "Value"], list(result["parameters"].items()), [32, max(30, columns - 36)])
+        print_table(["Parameter", "Value"], [(name, json.dumps(value, ensure_ascii=False) if isinstance(value, list) else value)
+                                             for name, value in result["parameters"].items()], [32, max(30, columns - 36)])
         print()
     stages = [("snapshot", str(report["timings_ms"]["snapshot"]), "Read HA context and settings", "-")]
     for event in report["trace"]:
@@ -322,7 +326,7 @@ def print_report(report, show_answer_input=False):
         decisions = output.get("decisions", {})
         detail = ", ".join(f"{name}={info.get('effective_choice', info.get('choice'))}"
                            for name, info in decisions.items()) or output.get("status", "")
-        if event["stage"].split(":", 1)[0] in ("text", "numeric") and "value" in output:
+        if event["stage"].split(":", 1)[0] in ("text", "numeric", "select") and "value" in output:
             detail = (f"{output['parameter']}: skipped (no text)" if output.get("status") == "skipped"
                       else f"{output['parameter']}={output['value']}")
         if event["stage"] == "optional_parameters" and "selected_parameters" in output:

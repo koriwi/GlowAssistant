@@ -59,7 +59,7 @@ def field_type(name, field):
         raise UnsupportedParameter(f"Parameter '{name}': invalid {kind} selector is not yet supported.")
     if kind == "text" and not options.get("multiple") and options.get("type", "text") == "text":
         return kind
-    if kind == "number":
+    if kind in ("number", "select"):
         return kind
     raise UnsupportedParameter(f"Parameter '{name}': {kind} format is not yet supported.")
 

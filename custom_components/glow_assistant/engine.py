@@ -27,6 +27,7 @@ from .parameter_values import (
     field_type,
     numeric_request,
 )
+from .select_values import decode_select, select_request
 from .state_properties import (
     format_values,
     property_options,
@@ -511,6 +512,8 @@ class AgentEngine:
                 if kind == "text":
                     prompt = config["message_prompt" if name == "message" else "text_prompt"]
                     options, payload = text_request(result["request"], result["service"], prompt, name, field, fields)
+                elif kind == "select":
+                    options, payload = select_request(result["request"], result["service"], name, field, fields, config["select_prompt"])
                 else:
                     options = None
                     payload = numeric_request(result["request"], result["service"], name, field, fields,
@@ -524,11 +527,16 @@ class AgentEngine:
 
         values = {}
         for name, kind, options, payload in plans:
-            stage = f"{kind if kind == 'text' else 'numeric'}:{name}"
+            stage = f"{'numeric' if kind == 'number' else kind}:{name}"
 
             def summarize(response):
-                value = (decode_text(response, options, config["text_probability_threshold"]) if kind == "text" else
-                         decode_number(response, payload["state"], config["numeric_confidence"]))
+                if kind == "text":
+                    value = decode_text(response, options, config["text_probability_threshold"])
+                elif kind == "select":
+                    value = decode_select(response, options, payload["state"]["multiple"],
+                                          config["select_probability_threshold"], config["select_confidence"])
+                else:
+                    value = decode_number(response, payload["state"], config["numeric_confidence"])
                 if kind == "text" and value["value"] == "" and name not in result["required_parameters"]:
                     value.update(status="skipped", reason="No words were retained for this optional text parameter.")
                 result.setdefault("parameter_extractions", {})[name] = {**value, "parameter": name, "type": kind,

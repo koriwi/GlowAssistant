@@ -129,6 +129,14 @@ class ChatLogTraceTests(unittest.TestCase):
         self.assertEqual(self.messages[0].tool_calls[0].tool_name, "glow_assistant_select_target_scope")
         self.assertEqual(self.messages[1].tool_result, result)
 
+    def test_select_extraction_has_a_native_card_with_values_and_scores(self):
+        result = {"value": ["needs_action"], "parameter": "status", "effective_probability_threshold": 0.15,
+                  "probabilities": {"value:needs_action": 0.9, "value:completed": 0.05, "none": 0.05}}
+        self.trace("select:status", {"parameter": "status", "candidate_counts": {"select_values": 3}})
+        self.trace("select:status", {}, result)
+        self.assertEqual(self.messages[0].tool_calls[0].tool_name, "glow_assistant_extract_select")
+        self.assertEqual(self.messages[1].tool_result, result)
+
     def test_action_area_and_entity_selection_have_native_cards(self):
         for stage, name in (("action_areas", "glow_assistant_select_action_areas"),
                             ("action_entities", "glow_assistant_select_action_entities")):

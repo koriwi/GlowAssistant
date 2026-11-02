@@ -135,6 +135,15 @@ class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(selector({"entity_id": ["light.desk", "light.ceiling"]}),
                          {"entity_id": ["light.desk", "light.ceiling"]})
 
+    def test_native_select_accepts_scalar_and_multiple_values_with_correct_types(self):
+        from homeassistant.helpers.selector import SelectSelector
+
+        single = SelectSelector({"options": [{"value": "heat", "label": "Heizen"}, {"value": "off", "label": "Aus"}]})
+        multiple = SelectSelector({"options": ["needs_action", "completed"], "multiple": True, "custom_value": False})
+        self.assertEqual(single("heat"), "heat")
+        self.assertEqual(multiple(["needs_action"]), ["needs_action"])
+        self.assertEqual(multiple(["needs_action", "completed"]), ["needs_action", "completed"])
+
     async def test_ha_response_services_return_data_to_the_caller(self):
         from homeassistant.core import HomeAssistant, SupportsResponse
 

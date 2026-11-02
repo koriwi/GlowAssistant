@@ -1163,6 +1163,7 @@ class IntegrationSettingsTests(unittest.TestCase):
     def test_stock_action_prompt_is_updated_for_text_but_custom_rules_are_preserved(self):
         from custom_components.glow_assistant.const import (
             LEGACY_PARAMETER_SERVICE_PROMPT,
+            LEGACY_RESPONSE_SERVICE_PROMPT,
             LEGACY_SERVICE_PROMPT,
             SERVICE_PROMPT,
         )
@@ -1174,6 +1175,9 @@ class IntegrationSettingsTests(unittest.TestCase):
         saved = normalize_settings({"decider": {"service_prompt": LEGACY_PARAMETER_SERVICE_PROMPT}})
         self.assertEqual(saved["decider"]["service_prompt"], SERVICE_PROMPT)
         self.assertIn("todo.get_items", saved["decider"]["service_prompt"])
+        saved = normalize_settings({"decider": {"service_prompt": LEGACY_RESPONSE_SERVICE_PROMPT}})
+        self.assertEqual(saved["decider"]["service_prompt"], SERVICE_PROMPT)
+        self.assertIn("fixed-option select", saved["decider"]["service_prompt"])
         custom = normalize_settings({"decider": {"service_prompt": "Custom action rules", "text_prompt": "Custom extraction rules"}})
         self.assertEqual(custom["decider"]["service_prompt"], "Custom action rules")
         self.assertEqual(custom["decider"]["text_prompt"], "Custom extraction rules")

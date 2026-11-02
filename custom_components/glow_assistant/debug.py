@@ -19,6 +19,7 @@ STAGE_LABELS = {
     "target": "Choose a device or room",
     "text": "Extract text parameter",
     "numeric": "Extract numeric parameter",
+    "select": "Extract select parameter",
     "parameters": "Extract action parameter values",
     "execution": "Call the Home Assistant action",
     "answer": "Generate the smart-home answer",
@@ -127,6 +128,7 @@ def decision_details(questions, answers, config):
             "action_entities": "action_entity_probability_threshold",
             "query_targets": "query_target_probability_threshold",
             "text_words": "text_probability_threshold",
+            "select_values": "select_probability_threshold",
         }
         if name in probability_fields:
             threshold = config[probability_fields[name]]

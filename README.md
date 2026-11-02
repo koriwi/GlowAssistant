@@ -2,7 +2,7 @@
 
 A Home Assistant conversation agent. Install it with HACS.
 
-GlowAssistant answers state queries and calls Home Assistant actions. It extracts text and number parameters. Other parameter formats report “not yet supported.” The local CLI plans actions by default; `--execute` runs them.
+GlowAssistant answers state queries and calls Home Assistant actions. It extracts text, number and fixed-option select parameters. Other parameter formats report “not yet supported.” The local CLI plans actions by default; `--execute` runs them.
 It uses Home Assistant's exposed entities. You can exclude additional entities in the integration settings.
 
 Minimum Home Assistant version: **2026.4.2**.

@@ -23,6 +23,14 @@ def settings():
 
 
 class BenchmarkSettingsTests(unittest.TestCase):
+    def test_select_extraction_settings_are_independent_of_parameter_detection(self):
+        args = benchmark.parser().parse_args(["-q", "test", "--parameter-threshold", "0.5", "--select-threshold", "0.6",
+                                             "--confidence", "0.1", "--select-confidence", "0.8"])
+        config = benchmark.model_settings(settings(), args, {})["decider"]
+        self.assertEqual(config["parameter_probability_threshold"], 0.5)
+        self.assertEqual(config["select_probability_threshold"], 0.6)
+        self.assertEqual(config["select_confidence"], 0.8)
+
     def test_environment_connections_and_specific_thresholds_override_exported_settings(self):
         args = benchmark.parser().parse_args(["--query", "test", "--confidence", "0.3", "--area-confidence", "0.7"])
         exported = settings()
@@ -102,6 +110,25 @@ class BenchmarkSettingsTests(unittest.TestCase):
 class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
     def exported(self):
         return {"entry_id": "one", "snapshot": copy.deepcopy(SNAPSHOT), "settings": settings()}
+
+    async def test_select_extraction_prints_json_list_and_its_own_timing_row(self):
+        from test_parameter_values import SelectParameterEngineTests
+
+        fixture = SelectParameterEngineTests()
+        exported = self.exported()
+        exported["snapshot"] = fixture.snapshot()
+        args = benchmark.parser().parse_args(["-q", "Was muss noch eingekauft werden?", "--select-threshold", "0.6"])
+        client = ScriptedModels(fixture.choices({"value:needs_action": 0.85, "value:completed": 0.1, "none": 0.05}))
+        with (patch("local.fetch_snapshot", new=AsyncMock(return_value=exported)),
+              patch("local.aiohttp.ClientSession", return_value=AsyncMock()), patch("local.ModelClient", return_value=client)):
+            report = await benchmark.run(args, {})
+        self.assertEqual(report["result"]["parameters"], {"status": ["needs_action"]})
+        self.assertEqual(report["result"]["parameter_extractions"]["status"]["effective_probability_threshold"], 0.3)
+        output = io.StringIO()
+        with redirect_stdout(output):
+            benchmark.print_report(report)
+        self.assertRegex(output.getvalue(), r'status\s+\["needs_action"\]')
+        self.assertRegex(output.getvalue(), r"select:status\s+\d+\s+status=")
 
     async def test_actions_only_execute_with_the_explicit_flag(self):
         for enabled in (False, True):

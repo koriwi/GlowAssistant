@@ -13,6 +13,7 @@ from .const import (
     LEGACY_ACTION_TARGET_SCOPE_PROMPT,
     LEGACY_GENERAL_PROMPT,
     LEGACY_PARAMETER_SERVICE_PROMPT,
+    LEGACY_RESPONSE_SERVICE_PROMPT,
     LEGACY_SERVICE_PROMPT,
     LEGACY_TARGET_SCOPE_PROMPT,
     LEGACY_TEXT_SERVICE_PROMPT,
@@ -29,6 +30,7 @@ from .parameter_values import (
     NUMERIC_INSTRUCTIONS,
     NUMERIC_MODE_INSTRUCTIONS,
 )
+from .select_values import INSTRUCTIONS as SELECT_INSTRUCTIONS
 from .state_properties import INSTRUCTIONS as STATE_PROPERTY_INSTRUCTIONS
 from .text_values import INSTRUCTIONS as TEXT_INSTRUCTIONS
 from .text_values import LEGACY_PROMPTS, MESSAGE_INSTRUCTIONS
@@ -53,6 +55,7 @@ DEFAULTS = {
         "text_prompt": TEXT_INSTRUCTIONS, "message_prompt": MESSAGE_INSTRUCTIONS,
         "text_probability_threshold": 0.3,
         "numeric_prompt": NUMERIC_INSTRUCTIONS, "numeric_mode_prompt": NUMERIC_MODE_INSTRUCTIONS, "numeric_confidence": 0,
+        "select_prompt": SELECT_INSTRUCTIONS, "select_confidence": 0, "select_probability_threshold": 0.3,
         "service_confidence": 0, "area_confidence": 0,
     },
     "answer": {
@@ -93,7 +96,9 @@ def normalize_settings(data):
             settings[key] = data[key]
     if settings["general"]["prompt"] == LEGACY_GENERAL_PROMPT:
         settings["general"]["prompt"] = GENERAL_PROMPT
-    if settings["decider"]["service_prompt"] in (LEGACY_SERVICE_PROMPT, LEGACY_TEXT_SERVICE_PROMPT, LEGACY_PARAMETER_SERVICE_PROMPT):
+    if settings["decider"]["service_prompt"] in (
+        LEGACY_SERVICE_PROMPT, LEGACY_TEXT_SERVICE_PROMPT, LEGACY_PARAMETER_SERVICE_PROMPT, LEGACY_RESPONSE_SERVICE_PROMPT,
+    ):
         settings["decider"]["service_prompt"] = SERVICE_PROMPT
     decider = data.get("decider", {})
     if settings["decider"]["target_scope_prompt"] in (
@@ -134,9 +139,9 @@ def validate_settings(data):
             _range(config, "temperature", 0, 2, group)
     decider = settings["decider"]
     for field in ("parameter_probability_threshold", "action_area_probability_threshold", "action_entity_probability_threshold",
-                  "query_target_probability_threshold", "text_probability_threshold"):
+                  "query_target_probability_threshold", "text_probability_threshold", "select_probability_threshold"):
         _range(decider, field, 0, 1, "decider")
-    for stage in ("service", "area", "domain", "query_type", "binary_answer", "target_scope", "numeric", "state_property"):
+    for stage in ("service", "area", "domain", "query_type", "binary_answer", "target_scope", "numeric", "state_property", "select"):
         _range(decider, f"{stage}_confidence", 0, 1, "decider")
     if not isinstance(settings["log_runs"], bool):
         raise TypeError("log_runs must be a boolean.")

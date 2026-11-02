@@ -58,7 +58,10 @@
               "numeric_confidence": "Minimum numeric extraction confidence",
               "numeric_mode_prompt": "Absolute/relative numeric field prompt",
               "state_property_prompt": "State property selection prompt",
-              "state_property_confidence": "Minimum state property confidence"
+              "state_property_confidence": "Minimum state property confidence",
+              "select_prompt": "Select field extraction prompt",
+              "select_confidence": "Minimum single-select extraction confidence",
+              "select_probability_threshold": "Multi-value select relative probability threshold"
             },
             "data_description": {
               "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
@@ -90,7 +93,10 @@
               "numeric_confidence": "Applies to numeric mode and Score extraction. Unsupported types and missing numeric ranges stop explicitly.",
               "numeric_mode_prompt": "Classify the current field as absolute, relative or unsure. Ignore other_parameters values and change verbs. Clear to restore the default.",
               "state_property_prompt": "One single-choice decision selects the state or attribute needed for a programmatic query reply. Clear to restore the default.",
-              "state_property_confidence": "Single-choice confidence threshold for selecting the requested state property. Used when LLM answer generation is disabled."
+              "state_property_confidence": "Single-choice confidence threshold for selecting the requested state property. Used when LLM answer generation is disabled.",
+              "select_prompt": "Choose only the fixed values supplied by the HA select field. Use labels, request meaning and other_parameters. Clear to restore the default.",
+              "select_confidence": "Applies only to single-value select extraction. Unsure, ties and low-confidence values stop execution. Default: 0.",
+              "select_probability_threshold": "For multi-value select fields, keep each allowed value with probability at or above this value / max(1, real option count). Exclude none from the count. Overall confidence is not a filter; none does not override retained values. Extra irrelevant choices can retain weak matches. Default: 0.3."
             }
           },
           "answer": {
@@ -206,7 +212,10 @@
               "numeric_confidence": "Minimum numeric extraction confidence",
               "numeric_mode_prompt": "Absolute/relative numeric field prompt",
               "state_property_prompt": "State property selection prompt",
-              "state_property_confidence": "Minimum state property confidence"
+              "state_property_confidence": "Minimum state property confidence",
+              "select_prompt": "Select field extraction prompt",
+              "select_confidence": "Minimum single-select extraction confidence",
+              "select_probability_threshold": "Multi-value select relative probability threshold"
             },
             "data_description": {
               "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
@@ -238,7 +247,10 @@
               "numeric_confidence": "Applies to numeric mode and Score extraction. Unsupported types and missing numeric ranges stop explicitly.",
               "numeric_mode_prompt": "Classify the current field as absolute, relative or unsure. Ignore other_parameters values and change verbs. Clear to restore the default.",
               "state_property_prompt": "One single-choice decision selects the state or attribute needed for a programmatic query reply. Clear to restore the default.",
-              "state_property_confidence": "Single-choice confidence threshold for selecting the requested state property. Used when LLM answer generation is disabled."
+              "state_property_confidence": "Single-choice confidence threshold for selecting the requested state property. Used when LLM answer generation is disabled.",
+              "select_prompt": "Choose only the fixed values supplied by the HA select field. Use labels, request meaning and other_parameters. Clear to restore the default.",
+              "select_confidence": "Applies only to single-value select extraction. Unsure, ties and low-confidence values stop execution. Default: 0.",
+              "select_probability_threshold": "For multi-value select fields, keep each allowed value with probability at or above this value / max(1, real option count). Exclude none from the count. Overall confidence is not a filter; none does not override retained values. Extra irrelevant choices can retain weak matches. Default: 0.3."
             }
           },
           "answer": {
@@ -364,7 +376,10 @@
               "numeric_confidence": "Minimum numeric extraction confidence",
               "numeric_mode_prompt": "Absolute/relative numeric field prompt",
               "state_property_prompt": "State property selection prompt",
-              "state_property_confidence": "Minimum state property confidence"
+              "state_property_confidence": "Minimum state property confidence",
+              "select_prompt": "Select field extraction prompt",
+              "select_confidence": "Minimum single-select extraction confidence",
+              "select_probability_threshold": "Multi-value select relative probability threshold"
             },
             "data_description": {
               "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
@@ -396,7 +411,10 @@
               "numeric_confidence": "Applies to numeric mode and Score extraction. Unsupported types and missing numeric ranges stop explicitly.",
               "numeric_mode_prompt": "Classify the current field as absolute, relative or unsure. Ignore other_parameters values and change verbs. Clear to restore the default.",
               "state_property_prompt": "One single-choice decision selects the state or attribute needed for a programmatic query reply. Clear to restore the default.",
-              "state_property_confidence": "Single-choice confidence threshold for selecting the requested state property. Used when LLM answer generation is disabled."
+              "state_property_confidence": "Single-choice confidence threshold for selecting the requested state property. Used when LLM answer generation is disabled.",
+              "select_prompt": "Choose only the fixed values supplied by the HA select field. Use labels, request meaning and other_parameters. Clear to restore the default.",
+              "select_confidence": "Applies only to single-value select extraction. Unsure, ties and low-confidence values stop execution. Default: 0.",
+              "select_probability_threshold": "For multi-value select fields, keep each allowed value with probability at or above this value / max(1, real option count). Exclude none from the count. Overall confidence is not a filter; none does not override retained values. Extra irrelevant choices can retain weak matches. Default: 0.3."
             }
           },
           "answer": {

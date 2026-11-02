@@ -57,10 +57,13 @@ flowchart TD
     Types -->|All supported| Each["For each selected field"]
     Each -->|Text| Text["Choice over word occurrences + none; p at or above relative cutoff"]
     Each -->|Number| Numeric["Absolute/relative Choice + Score; HA range, step and current settings"]
+    Each -->|Select| SelectValue["One Choice over fixed HA values + none; single value or relative-cutoff list"]
     Text -->|Empty or invalid| Unsure
     Numeric -->|Unclear or missing relative baseline| Unsure
     Text -->|Words retained| Values["Store value for this field"]
     Numeric -->|Valid number| Values
+    SelectValue -->|No matching values| Unsure
+    SelectValue -->|Valid string or list| Values
     Values -->|More fields| Each
     Values -->|All complete| Console["Print targets, parameter values and per-field timings"]
     Console --> Plan["Build explicit entity calls; group by supported parameters"]

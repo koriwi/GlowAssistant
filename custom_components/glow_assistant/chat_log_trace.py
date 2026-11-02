@@ -21,6 +21,7 @@ STAGE_NAMES = {
     "target": "glow_assistant_select_target",
     "text": "glow_assistant_extract_text",
     "numeric": "glow_assistant_extract_number",
+    "select": "glow_assistant_extract_select",
     "answer": "glow_assistant_generate_answer",
     "execution": "glow_assistant_execute_action",
     "general": "glow_assistant_general_answer",

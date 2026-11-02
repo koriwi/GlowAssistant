@@ -1,6 +1,7 @@
 import copy
 import json
 import unittest
+from unittest.mock import AsyncMock
 
 from custom_components.glow_assistant.client import ModelError
 from custom_components.glow_assistant.engine import AgentEngine
@@ -11,7 +12,14 @@ from custom_components.glow_assistant.parameter_values import (
     field_type,
     numeric_request,
 )
-from custom_components.glow_assistant.settings import normalize_settings
+from custom_components.glow_assistant.select_values import (
+    INSTRUCTIONS as SELECT_INSTRUCTIONS,
+)
+from custom_components.glow_assistant.select_values import decode_select, select_request
+from custom_components.glow_assistant.settings import (
+    normalize_settings,
+    validate_settings,
+)
 from custom_components.glow_assistant.text_values import text_request
 from test_integration_engine import ScriptedModels, entity
 
@@ -39,9 +47,10 @@ def word_answers(prompt, positions):
 
 class ParameterValueTests(unittest.TestCase):
     def test_supported_scalar_selectors_and_unsupported_formats(self):
-        for selector in ({"text": {}}, {"text": {"multiline": True}}, {"number": {"min": 0, "max": 100}}):
-            self.assertIn(field_type("value", {"selector": selector}), ("text", "number"))
-        for selector in (None, {}, {"boolean": {}}, {"select": {"options": ["on", "off"]}}, {"date": {}},
+        for selector in ({"text": {}}, {"text": {"multiline": True}}, {"number": {"min": 0, "max": 100}},
+                         {"select": {"options": ["on", "off"]}}):
+            self.assertIn(field_type("value", {"selector": selector}), ("text", "number", "select"))
+        for selector in (None, {}, {"boolean": {}}, {"date": {}},
                          {"datetime": {}}, {"object": {}}, {"text": []}, {"text": False}, {"text": {"multiple": True}}, {"text": {"type": "email"}},
                          {"number": {}, "text": {}}):
             with self.subTest(selector=selector), self.assertRaisesRegex(UnsupportedParameter, "not yet supported"):
@@ -250,7 +259,7 @@ class ParameterEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["parameter_extractions"]["brightness_step_pct"]["supported_entity_ids"], ["light.dimmable"])
 
     async def test_unsupported_field_fails_visibly_before_any_value_extraction(self):
-        for selector in ({"boolean": {}}, {"select": {"options": ["heat", "off"]}}, {"date": {}}, {"object": {}}, None,
+        for selector in ({"boolean": {}}, {"select": {"options": []}}, {"date": {}}, {"object": {}}, None,
                          {"number": {}}):
             with self.subTest(selector=selector):
                 fields = {"message": {"required": True, "selector": {"text": {}}},
@@ -294,6 +303,173 @@ class ParameterEngineTests(unittest.IsolatedAsyncioTestCase):
         result = await AgentEngine(normalize_settings({}), client, dry_run=True).process(prompt, "en", snapshot)
         self.assertEqual(result["parameters"], {"item": "milk"})
         self.assertNotIn("error", result)
+
+
+def select_answers(probabilities, multiple=True, confidence=0.9):
+    return {"select_values" if multiple else "select": {
+        "type": "choice", "choice": max(probabilities, key=probabilities.get), "confidence": confidence,
+        "probabilities": probabilities,
+    }}
+
+
+class SelectValueTests(unittest.TestCase):
+    def request(self, multiple=True, options=None):
+        field = {"description": "Which item statuses to retrieve", "selector": {"select": {
+            "options": options if options is not None else ["needs_action", "completed"], "multiple": multiple,
+        }}}
+        return select_request("Was muss noch eingekauft werden?", "todo.get_items", "status", field,
+                              {"status": field, "description": {"selector": {"text": {}}}}, SELECT_INSTRUCTIONS)
+
+    def test_request_preserves_actual_values_labels_and_other_field_metadata(self):
+        options, payload = self.request(options=[{"value": "needs_action", "label": "Offen"}, "completed"])
+        self.assertEqual(options["value:needs_action"], {"value": "needs_action", "label": "Offen"})
+        self.assertEqual(payload["state"]["other_parameters"], ["description"])
+        self.assertTrue(payload["state"]["multiple"])
+        self.assertEqual(set(payload["questions"]["select_values"]["criteria"]), {*options, "none"})
+        self.assertIn("muss noch eingekauft werden", payload["questions"]["select_values"]["instructions"])
+
+    def test_multiple_values_use_relative_cutoff_without_none_veto(self):
+        options, _ = self.request()
+        for probabilities, expected in (
+            ({"value:needs_action": 0.9, "value:completed": 0.05, "none": 0.05}, ["needs_action"]),
+            ({"value:needs_action": 0.45, "value:completed": 0.45, "none": 0.1}, ["needs_action", "completed"]),
+            ({"value:needs_action": 0.2, "value:completed": 0.05, "none": 0.75}, ["needs_action"]),
+            ({"value:needs_action": 0.15, "value:completed": 0.1, "none": 0.75}, ["needs_action"]),
+            ({"value:needs_action": 0.1, "value:completed": 0.1, "none": 0.8}, None),
+        ):
+            with self.subTest(probabilities=probabilities):
+                result = decode_select({"answers": select_answers(probabilities, confidence=0)}, options, True, 0.3, 1)
+                self.assertEqual(result["value"], expected)
+                self.assertEqual(result["effective_probability_threshold"], 0.15)
+                self.assertEqual(result["real_option_count"], 2)
+
+    def test_single_select_returns_one_exact_value_and_respects_confidence_and_ambiguity(self):
+        options, _ = self.request(multiple=False, options=[{"value": "heat", "label": "Heizen"}, "off"])
+        for probabilities, confidence, expected in (
+            ({"value:heat": 0.8, "value:off": 0.1, "none": 0.1}, 0.9, "heat"),
+            ({"value:heat": 0.8, "value:off": 0.1, "none": 0.1}, 0.49, None),
+            ({"value:heat": 0.45, "value:off": 0.45, "none": 0.1}, 0.9, None),
+            ({"value:heat": 0.1, "value:off": 0.1, "none": 0.8}, 0.9, None),
+        ):
+            with self.subTest(probabilities=probabilities, confidence=confidence):
+                result = decode_select({"answers": select_answers(probabilities, False, confidence)}, options, False, 0.3, 0.5)
+                self.assertEqual(result["value"], expected)
+
+    def test_a_literal_none_option_is_distinct_from_the_fallback(self):
+        options, _ = self.request(multiple=False, options=["none", "hold"])
+        response = {"answers": select_answers({"value:none": 0.9, "value:hold": 0.05, "none": 0.05}, False)}
+        self.assertEqual(decode_select(response, options, False, 0.3, 0)["value"], "none")
+
+    def test_custom_dynamic_duplicate_and_invalid_options_are_explicitly_unsupported(self):
+        for selector in ({}, {"options": []}, {"options": "off"}, {"options": ["off"], "custom_value": True},
+                         {"options": ["off"], "multiple": "true"}, {"options": ["off", "off"]},
+                         {"options": [True]}, {"options": [""]}, {"options": [{"label": "Off"}]},
+                         {"options": [{"value": "off", "label": False}]}):
+            field = {"selector": {"select": selector}}
+            with self.subTest(selector=selector), self.assertRaisesRegex(UnsupportedParameter, "not yet supported"):
+                select_request("test", "test.action", "mode", field, {"mode": field}, SELECT_INSTRUCTIONS)
+
+    def test_invalid_or_invented_model_values_are_rejected(self):
+        options, _ = self.request()
+        valid = {"answers": select_answers({"value:needs_action": 0.9, "value:completed": 0.1, "none": 0})}
+        cases = [None, {}, {"answers": {}}, {"answers": select_answers({"invented": 1})}]
+        for key, value in (("type", "score"), ("confidence", True), ("probabilities", {"none": 1}), ("choice", "invented")):
+            invalid = copy.deepcopy(valid)
+            invalid["answers"]["select_values"][key] = value
+            cases.append(invalid)
+        for response in cases:
+            with self.subTest(response=response), self.assertRaisesRegex(ModelError, "Malformed select extraction"):
+                decode_select(response, options, True, 0.3, 0)
+
+    def test_settings_reject_invalid_thresholds_and_preserve_custom_prompt(self):
+        saved = normalize_settings({"decider": {"select_prompt": "Custom choices"}})
+        self.assertEqual(saved["decider"]["select_prompt"], "Custom choices")
+        self.assertEqual(saved["decider"]["select_probability_threshold"], 0.3)
+        self.assertEqual(normalize_settings({"decider": {"select_prompt": ""}})["decider"]["select_prompt"], SELECT_INSTRUCTIONS)
+        for field in ("select_confidence", "select_probability_threshold"):
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                validate_settings({"decider": {"url": "http://local/v1/systemone", field: 1.1}})
+
+
+class SelectParameterEngineTests(unittest.IsolatedAsyncioTestCase):
+    def snapshot(self):
+        return {"entities": [entity("todo.shopping", "Einkaufsliste", area=None, state="2")], "services": {
+            "todo.get_items": {"response": {"optional": False}, "fields": {"status": {"selector": {"select": {
+                "options": ["needs_action", "completed"], "multiple": True, "custom_value": False,
+            }}}}},
+        }}
+
+    def choices(self, probabilities):
+        return [{"service": "todo.get_items"}, {"target_scope": "entities"},
+                {"action_entities": "entity:todo.shopping"}, {"optional_parameters": "status"},
+                select_answers(probabilities)]
+
+    async def test_shopping_status_reaches_executor_as_a_list_and_is_visible_in_debug(self):
+        client = ScriptedModels(self.choices({"value:needs_action": 0.9, "value:completed": 0.05, "none": 0.05}))
+        execute = AsyncMock(return_value={"todo.shopping": {"items": [{"summary": "Milch", "status": "needs_action"}]}})
+        events = []
+        history = [{"role": "user", "content": "Wir reden über die Einkaufsliste."}, {"role": "assistant", "content": "ok"}]
+        result = await AgentEngine(normalize_settings({"history_enabled": True}), client, execute=execute, history=history,
+                                   trace=lambda *event: events.append(event)).process(
+            "Was steht auf der Einkaufsliste und muss noch eingekauft werden?", "de", self.snapshot())
+        self.assertEqual(result["parameters"], {"status": ["needs_action"]})
+        self.assertEqual(result["answer"], "Einkaufsliste: Milch.")
+        execute.assert_awaited_once_with("todo.get_items", {"status": ["needs_action"], "entity_id": ["todo.shopping"]})
+        state = client.requests[-1][1]
+        self.assertEqual(state["language"], "de")
+        self.assertEqual(state["history"], history)
+        self.assertEqual(state["supported_entity_ids"], ["todo.shopping"])
+        output = next(output for stage, _, output in events if stage == "select:status" and output)
+        self.assertEqual(output["value"], ["needs_action"])
+        self.assertEqual(output["decisions"]["select_values"]["effective_probability_threshold"], 0.15)
+        self.assertNotIn(SELECT_INSTRUCTIONS, json.dumps(events))
+
+    async def test_no_retained_status_stops_without_broadening_or_executing(self):
+        client = ScriptedModels(self.choices({"value:needs_action": 0.1, "value:completed": 0.1, "none": 0.8}))
+        execute = AsyncMock()
+        result = await AgentEngine(normalize_settings({}), client, execute=execute).process("Read open items", "en", self.snapshot())
+        self.assertEqual(result["route"], "unsure")
+        self.assertEqual(result["failures"][0]["stage"], "select:status")
+        self.assertNotIn("execution", result)
+        execute.assert_not_awaited()
+
+    async def test_required_single_select_uses_the_same_dispatcher_and_preserves_dry_run(self):
+        snapshot = {"entities": [entity("climate.office", "Thermostat")], "services": {
+            "climate.set_hvac_mode": {"fields": {"hvac_mode": {"required": True, "selector": {"select": {
+                "options": [{"value": "heat", "label": "Heizen"}, "off"],
+            }}}}},
+        }}
+        client = ScriptedModels([{"service": "climate.set_hvac_mode"}, {"target_scope": "implied_area"},
+                                 select_answers({"value:heat": 0.9, "value:off": 0.05, "none": 0.05}, False)])
+        execute = AsyncMock()
+        result = await AgentEngine(normalize_settings({}), client, execute=execute, dry_run=True).process(
+            "Stelle die Heizung auf Heizbetrieb", "de", snapshot, speaker_area="Office")
+        self.assertEqual(result["parameters"], {"hvac_mode": "heat"})
+        self.assertEqual(result["execution"]["calls"][0]["arguments"], {"hvac_mode": "heat", "entity_id": ["climate.office"]})
+        self.assertEqual(result["execution"]["status"], "planned")
+        execute.assert_not_awaited()
+
+    async def test_text_and_select_fields_are_extracted_separately_and_execute_together(self):
+        prompt = "Mark milk completed"
+        snapshot = {"entities": [entity("todo.shopping", "Shopping", area=None)], "services": {
+            "todo.update_item": {"fields": {
+                "item": {"required": True, "selector": {"text": {}}},
+                "status": {"selector": {"select": {"options": ["needs_action", "completed"]}}},
+            }},
+        }}
+        client = ScriptedModels([
+            {"service": "todo.update_item"}, {"target_scope": "entities"}, {"action_entities": "entity:todo.shopping"},
+            {"optional_parameters": "status"}, word_answers(prompt, [2]),
+            select_answers({"value:needs_action": 0.05, "value:completed": 0.9, "none": 0.05}, False),
+        ])
+        execute = AsyncMock(return_value=None)
+        result = await AgentEngine(normalize_settings({}), client, execute=execute).process(prompt, "en", snapshot)
+        self.assertEqual(result["parameters"], {"item": "milk", "status": "completed"})
+        self.assertEqual(result["answer"], "ok")
+        self.assertEqual(set(result["parameter_extractions"]), {"item", "status"})
+        self.assertEqual(client.requests[-1][1]["other_parameters"], ["item"])
+        self.assertEqual(client.requests[-2][1]["other_parameters"], ["status"])
+        execute.assert_awaited_once_with("todo.update_item", {"item": "milk", "status": "completed", "entity_id": ["todo.shopping"]})
 
 
 if __name__ == "__main__":

@@ -78,7 +78,7 @@ The `parameter_capabilities` debug card/JSON record shows the actual target enti
 
 Parameter detection then runs against the remaining action fields. Required fields are listed automatically. Optional fields use one Choice question plus `none`; every real field at or above the calculated cutoff from `parameter_probability_threshold` (default 0.15) is kept. Overall confidence is not a filter, and `none` never overrides retained real fields. `--parameter-threshold` overrides this cutoff independently of `--confidence`. No optional fields means no extra model call. The request includes the resolved target, without the entity catalog or current numeric values.
 
-Console output lists all optional-field probabilities, including dropped fields with `drop: p < THRESHOLD`. Fields removed by the capability filter are labeled unsupported for the selected targets. `none` is labeled as a non-parameter. `--json` retains the full distribution. Required and retained optional fields are extracted next according to their HA selectors. Text and number selectors are supported; other formats report not yet supported. Device calls run only with `--execute`. Successful action plans reply ok by default; with --llm-answer the model describes the plan without claiming execution.
+Console output lists all optional-field probabilities, including dropped fields with `drop: p < THRESHOLD`. Fields removed by the capability filter are labeled unsupported for the selected targets. `none` is labeled as a non-parameter. `--json` retains the full distribution. Required and retained optional fields are extracted next according to their HA selectors. Text, number and fixed-option select selectors are supported; other formats report not yet supported. Device calls run only with `--execute`. Successful action plans reply ok by default; with --llm-answer the model describes the plan without claiming execution.
 
 Supply speaker context explicitly when benchmarking:
 
@@ -131,7 +131,7 @@ The CLI shows `answer mode` and the selected `state property`. JSON includes `st
 
 ## Parameter value extraction
 
-Extract every required field and every retained optional field. Flattened HA selectors choose the extractor; the old item/message-only restriction is removed. Preflight all selected fields before making extraction calls. A boolean, select/enum, date/time, object, list, formatted text, unknown selector or unusable numeric range returns a visible `not yet supported` error. A dropped unsupported optional field does not block the request. The local tool executes device actions only with `--execute`. HA executes only after required and selected fields have been extracted successfully.
+Extract every required field and every retained optional field. Flattened HA selectors choose the extractor; the old item/message-only restriction is removed. Preflight all selected fields before making extraction calls. A boolean, date/time, object, generic list, formatted text, unknown selector or unusable numeric range returns a visible `not yet supported` error. Fixed-option select fields support scalar or list output as defined by HA. A dropped unsupported optional field does not block the request. The local tool executes device actions only with `--execute`. HA executes only after required and selected fields have been extracted successfully.
 
 Text fields use one Choice over word occurrences plus `none`, with the existing relative cutoff. Each request includes the current field's HA metadata, all selected fields, the resolved target, pipeline language and enabled history. `other_parameters` explicitly lists the other selected fields; each has its own extractor. Prompts tell each extractor to leave those fields' values alone. Copy words only from the latest request. When both `item` and `description` are selected, extract the short item name separately from its details.
 
@@ -144,9 +144,17 @@ python local.py -q "mach das Licht etwas heller" --speaker-area "Wohnzimmer"
 
 The console prints every extracted value in one `Parameter / Value` table. Each field has a separate timing row, such as `text:item`, `text:description` or `numeric:brightness_pct`. Native debug shows an extraction card per field. `--json` stores values in `parameters`, per-field details in `parameter_extractions`, and complete decisions, usage and timing under the field's stage name. Empty optional text fields are omitted; their extraction records and timing rows show skipped (no text). Required text fields with no words still stop the request. Invalid responses, unsupported formats and unclear numeric values still stop the request.
 
-Edit the text, message, numeric and numeric-mode prompts under Decider. Saved stock text/service prompts upgrade automatically; custom prompts remain. The configured text threshold defaults to **0.3** (previously 0.02); the optional-parameter threshold defaults to **0.15** (previously 0.3). Existing saved thresholds and explicit flags remain unchanged. Text selection still uses `p >= configured threshold / real option count`, excluding `none`. Numeric confidence is separate from multi-select probability cutoffs.
+Edit the text, message, numeric, numeric-mode and select prompts under Decider. Saved stock text/service prompts upgrade automatically; custom prompts remain. The configured text threshold defaults to **0.3** (previously 0.02); the optional-parameter threshold defaults to **0.15** (previously 0.3). Existing saved thresholds and explicit flags remain unchanged. Text selection still uses `p >= configured threshold / real option count`, excluding `none`. Numeric confidence is separate from multi-select probability cutoffs.
 
 ## Action execution
+
+Fixed-option select fields use one Choice call each. String options and `{value, label}` options are supported; extraction returns the actual HA value. Single-select returns one string, requiring a unique highest choice and `select_confidence` (default 0; `--select-confidence`). Multi-select returns a list and uses `select_probability_threshold` (default **0.3**; `--select-threshold`) divided by the real option count. Keep `p >= cutoff`, excluding fallback `none` from the count. Overall confidence does not filter multi-select; `none` does not override retained options. The prompt and settings are under Decider.
+
+For `todo.get_items.status`, “muss noch eingekauft werden” maps to `["needs_action"]`; completed items use `["completed"]`. The CLI shows the value and a `select:status` timing row. Native debug uses `glow_assistant_extract_select`, including probabilities and thresholds. Empty or invalid selections stop before execution. Custom values and selectors without fixed options remain unsupported.
+
+```bash
+python local.py -q "Was steht auf der Einkaufsliste und muss noch eingekauft werden?" --execute --select-threshold 0.3
+```
 
 The core expands selected rooms to explicit exposed entity IDs. It groups targets by the parameters each supports, so an unsupported optional field is not sent to that target. Targets lacking any optional values can receive the base action. Missing required values or a target that cannot accept required fields stop before execution. Parameters cannot add broad `area_id`, `device_id`, `floor_id` or `label_id` selectors.
 
