@@ -6,11 +6,20 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 
-from custom_components.glow_assistant.settings import normalize_settings
+from custom_components.glow_assistant.settings import DEFAULTS, normalize_settings
 
 
 @unittest.skipUnless(importlib.util.find_spec("homeassistant"), "Home Assistant is not installed; run the HA CI suite")
 class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
+    def test_config_schema_accepts_config_entries_and_rejects_yaml_configuration(self):
+        import voluptuous as vol
+
+        from custom_components.glow_assistant import CONFIG_SCHEMA
+
+        self.assertEqual(CONFIG_SCHEMA({}), {})
+        with self.assertRaises(vol.Invalid):
+            CONFIG_SCHEMA({"glow_assistant": {}})
+
     async def test_setup_registers_authenticated_snapshot_and_execution_views(self):
         from custom_components.glow_assistant import async_setup
         from custom_components.glow_assistant.snapshot_api import (
@@ -41,6 +50,8 @@ class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
         flow = GlowConfigFlow()
         flow.hass = Mock()
         form = await flow.async_step_user()
+        self.assertEqual(form["description_placeholders"]["openrouter_decider_url"], DEFAULTS["decider"]["url"])
+        self.assertEqual(form["description_placeholders"]["local_decider_url"], "http://SERVER:8321/v1/systemone")
         for key, block in form["data_schema"].schema.items():
             if key.schema not in ("decider", "answer", "general"):
                 continue

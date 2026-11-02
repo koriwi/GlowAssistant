@@ -115,7 +115,11 @@ class _SettingsForm:
             detail = ""
         return None, self.async_show_form(
             step_id=step, data_schema=settings_schema(values), errors=errors,
-            description_placeholders={"error": detail},
+            description_placeholders={
+                "error": detail,
+                "openrouter_decider_url": DEFAULTS["decider"]["url"],
+                "local_decider_url": "http://SERVER:8321/v1/systemone",
+            },
         )
 
 

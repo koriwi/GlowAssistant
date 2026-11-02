@@ -8,6 +8,8 @@
 
 # Repository
 
+- hassfest is built from HA 2026.4.2 source in CI, matching the supported runtime and MCP pin. The latest hassfest image checks newer HA dependency versions. Translation strings use description placeholders for endpoint URLs; config/options forms supply their values. CONFIG_SCHEMA delegates lazily to HA's config_entry_only_config_schema so local engine imports stay HA-independent.
+
 - CI installs Conversation/Intent component requirements from the pinned HA package's manifests before tests. Base HA installation alone omits runtime-installed integration dependencies such as hassil; keep those versions sourced from HA rather than separately guessing pins.
 
 - Fixed-option HA select fields use one Choice call per selected parameter. Return actual option values, not labels. multiple=true returns a list, including for one value. Single-select requires a unique highest option and select_confidence (default 0, CLI --select-confidence). Multi-select uses select_probability_threshold (default 0.3, CLI --select-threshold) / real option count, >=, excluding fallback none. Overall confidence does not filter multi-select and none never vetoes retained values. Prompt and both thresholds are under Decider. Debug uses select:FIELD / glow_assistant_extract_select; CLI shows values and timing. Empty, invalid, tied or low-confidence scalar selections stop without fallback/execution. Support fixed string and value/label options; missing/dynamic options, custom values and malformed/duplicate options remain explicitly unsupported.

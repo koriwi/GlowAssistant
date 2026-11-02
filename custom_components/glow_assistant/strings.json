@@ -64,7 +64,7 @@
               "select_probability_threshold": "Multi-value select relative probability threshold"
             },
             "data_description": {
-              "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
+              "url": "Full native decisions endpoint, e.g. {openrouter_decider_url} or {local_decider_url}.",
               "api_key": "Optional for local servers without authentication. This model uses only this key.",
               "max_input_chars": "Reject larger requests without truncating candidates or state data. This counts characters, not tokens.",
               "test_connection": "Sends a model-only test request. It never executes a Home Assistant action.",
@@ -218,7 +218,7 @@
               "select_probability_threshold": "Multi-value select relative probability threshold"
             },
             "data_description": {
-              "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
+              "url": "Full native decisions endpoint, e.g. {openrouter_decider_url} or {local_decider_url}.",
               "api_key": "Optional for local servers without authentication. This model uses only this key.",
               "max_input_chars": "Reject larger requests without truncating candidates or state data. This counts characters, not tokens.",
               "test_connection": "Sends a model-only test request. It never executes a Home Assistant action.",
@@ -382,7 +382,7 @@
               "select_probability_threshold": "Multi-value select relative probability threshold"
             },
             "data_description": {
-              "url": "Full native decisions endpoint, e.g. https://openrouter.ai/api/alpha/decisions or http://SERVER:8321/v1/systemone.",
+              "url": "Full native decisions endpoint, e.g. {openrouter_decider_url} or {local_decider_url}.",
               "api_key": "Optional for local servers without authentication. This model uses only this key.",
               "max_input_chars": "Reject larger requests without truncating candidates or state data. This counts characters, not tokens.",
               "test_connection": "Sends a model-only test request. It never executes a Home Assistant action.",

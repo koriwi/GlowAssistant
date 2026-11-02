@@ -1,3 +1,16 @@
+from .const import DOMAIN
+
+
+def _config_schema(config):
+    # Keep local engine imports independent of HA.
+    from homeassistant.helpers import config_validation as cv
+
+    return cv.config_entry_only_config_schema(DOMAIN)(config)
+
+
+CONFIG_SCHEMA = _config_schema
+
+
 async def async_setup(hass, config):
     from .snapshot_api import ExecuteView, SnapshotView
 
