@@ -1,13 +1,20 @@
 {
   "domain": "glow_assistant",
   "name": "GlowAssistant",
-  "codeowners": ["@koriwi"],
+  "codeowners": [
+    "@koriwi"
+  ],
   "config_flow": true,
-  "dependencies": ["conversation", "http"],
+  "dependencies": [
+    "conversation",
+    "http"
+  ],
   "documentation": "https://github.com/koriwi/GlowAssistant",
   "integration_type": "service",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/koriwi/GlowAssistant/issues",
-  "requirements": ["mcp==1.26.0"],
-  "version": "0.2.0"
+  "requirements": [
+    "mcp==1.26.0"
+  ],
+  "version": "0.9.2"
 }

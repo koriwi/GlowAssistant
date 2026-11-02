@@ -1085,12 +1085,14 @@ class IntegrationSettingsTests(unittest.TestCase):
     def test_stock_scope_prompt_upgrades_and_custom_prompt_is_preserved(self):
         from custom_components.glow_assistant.const import (
             LEGACY_ACTION_TARGET_SCOPE_PROMPT,
+            LEGACY_AREALESS_TARGET_SCOPE_PROMPT,
             LEGACY_TARGET_SCOPE_PROMPT,
             LEGACY_UNSCOPED_TARGET_SCOPE_PROMPT,
             TARGET_SCOPE_PROMPT,
         )
 
-        for previous in (LEGACY_TARGET_SCOPE_PROMPT, LEGACY_ACTION_TARGET_SCOPE_PROMPT, LEGACY_UNSCOPED_TARGET_SCOPE_PROMPT):
+        for previous in (LEGACY_TARGET_SCOPE_PROMPT, LEGACY_ACTION_TARGET_SCOPE_PROMPT, LEGACY_UNSCOPED_TARGET_SCOPE_PROMPT,
+                         LEGACY_AREALESS_TARGET_SCOPE_PROMPT):
             upgraded = normalize_settings({"decider": {"target_scope_prompt": previous}})
             self.assertEqual(upgraded["decider"]["target_scope_prompt"], TARGET_SCOPE_PROMPT)
         custom = normalize_settings({"decider": {"target_scope_prompt": "Custom scope rules"}})
