@@ -8,6 +8,8 @@
 
 # Repository
 
+- CI installs Conversation/Intent component requirements from the pinned HA package's manifests before tests. Base HA installation alone omits runtime-installed integration dependencies such as hassil; keep those versions sourced from HA rather than separately guessing pins.
+
 - Fixed-option HA select fields use one Choice call per selected parameter. Return actual option values, not labels. multiple=true returns a list, including for one value. Single-select requires a unique highest option and select_confidence (default 0, CLI --select-confidence). Multi-select uses select_probability_threshold (default 0.3, CLI --select-threshold) / real option count, >=, excluding fallback none. Overall confidence does not filter multi-select and none never vetoes retained values. Prompt and both thresholds are under Decider. Debug uses select:FIELD / glow_assistant_extract_select; CLI shows values and timing. Empty, invalid, tied or low-confidence scalar selections stop without fallback/execution. Support fixed string and value/label options; missing/dynamic options, custom values and malformed/duplicate options remain explicitly unsupported.
 
 - Response-producing HA actions are included in selection. The executor checks `SupportsResponse` and requests return data for mandatory/optional responses. Preserve returned data in execution debug/logs and LLM answer facts. With LLM replies disabled, format `todo.get_items` as named list items (including descriptions/completed markers), and other response data as JSON. Dry-run never calls these actions or invents their results. Missing expected response data fails without retry. Ordinary commands still reply `ok`.
