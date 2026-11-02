@@ -269,7 +269,7 @@ class AgentEngine:
             action = actions[service_choice]
             result.update(
                 service=action["service"], domain=action["service"].split(".", 1)[0],
-                answer="ok",
+                answer=self.settings["ok_reply"],
             )
             result["speaker_area"] = speaker_area
             scopes = {key: value for key, value in TARGET_SCOPES.items()
@@ -292,7 +292,7 @@ class AgentEngine:
                     {"role": "user", "content": json.dumps(facts, ensure_ascii=False)},
                 ])
             else:
-                self._programmatic_answer(result, format_action_response(result, members))
+                self._programmatic_answer(result, format_action_response(result, members, self.settings["ok_reply"]))
             return
 
         result["service"] = QUERY
@@ -567,7 +567,8 @@ class AgentEngine:
         }, {"binary_answer": choice_question(options, self.settings["decider"]["binary_answer_prompt"])})
         result["state_answer"] = self._choice(response, "binary_answer", options)
         if not self.settings["answer"]["enable"]:
-            self._programmatic_answer(result, yes_no_answer(result["state_answer"], result["language"]))
+            reply = self.settings[f"{result['state_answer']}_reply"].strip()
+            self._programmatic_answer(result, reply or yes_no_answer(result["state_answer"], result["language"]))
             return
         await self._answer(result, [
             {"role": "system", "content": (

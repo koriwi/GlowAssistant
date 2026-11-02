@@ -68,8 +68,10 @@ def settings_schema(values):
     schema[vol.Required("log_runs", default=values["log_runs"])] = BooleanSelector()
     schema[vol.Required("history_enabled", default=values["history_enabled"])] = BooleanSelector()
     schema[vol.Required("history_messages", default=values["history_messages"])] = _number(1, 100)
-    for field in ("unsure_reply", "error_reply", "answer_error_reply"):
+    for field in ("ok_reply", "unsure_reply", "error_reply", "answer_error_reply"):
         schema[vol.Required(field, default=values[field])] = TextSelector()
+    for field in ("yes_reply", "no_reply"):
+        schema[vol.Optional(field, default=values[field])] = TextSelector()
     return vol.Schema(schema)
 
 

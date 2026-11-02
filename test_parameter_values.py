@@ -465,7 +465,7 @@ class SelectParameterEngineTests(unittest.IsolatedAsyncioTestCase):
         execute = AsyncMock(return_value=None)
         result = await AgentEngine(normalize_settings({}), client, execute=execute).process(prompt, "en", snapshot)
         self.assertEqual(result["parameters"], {"item": "milk", "status": "completed"})
-        self.assertEqual(result["answer"], "ok")
+        self.assertEqual(result["answer"], "Okay")
         self.assertEqual(set(result["parameter_extractions"]), {"item", "status"})
         self.assertEqual(client.requests[-1][1]["other_parameters"], ["item"])
         self.assertEqual(client.requests[-2][1]["other_parameters"], ["status"])

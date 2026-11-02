@@ -152,7 +152,7 @@ class RunLogTests(unittest.IsolatedAsyncioTestCase):
         with patch("custom_components.glow_assistant.run_logs._write", side_effect=OSError("disk full")):
             report = await record.finish(result, "/unused")
         self.assertEqual(result["execution"]["status"], "completed")
-        self.assertEqual(report["result"]["answer"], "ok")
+        self.assertEqual(report["result"]["answer"], "Okay")
         self.assertTrue(report["success"])
         self.assertEqual(report["log_error"], "disk full")
         execute.assert_awaited_once()

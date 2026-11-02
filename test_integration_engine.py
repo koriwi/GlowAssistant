@@ -250,7 +250,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result["target"]["area_id"], "office")
                 self.assertEqual(result["execution"]["status"], "planned" if dry_run else "completed")
                 self.assertNotIn("failures", result)
-                self.assertEqual(result["answer"], "ok")
+                self.assertEqual(result["answer"], "Okay")
 
 
     async def test_action_target_scope_choices_and_speaker_context(self):

@@ -81,6 +81,9 @@ class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["type"], "create_entry")
         self.assertEqual(result["data"]["answer"]["model"], "small-model")
         self.assertFalse(result["data"]["general"]["enable"])
+        self.assertEqual(result["data"]["ok_reply"], "Okay")
+        self.assertEqual(result["data"]["yes_reply"], "")
+        self.assertEqual(result["data"]["no_reply"], "")
         self.assertNotIn("test_connection", result["data"]["decider"])
 
     async def test_invalid_form_preserves_values_and_returns_error(self):
@@ -99,6 +102,7 @@ class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
         from custom_components.glow_assistant.config_flow import GlowOptionsFlow
 
         data = self.settings()
+        data.update(ok_reply="Erledigt.", yes_reply="Jawohl.", no_reply="Nö.")
         data["decider"]["query_target_prompt"] = "My custom target instructions"
         entry = SimpleNamespace(data=data)
         flow = GlowOptionsFlow()
@@ -112,6 +116,8 @@ class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
         saved = flow.hass.config_entries.async_update_entry.call_args.kwargs["data"]
         self.assertEqual(saved["decider"]["query_target_prompt"], "My custom target instructions")
         self.assertEqual(saved["answer"]["model"], "small-model")
+        for field in ("ok_reply", "yes_reply", "no_reply"):
+            self.assertEqual(saved[field], data[field])
 
     async def test_reconfigure_updates_same_entry(self):
         from custom_components.glow_assistant.config_flow import GlowConfigFlow

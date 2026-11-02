@@ -99,18 +99,56 @@ class ProgrammaticAnswerTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("target_selection", result)
                 self.assertFalse(client.chat_requests)
 
-    async def test_command_defaults_to_ok_without_chat_or_device_execution(self):
+    async def test_command_defaults_to_okay_without_chat_or_device_execution(self):
         client = ScriptedModels([{"service": "light.turn_off"}, {"target_scope": "implied_area"}])
         result = await AgentEngine(local_settings(), client, dry_run=True).process("Turn off the lights", "en", SNAPSHOT, speaker_area="Office")
-        self.assertEqual(result["answer"], "ok")
+        self.assertEqual(result["answer"], "Okay")
         self.assertEqual(result["answer_source"], "programmatic")
         self.assertEqual(len(client.requests), 2)
         self.assertFalse(client.chat_requests)
         self.assertEqual(result["execution"]["status"], "planned")
 
+    async def test_custom_command_reply_is_used_for_live_and_planned_commands(self):
+        for dry_run in (False, True):
+            with self.subTest(dry_run=dry_run):
+                settings = local_settings()
+                settings["ok_reply"] = "Alles klar."
+                execute = AsyncMock(return_value=None)
+                client = ScriptedModels([{"service": "light.turn_off"}, {"target_scope": "implied_area"}])
+                result = await AgentEngine(settings, client, dry_run=dry_run, execute=execute).process(
+                    "Turn off the lights", "de", SNAPSHOT, speaker_area="Office")
+                self.assertEqual(result["answer"], "Alles klar.")
+                self.assertEqual(result["answer_source"], "programmatic")
+                self.assertFalse(client.chat_requests)
+                self.assertEqual(execute.await_count, 0 if dry_run else 1)
+
+    async def test_custom_yes_no_replies_override_language_defaults_without_changing_the_decision(self):
+        for language, answer, expected in (("de", "yes", "Jawohl!"), ("en", "yes", "Jawohl!"), ("de", "no", "Nö.")):
+            with self.subTest(language=language, answer=answer):
+                settings = local_settings()
+                settings.update(yes_reply="Jawohl!", no_reply="Nö.")
+                client = ScriptedModels([{"service": "query_state"}, {"area": "area:office"}, {"domain": "light"},
+                                         {"query_type": "yes_no"}, {"binary_answer": answer}])
+                result = await AgentEngine(settings, client, dry_run=True).process("Is the office light on?", language, SNAPSHOT)
+                self.assertEqual(result["answer"], expected)
+                self.assertEqual(result["state_answer"], answer)
+                self.assertFalse(client.chat_requests)
+
+    async def test_enabled_yes_no_answer_model_keeps_generating_the_reply(self):
+        settings = local_settings(True)
+        settings.update(yes_reply="Custom yes", no_reply="Custom no")
+        client = ScriptedModels([{"service": "query_state"}, {"area": "area:office"}, {"domain": "light"},
+                                 {"query_type": "yes_no"}, {"binary_answer": "yes"}], answers=["Ja."])
+        result = await AgentEngine(settings, client, dry_run=True).process("Ist das Licht an?", "de", SNAPSHOT)
+        self.assertEqual(result["answer"], "Ja.")
+        self.assertEqual(result["answer_source"], "llm")
+        self.assertEqual(json.loads(client.chat_requests[0][1][1]["content"]), {"state_answer": "yes"})
+
     async def test_enabled_answer_llm_receives_a_command_plan_without_claiming_execution(self):
         client = ScriptedModels([{"service": "light.turn_off"}, {"target_scope": "implied_area"}], answers=["I would turn off the lights."])
-        result = await AgentEngine(local_settings(True), client, dry_run=True).process("Turn off the lights", "en", SNAPSHOT, speaker_area="Office")
+        settings = local_settings(True)
+        settings["ok_reply"] = "Custom acknowledgment"
+        result = await AgentEngine(settings, client, dry_run=True).process("Turn off the lights", "en", SNAPSHOT, speaker_area="Office")
         self.assertEqual(result["answer_source"], "llm")
         self.assertEqual(result["answer"], "I would turn off the lights.")
         self.assertEqual(len(client.chat_requests), 1)
@@ -149,6 +187,30 @@ class ProgrammaticAnswerTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AnswerConfigurationTests(unittest.TestCase):
+    def test_reply_defaults_validation_and_exported_ha_overrides(self):
+        settings = local_settings()
+        self.assertEqual(settings["ok_reply"], "Okay")
+        self.assertEqual(settings["yes_reply"], "")
+        self.assertEqual(settings["no_reply"], "")
+        settings.update(ok_reply="Erledigt.", yes_reply="Jawohl.", no_reply="Nö.")
+        args = benchmark.parser().parse_args(["-q", "test"])
+        configured = benchmark.model_settings(settings, args, {})
+        for field in ("ok_reply", "yes_reply", "no_reply"):
+            self.assertEqual(configured[field], settings[field])
+        for value in ("", "   ", None, True):
+            invalid = local_settings()
+            invalid["ok_reply"] = value
+            with self.subTest(ok_reply=value), self.assertRaises(ValueError):
+                validate_settings(invalid)
+        for field in ("yes_reply", "no_reply"):
+            for value in (None, True, 1):
+                invalid = local_settings()
+                invalid[field] = value
+                with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                    validate_settings(invalid)
+        settings.update(yes_reply="   ", no_reply="")
+        self.assertEqual(validate_settings(settings)["yes_reply"], "")
+
     def test_answer_model_is_disabled_by_default_and_needs_no_endpoint_or_key(self):
         settings = normalize_settings({"decider": {"url": "http://local/v1/systemone", "model": "decider"},
                                        "answer": {"url": "", "model": "", "api_key": ""}})

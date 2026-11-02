@@ -12,14 +12,20 @@
           "history_enabled": "Enable conversation history",
           "history_messages": "Previous messages to include",
           "log_runs": "Save run logs to disk",
-          "answer_error_reply": "Reply when the action completed but answer generation failed"
+          "answer_error_reply": "Reply when the action completed but answer generation failed",
+          "ok_reply": "Successful command reply",
+          "yes_reply": "Yes reply",
+          "no_reply": "No reply"
         },
         "data_description": {
           "excluded_entities": "Home Assistant exposed-entity settings are always respected. These entities are additionally excluded.",
           "history_enabled": "Use prior user inputs and final assistant replies in every model step.",
           "history_messages": "Rolling window for this Assist conversation. Includes only user/assistant text, with no added idle expiry.",
           "log_runs": "Off by default. Save complete run records under glow_assistant/runs/successful or unsuccessful in your HA configuration directory. Includes user text, states, prompts, model requests/responses and execution details; connection credentials are redacted. Files are not automatically deleted.",
-          "answer_error_reply": "Used after HA accepted the command and only answer generation failed; it must not imply the command failed."
+          "answer_error_reply": "Used after HA accepted the command and only answer generation failed; it must not imply the command failed.",
+          "ok_reply": "Spoken confirmation for successful commands when LLM answer generation is off. Default: Okay.",
+          "yes_reply": "Reply for yes/no queries when the answer is yes and LLM answer generation is off. Blank uses the pipeline-language default. Custom text is spoken unchanged.",
+          "no_reply": "Reply for yes/no queries when the answer is no and LLM answer generation is off. Blank uses the pipeline-language default. Custom text is spoken unchanged."
         },
         "sections": {
           "decider": {
@@ -166,14 +172,20 @@
           "history_enabled": "Enable conversation history",
           "history_messages": "Previous messages to include",
           "log_runs": "Save run logs to disk",
-          "answer_error_reply": "Reply when the action completed but answer generation failed"
+          "answer_error_reply": "Reply when the action completed but answer generation failed",
+          "ok_reply": "Successful command reply",
+          "yes_reply": "Yes reply",
+          "no_reply": "No reply"
         },
         "data_description": {
           "excluded_entities": "Home Assistant exposed-entity settings are always respected. These entities are additionally excluded.",
           "history_enabled": "Use prior user inputs and final assistant replies in every model step.",
           "history_messages": "Rolling window for this Assist conversation. Includes only user/assistant text, with no added idle expiry.",
           "log_runs": "Off by default. Save complete run records under glow_assistant/runs/successful or unsuccessful in your HA configuration directory. Includes user text, states, prompts, model requests/responses and execution details; connection credentials are redacted. Files are not automatically deleted.",
-          "answer_error_reply": "Used after HA accepted the command and only answer generation failed; it must not imply the command failed."
+          "answer_error_reply": "Used after HA accepted the command and only answer generation failed; it must not imply the command failed.",
+          "ok_reply": "Spoken confirmation for successful commands when LLM answer generation is off. Default: Okay.",
+          "yes_reply": "Reply for yes/no queries when the answer is yes and LLM answer generation is off. Blank uses the pipeline-language default. Custom text is spoken unchanged.",
+          "no_reply": "Reply for yes/no queries when the answer is no and LLM answer generation is off. Blank uses the pipeline-language default. Custom text is spoken unchanged."
         },
         "sections": {
           "decider": {
@@ -330,14 +342,20 @@
           "history_enabled": "Enable conversation history",
           "history_messages": "Previous messages to include",
           "log_runs": "Save run logs to disk",
-          "answer_error_reply": "Reply when the action completed but answer generation failed"
+          "answer_error_reply": "Reply when the action completed but answer generation failed",
+          "ok_reply": "Successful command reply",
+          "yes_reply": "Yes reply",
+          "no_reply": "No reply"
         },
         "data_description": {
           "excluded_entities": "Home Assistant exposed-entity settings are always respected. These entities are additionally excluded.",
           "history_enabled": "Use prior user inputs and final assistant replies in every model step.",
           "history_messages": "Rolling window for this Assist conversation. Includes only user/assistant text, with no added idle expiry.",
           "log_runs": "Off by default. Save complete run records under glow_assistant/runs/successful or unsuccessful in your HA configuration directory. Includes user text, states, prompts, model requests/responses and execution details; connection credentials are redacted. Files are not automatically deleted.",
-          "answer_error_reply": "Used after HA accepted the command and only answer generation failed; it must not imply the command failed."
+          "answer_error_reply": "Used after HA accepted the command and only answer generation failed; it must not imply the command failed.",
+          "ok_reply": "Spoken confirmation for successful commands when LLM answer generation is off. Default: Okay.",
+          "yes_reply": "Reply for yes/no queries when the answer is yes and LLM answer generation is off. Blank uses the pipeline-language default. Custom text is spoken unchanged.",
+          "no_reply": "Reply for yes/no queries when the answer is no and LLM answer generation is off. Blank uses the pipeline-language default. Custom text is spoken unchanged."
         },
         "sections": {
           "decider": {

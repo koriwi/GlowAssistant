@@ -35,7 +35,7 @@ Replace `SERVER` with the model server address.
 Set the port for each server.
 Use addresses that Home Assistant can reach.
 
-Smart-home replies use no answer LLM by default. Commands reply `ok`. Yes/no queries use a fixed reply. Other queries list entity names and values; one decision selects the requested state property, such as brightness or temperature.
+Smart-home replies use no answer LLM by default. Commands reply `Okay` by default. Command and yes/no reply texts are configurable. Other queries list entity names and values; one decision selects the requested state property, such as brightness or temperature.
 Enable **Smart-home answer → Enable LLM answer generation** to use the answer model.
 
 To answer questions about other topics, enable the **General model**.

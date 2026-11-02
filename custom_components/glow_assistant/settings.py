@@ -75,6 +75,9 @@ DEFAULTS = {
     "history_enabled": False,
     "history_messages": 10,
     "excluded_entities": [],
+    "ok_reply": "Okay",
+    "yes_reply": "",
+    "no_reply": "",
     "unsure_reply": "ich bin mir nicht sicher",
     "error_reply": "Ich konnte die Anfrage nicht erfolgreich abschließen.",
     "answer_error_reply": "Der Befehl wurde übermittelt, aber ich konnte keine Antwort formulieren.",
@@ -180,9 +183,13 @@ def validate_settings(data):
         names.add(server["name"])
         servers.append(server)
     general["mcp_servers"] = servers
-    for field in ("name", "unsure_reply", "error_reply", "answer_error_reply"):
+    for field in ("name", "ok_reply", "unsure_reply", "error_reply", "answer_error_reply"):
         if not isinstance(settings[field], str) or not settings[field].strip():
             raise ValueError(f"{field}: text must not be empty.")
+    for field in ("yes_reply", "no_reply"):
+        if not isinstance(settings[field], str):
+            raise ValueError(f"{field}: reply must be text.")
+        settings[field] = settings[field].strip()
     return settings
 
 
