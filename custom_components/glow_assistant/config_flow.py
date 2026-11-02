@@ -62,7 +62,8 @@ def settings_schema(values):
             elif field.endswith(("_confidence", "_probability_threshold")):
                 selector = _number(0, 1, 0.01)
             fields[vol.Optional(field, default=value)] = selector
-        fields[vol.Optional("test_connection", default=False)] = BooleanSelector()
+            if field == "api_key":
+                fields[vol.Optional("test_connection", default=False)] = BooleanSelector()
         schema[vol.Required(group)] = section(vol.Schema(fields), {"collapsed": False})
     schema[vol.Optional("excluded_entities", default=values["excluded_entities"])] = EntitySelector({"multiple": True})
     schema[vol.Required("log_runs", default=values["log_runs"])] = BooleanSelector()

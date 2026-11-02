@@ -40,8 +40,8 @@ class TextValuesTests(unittest.TestCase):
         threshold = normalize_settings({})["decider"]["text_probability_threshold"]
         selection = decode_text(response_for(probabilities), words, threshold)
         self.assertEqual(selection["value"], "zwiebeln")
-        self.assertEqual(selection["probability_threshold"], 0.3)
-        self.assertEqual(selection["effective_probability_threshold"], 0.06)
+        self.assertEqual(selection["probability_threshold"], 0.4)
+        self.assertEqual(selection["effective_probability_threshold"], 0.08)
 
     def test_message_actions_use_their_own_prompt(self):
         for service in ("notify.send_message", "assist_satellite.announce"):
@@ -134,7 +134,7 @@ class TextEngineTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(client.requests[-1][1]["target"], result["target"])
                 text_output = next(output for stage, _, output in events if stage.startswith("text:") and output)
                 self.assertEqual(text_output["value"], expected)
-                self.assertEqual(text_output["probability_threshold"], 0.3)
+                self.assertEqual(text_output["probability_threshold"], 0.4)
                 self.assertIn("probabilities", text_output["decisions"]["text_words"])
 
     async def test_language_history_and_custom_prompt_reach_text_step_without_leaking_instructions_to_debug(self):

@@ -928,7 +928,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         output = next(output for stage, _, output in events if stage == "target" and output)
         self.assertEqual(output["entities_before"], 54)
         self.assertEqual(output["entities_after"], 18)
-        self.assertEqual(output["decisions"]["query_targets"]["probability_threshold"], 0.02)
+        self.assertEqual(output["decisions"]["query_targets"]["probability_threshold"], 0.7)
 
 
     async def test_malformed_query_choice_stops_before_answer(self):
@@ -1036,7 +1036,7 @@ class IntegrationSettingsTests(unittest.TestCase):
         self.assertEqual(settings["decider"]["api_key"], "")
 
     def test_parameter_probability_setting_is_validated_independently_of_confidence(self):
-        self.assertEqual(self.local_settings()["decider"]["parameter_probability_threshold"], 0.15)
+        self.assertEqual(self.local_settings()["decider"]["parameter_probability_threshold"], 0.5)
         for value in (-0.1, 1.1, True, float("nan")):
             settings = self.local_settings()
             settings["decider"]["parameter_probability_threshold"] = value
@@ -1053,7 +1053,7 @@ class IntegrationSettingsTests(unittest.TestCase):
                    "text_confidence": 0.9, "text_keep_uncertain": True}
         saved = normalize_settings({"decider": removed})
         self.assertFalse(set(removed) & set(saved["decider"]))
-        self.assertEqual(saved["decider"]["text_probability_threshold"], 0.3)
+        self.assertEqual(saved["decider"]["text_probability_threshold"], 0.4)
         self.assertEqual(normalize_settings({"decider": {"text_probability_threshold": 0.05}})["decider"]["text_probability_threshold"], 0.05)
 
     def test_saved_thresholds_and_custom_prompts_are_preserved(self):
@@ -1173,7 +1173,7 @@ class IntegrationSettingsTests(unittest.TestCase):
         saved = normalize_settings({"decider": {"service_prompt": LEGACY_SERVICE_PROMPT}})
         self.assertEqual(saved["decider"]["service_prompt"], SERVICE_PROMPT)
         self.assertIn("field metadata", saved["decider"]["service_prompt"])
-        self.assertEqual(saved["decider"]["text_probability_threshold"], 0.3)
+        self.assertEqual(saved["decider"]["text_probability_threshold"], 0.4)
         saved = normalize_settings({"decider": {"service_prompt": LEGACY_PARAMETER_SERVICE_PROMPT}})
         self.assertEqual(saved["decider"]["service_prompt"], SERVICE_PROMPT)
         self.assertIn("todo.get_items", saved["decider"]["service_prompt"])

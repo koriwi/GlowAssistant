@@ -134,7 +134,7 @@ class ActionRoutingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_explicit_areas_are_final_targets_without_entity_decision(self):
         result, client, _ = await self.run_route("areas", [{"action_areas": answer({
-            "area:office": 0.3, "area:kitchen": 0.2, "none": 0.5,
+            "area:office": 0.45, "area:kitchen": 0.4, "none": 0.15,
         })}])
         self.assertEqual(result["target"]["type"], "areas")
         self.assertEqual(result["target"]["area_ids"], ["office", "kitchen"])
@@ -154,7 +154,7 @@ class ActionRoutingTests(unittest.IsolatedAsyncioTestCase):
     async def test_entities_in_one_explicit_area_choose_highest_area_then_only_matching_entities(self):
         result, client, events = await self.run_route("entities_explicit_area", [
             {"action_areas": answer({"area:office": 0.45, "area:kitchen": 0.4, "none": 0.15})},
-            {"action_entities": answer({"entity:light.desk": 0.4, "entity:light.ceiling": 0.35, "none": 0.25})},
+            {"action_entities": answer({"entity:light.desk": 0.45, "entity:light.ceiling": 0.4, "none": 0.15})},
         ], settings=normalize_settings({"decider": {"action_area_probability_threshold": 0.99}}))
         self.assertEqual([area["area_id"] for area in result["selected_areas"]], ["office"])
         self.assertEqual(result["target"]["entity_ids"], ["light.desk", "light.ceiling"])
@@ -163,7 +163,7 @@ class ActionRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["action_areas"]["selection_mode"], "highest_probability")
         output = next(output for stage, _, output in events if stage == "action_entities" and output)
         self.assertEqual(output["selected_names"], ["Desk lamp", "Ceiling lamp"])
-        self.assertEqual(output["probability_threshold"], 0.15)
+        self.assertEqual(output["probability_threshold"], 0.8)
 
     async def test_entities_in_implied_area_skip_area_decision_and_resolve_room_alias(self):
         result, client, _ = await self.run_route("entities_implied_area", [
@@ -176,7 +176,7 @@ class ActionRoutingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_arealess_targets_filter_only_by_domain_including_assigned_and_unassigned_entities(self):
         result, client, _ = await self.run_route("entities", [{"action_entities": answer({
-            "entity:todo.shopping": 0.66, "entity:todo.work": 0.04, "entity:todo.unassigned": 0.2, "none": 0.1,
+            "entity:todo.shopping": 0.55, "entity:todo.work": 0.04, "entity:todo.unassigned": 0.31, "none": 0.1,
         })}, {"text_words": answer({"word:0:test": 0, "word:1:request": 0.9, "none": 0.1})}], speaker_area="Office", service="todo.add_item")
         self.assertEqual(result["target"]["entity_ids"], ["todo.shopping", "todo.unassigned"])
         self.assertEqual(result["selected_areas"], [])

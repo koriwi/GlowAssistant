@@ -79,7 +79,7 @@ class BenchmarkSettingsTests(unittest.TestCase):
         self.assertEqual(configured["decider"]["service_confidence"], 0.9)
         self.assertEqual(configured["decider"]["parameter_probability_threshold"], 0.2)
         args = benchmark.parser().parse_args(["--query", "test", "--confidence", "0"])
-        self.assertEqual(benchmark.model_settings(settings(), args, {})["decider"]["parameter_probability_threshold"], 0.15)
+        self.assertEqual(benchmark.model_settings(settings(), args, {})["decider"]["parameter_probability_threshold"], 0.5)
 
     def test_action_selection_thresholds_are_independent_of_global_confidence(self):
         args = benchmark.parser().parse_args([
@@ -104,7 +104,7 @@ class BenchmarkSettingsTests(unittest.TestCase):
         configured = benchmark.model_settings(settings(), args, {})["decider"]
         self.assertEqual(configured["query_target_probability_threshold"], 0.04)
         self.assertEqual(configured["service_confidence"], 0.9)
-        self.assertEqual(configured["parameter_probability_threshold"], 0.15)
+        self.assertEqual(configured["parameter_probability_threshold"], 0.5)
 
 
 class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
@@ -347,9 +347,9 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
         self.assertRegex(printed, r"speaker area\s+unknown")
         self.assertNotIn('"selector"', printed)
         self.assertIn("Selected optional parameters: brightness_pct", printed)
-        self.assertIn("Probability cutoff: 0.15 / max(1, 2) = 0.075", printed)
+        self.assertIn("Probability cutoff: 0.5 / max(1, 2) = 0.25", printed)
         self.assertRegex(printed, r"brightness_pct\s+1\.0000\s+2/2\s+keep")
-        self.assertRegex(printed, r"hue\s+0\.0000\s+2/2\s+drop: p < 0\.075")
+        self.assertRegex(printed, r"hue\s+0\.0000\s+2/2\s+drop: p < 0\.25")
         self.assertIn("hue", report["result"]["parameter_selection"]["probabilities"])
         self.assertIn("Answer model was not called.", printed)
         self.assertRegex(printed, r"area filter\s+Office")

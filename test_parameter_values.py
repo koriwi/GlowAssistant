@@ -142,7 +142,7 @@ class ParameterEngineTests(unittest.IsolatedAsyncioTestCase):
                     "services": {"todo.add_item": {"fields": fields}}}
         events = []
         history = [{"role": "user", "content": "Use the shopping list"}]
-        settings = normalize_settings({"history_enabled": True})
+        settings = normalize_settings({"history_enabled": True, "decider": {"parameter_probability_threshold": 0.15}})
         result = await AgentEngine(settings, client, trace=lambda *event: events.append(event), history=history, dry_run=True).process(prompt, "de", snapshot)
         self.assertEqual(result["parameters"], {"item": "nudeln", "description": "(weizen, fussilli, barilla)"})
         self.assertEqual(set(result["parameter_extractions"]), {"item", "description"})
