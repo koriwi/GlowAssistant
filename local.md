@@ -78,7 +78,7 @@ The `parameter_capabilities` debug card/JSON record shows the actual target enti
 
 Parameter detection then runs against the remaining action fields. Required fields are listed automatically. Optional fields use one Choice question plus `none`; every real field at or above the calculated cutoff from `parameter_probability_threshold` (default 0.15) is kept. Overall confidence is not a filter, and `none` never overrides retained real fields. `--parameter-threshold` overrides this cutoff independently of `--confidence`. No optional fields means no extra model call. The request includes the resolved target, without the entity catalog or current numeric values.
 
-Console output lists all optional-field probabilities, including dropped fields with `drop: p < THRESHOLD`. Fields removed by the capability filter are labeled unsupported for the selected targets. `none` is labeled as a non-parameter. `--json` retains the full distribution. Required and retained optional fields are extracted next according to their HA selectors. Text, number and fixed-option select selectors are supported; other formats report not yet supported. Device calls run only with `--execute`. Successful action plans reply ok by default; with --llm-answer the model describes the plan without claiming execution.
+Console output lists all optional-field probabilities, including dropped fields with `drop: p < THRESHOLD`. Fields removed by the capability filter are labeled unsupported for the selected targets. `none` is labeled as a non-parameter. `--json` retains the full distribution. Required and retained optional fields are extracted next according to their HA selectors. Text, number and fixed-option select selectors are supported; other formats report not yet supported. Device calls run only with `--execute`. Successful action plans use the configured command reply (default Okay); with --llm-answer the model describes the plan without claiming execution.
 
 Supply speaker context explicitly when benchmarking:
 
@@ -121,13 +121,15 @@ python local.py -q "Wie hell sind die Lampen im Büro?" --llm-answer --show-answ
 
 Default replies:
 
-- Successful commands: `ok`. HA executes selected actions; the local tool plans them unless `--execute` is set. Response-producing actions return their data instead of `ok`.
-- Yes/no state queries: Ja/Nein for German pipelines, Yes/No otherwise. Keep the existing binary-answer shortcut; no property selection or answer-model call.
+- Successful commands: `ok_reply` (default `Okay`). HA executes selected actions; the local tool plans them unless `--execute` is set. Response-producing actions return their data instead of the command acknowledgement.
+- Yes/no state queries: configurable `yes_reply` and `no_reply`. Blank values use Ja/Nein for German pipelines and Yes/No otherwise. Keep the existing binary-answer shortcut; no property selection or answer-model call.
 - Other state queries: one `state_property` single-choice call selects the requested property for all selected entities. Output each name + value, with units. Brightness is shown as percent; hue and saturation come from `hs_color`. Unknown, unavailable or missing attributes are reported explicitly. Never substitute an entity's main state for a missing requested attribute. Duplicate names include room names when available.
 
 The property selector receives the request, property names/metadata, language and enabled history, without the entity catalog or state values. Its prompt/confidence are under Decider. `--state-property-confidence` overrides the threshold. Only scalar state attributes and derived hue/saturation are offered; unsupported or ambiguous selections return unsure.
 
 The CLI shows `answer mode` and the selected `state property`. JSON includes `state_property` and per-entity `state_values`; native debug has a property-selection card and an answer entry marked `model_call: false`. `--show-answer-input` reports that the answer model was not called. With `--llm-answer`, existing exact input tracing remains available. Fixed state labels use German for German pipelines and English/canonical values otherwise.
+
+Set **Successful command reply**, **Yes reply** and **No reply** alongside the unsure/error replies in HA settings. Custom replies are used unchanged when LLM answer generation is off. The local tool reuses these exported HA settings.
 
 ## Parameter value extraction
 

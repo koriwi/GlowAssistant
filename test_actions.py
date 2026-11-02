@@ -123,7 +123,7 @@ class ActionExecutionTests(unittest.IsolatedAsyncioTestCase):
             "Read the shopping list", "en", self.todo_snapshot())
         self.assertEqual(result["route"], "error")
         self.assertIn("expected action data", result["error"])
-        self.assertNotEqual(result["answer"], "ok")
+        self.assertNotEqual(result["answer"], "Okay")
         execute.assert_awaited_once()
 
     async def test_optional_response_action_returns_generic_data_without_an_answer_model(self):
@@ -146,7 +146,7 @@ class ActionExecutionTests(unittest.IsolatedAsyncioTestCase):
                 result = await AgentEngine(normalize_settings({}), client, dry_run=dry_run, execute=execute,
                                            trace=lambda *event: events.append(event)).process(
                     "Turn off the lights", "en", SNAPSHOT, speaker_area="Office")
-                self.assertEqual(result["answer"], "ok")
+                self.assertEqual(result["answer"], "Okay")
                 self.assertFalse(client.chat_requests)
                 self.assertEqual(result["execution"]["status"], "planned" if dry_run else "completed")
                 if dry_run:

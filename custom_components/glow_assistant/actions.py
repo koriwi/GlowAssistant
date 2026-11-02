@@ -48,9 +48,9 @@ def device_outcome(execution):
     return "not_sent"
 
 
-def format_action_response(result, members):
+def format_action_response(result, members, ok_reply):
     if "response" not in result["action_metadata"]:
-        return "ok"
+        return ok_reply
     german = result["language"].split("-")[0].lower() == "de"
     if result["execution"]["dry_run"]:
         return "Nicht ausgeführt; keine Ergebnisdaten verfügbar." if german else "Not executed; no response data available."
