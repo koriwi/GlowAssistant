@@ -69,14 +69,14 @@ Each JSON record includes the request, states, settings, model inputs/outputs, d
 
 ## Local testing
 
-`local.py` uses the same engine as the integration. It reports decision times and prints the selected action's field metadata.
+`scripts/local.py` uses the same engine as the integration. It reports decision times and prints the selected action's field metadata.
 Add `--log-runs` to save local records under `runs/successful/` or `runs/unsuccessful/`. Actions run only with `--execute`.
-See [local setup](local.md) for the integration update and `.env` settings. `benchmark.py` remains a compatibility entry point.
+See [local tools](scripts/README.md) and [local setup](local.md) for the integration update and `.env` settings.
 
 ```bash
-python local.py --query "Ist die Lampe im Büro an?"
-python local.py --query "Wie hell ist die Lampe?" --llm-answer
-python local.py --query "Was steht auf der Einkaufsliste?" --execute
+python scripts/local.py --query "Ist die Lampe im Büro an?"
+python scripts/local.py --query "Wie hell ist die Lampe?" --llm-answer
+python scripts/local.py --query "Was steht auf der Einkaufsliste?" --execute
 ```
 
 ## TODO

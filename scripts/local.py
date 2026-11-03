@@ -14,6 +14,9 @@ from urllib.parse import urlsplit
 import aiohttp
 from dotenv import load_dotenv
 
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from custom_components.glow_assistant.actions import ActionError
 from custom_components.glow_assistant.client import ModelClient, ModelError
 from custom_components.glow_assistant.engine import AgentEngine
@@ -23,8 +26,9 @@ from custom_components.glow_assistant.settings import (
     normalize_settings,
     validate_settings,
 )
+from scripts import ROOT
 
-LOG_DIRECTORY = Path(__file__).parent / "runs"
+LOG_DIRECTORY = ROOT / "runs"
 
 CONFIDENCE_FIELDS = tuple(key for key in DEFAULTS["decider"] if key.endswith("_confidence")
                           and key not in ("area_confidence", "state_property_confidence"))
@@ -412,7 +416,7 @@ def print_report(report, show_answer_input=False):
 
 
 def main(argv=None):
-    load_dotenv(Path(__file__).with_name(".env"))
+    load_dotenv(ROOT / ".env")
     arguments = parser()
     args = arguments.parse_args(argv)
     if not args.query.strip():

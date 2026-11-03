@@ -7,7 +7,7 @@ import unittest
 from contextlib import redirect_stdout
 from unittest.mock import AsyncMock, patch
 
-from numeric_probe import decode_probe, probe_request, run
+from scripts.numeric_probe import decode_probe, probe_request, run
 
 RESPONSE = {
     "answers": {
@@ -94,13 +94,13 @@ class NumericProbeTests(unittest.TestCase):
         decider = AsyncMock(return_value=RESPONSE)
         output = io.StringIO()
         with (
-            patch.object(sys, "argv", ["numeric_probe.py", "increase by 15 percentage points",
+            patch.object(sys, "argv", ["scripts.numeric_probe.py", "increase by 15 percentage points",
                                        "--current", "40", "--levels", "3", "--expected", "55", "--json"]),
-            patch("numeric_probe.load_dotenv"),
-            patch("numeric_probe.decider_api_key", return_value="test-key"),
-            patch("numeric_probe.call_decider", new=decider),
-            patch("prototype.inspect_mcp", new=AsyncMock()) as inspector,
-            patch("prototype.execute_mcp", new=AsyncMock()) as executor,
+            patch("scripts.numeric_probe.load_dotenv"),
+            patch("scripts.numeric_probe.decider_api_key", return_value="test-key"),
+            patch("scripts.numeric_probe.call_decider", new=decider),
+            patch("scripts.local.fetch_snapshot", new=AsyncMock()) as inspector,
+            patch("scripts.local.execute_action", new=AsyncMock()) as executor,
             redirect_stdout(output),
         ):
             self.assertEqual(asyncio.run(run()), 0)

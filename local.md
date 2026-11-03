@@ -1,6 +1,6 @@
 # Local testing
 
-`local.py` imports the addon's `AgentEngine` and `ModelClient` directly. Decisions, prompts and state-query filtering share the same implementation.
+`scripts/local.py` imports the addon's `AgentEngine` and `ModelClient` directly. Decisions, prompts and state-query filtering share the same implementation.
 
 ## Setup
 
@@ -33,23 +33,23 @@ Set model keys with `DECIDER_API_KEY`, `ANSWER_API_KEY` and `GENERAL_API_KEY`. N
 
 ## Run
 
-Dry-run is the default. Add `--execute` to run selected actions, including read-only actions such as `todo.get_items`. General-model MCP connections and tool calls are also allowed in this mode. `benchmark.py` remains a compatibility entry point.
+Dry-run is the default. Add `--execute` to run selected actions, including read-only actions such as `todo.get_items`. General-model MCP connections and tool calls are also allowed in this mode.
 
-To benchmark entity selection alone, use `python entity_probe.py -q "Ist die Lampe im Büro an?" --repeat 5`.
+To benchmark entity selection alone, use `python scripts/entity_probe.py -q "Ist die Lampe im Büro an?" --repeat 5`.
 It sends all exposed snapshot entities in one single-choice request plus `unsure`, without service, area or domain decisions.
 It uses the same `.env` connection settings. `--snapshot path/to/run.json` reuses a saved run's snapshot/settings;
 `--confidence` defaults to 0. `--json` prints the exact request, responses, usage and timings. No actions run.
 
 ```bash
-python local.py -q "Was steht auf der Einkaufsliste?" --execute
+python scripts/local.py -q "Was steht auf der Einkaufsliste?" --execute
 ```
 
 Actions that return data, such as `todo.get_items`, use the same target and parameter path. HA collects the response and includes it in debug records and optional LLM replies. With LLM replies off, to-do results list item names, descriptions and completion status; other action data is printed as JSON. Dry-run plans these calls without executing them; use `--execute` to see their returned data.
 
 ```bash
-python local.py --query "Ist die Lampe im Büro an?" --language de
-python local.py --query "Mach das Licht im Büro an" --confidence 0.25
-python local.py --query "Sind im Haus Fenster offen?" --domain-confidence 0.4 --query-target-threshold 0.02 --json
+python scripts/local.py --query "Ist die Lampe im Büro an?" --language de
+python scripts/local.py --query "Mach das Licht im Büro an" --confidence 0.25
+python scripts/local.py --query "Sind im Haus Fenster offen?" --domain-confidence 0.4 --query-target-threshold 0.02 --json
 ```
 
 `--confidence` overrides the single-choice confidence thresholds; probability cutoffs are separate. Individual flags override that value: `--service-confidence`, `--target-scope-confidence`, `--domain-confidence`, `--query-type-confidence`, `--binary-answer-confidence`, `--numeric-confidence`.
@@ -104,9 +104,9 @@ Console output lists all optional-field probabilities, including dropped fields 
 Supply speaker context explicitly when benchmarking:
 
 ```bash
-python local.py -q "Mach das Licht aus" --speaker-area "Küche"
-python local.py -q "Mach das Licht im Büro aus"
-python local.py -q "Schalte die Schreibtischlampe aus"
+python scripts/local.py -q "Mach das Licht aus" --speaker-area "Küche"
+python scripts/local.py -q "Mach das Licht im Büro aus"
+python scripts/local.py -q "Schalte die Schreibtischlampe aus"
 ```
 
 Without `--speaker-area`, the speaker location is unknown and neither `entities_implied_area` nor `implied_area` is offered. HA obtains the room from the requesting device's area assignment when available. Text chat and unassigned devices provide no default room. The editable prompt and confidence threshold are under Decider; `--target-scope-confidence` overrides that threshold locally. The saved stock scope prompt upgrades automatically; custom prompts are preserved.
@@ -126,18 +126,18 @@ Complex state queries use one Choice question containing all area/domain-filtere
 The default configured threshold is **0.7**; the effective cutoff is divided by the real option count. Set it under Decider or override it locally:
 
 ```bash
-python local.py -q "wie warm ist es?" --query-target-threshold 0.02 --show-answer-input
+python scripts/local.py -q "wie warm ist es?" --query-target-threshold 0.02 --show-answer-input
 ```
 
 The `target` timing row shows `selected N/M (one Choice)`. `--json` includes every option probability, the active threshold and selected entity IDs; `state_info` contains the selected states for quality comparisons. The old keep/drop helpers, settings and flags have been removed. Use the new state-query Choice prompt and probability threshold. Yes/no queries still bypass entity selection. Area/domain selection and answer generation are unchanged, including the current all_areas fallback for an unspecified room.
 
 ## Optional LLM replies
 
-`local.py` requires `--llm-answer` to call the smart-home answer model, even if the exported HA setting is enabled. Without this flag, the answer model does not need a configured URL, model or API key. In HA, use **Smart-home answer → Enable LLM answer generation**, off by default. General-model routing has its own enable setting and is unchanged.
+`scripts/local.py` requires `--llm-answer` to call the smart-home answer model, even if the exported HA setting is enabled. Without this flag, the answer model does not need a configured URL, model or API key. In HA, use **Smart-home answer → Enable LLM answer generation**, off by default. General-model routing has its own enable setting and is unchanged.
 
 ```bash
-python local.py -q "Wie hell sind die Lampen im Büro?"
-python local.py -q "Wie hell sind die Lampen im Büro?" --llm-answer --show-answer-input
+python scripts/local.py -q "Wie hell sind die Lampen im Büro?"
+python scripts/local.py -q "Wie hell sind die Lampen im Büro?" --llm-answer --show-answer-input
 ```
 
 Default replies:
@@ -161,8 +161,8 @@ Text fields use one Choice over word occurrences plus `none`, with the existing 
 Number fields use one request with an absolute/relative Choice and a nine-anchor Score. HA selector bounds and step define the output; thermostat device bounds also apply. Relative final-setting requests need a known common current setting among the entities that support that field. Thermostat changes use the existing target and whole degrees, preserving the direction of small changes. Native brightness step fields extract signed deltas without requiring a device baseline. Numeric extraction prompts and confidence are under Decider; `--numeric-confidence` overrides confidence locally. A number selector without finite bounds stops explicitly.
 
 ```bash
-python local.py -q "setze nudeln (weizen, fussilli, barilla) auf die einkaufsliste." --text-threshold 0.3
-python local.py -q "mach das Licht etwas heller" --speaker-area "Wohnzimmer"
+python scripts/local.py -q "setze nudeln (weizen, fussilli, barilla) auf die einkaufsliste." --text-threshold 0.3
+python scripts/local.py -q "mach das Licht etwas heller" --speaker-area "Wohnzimmer"
 ```
 
 The console prints every extracted value in one `Parameter / Value` table. Each field has a separate timing row, such as `text:item`, `text:description` or `numeric:brightness_pct`. Native debug shows an extraction card per field. `--json` stores values in `parameters`, per-field details in `parameter_extractions`, and complete decisions, usage and timing under the field's stage name. Empty optional text fields are omitted; their extraction records and timing rows show skipped (no text). Required text fields with no words still stop the request. Invalid responses, unsupported formats and unclear numeric values still stop the request.
@@ -176,7 +176,7 @@ Fixed-option select fields use one Choice call each. String options and `{value,
 For `todo.get_items.status`, “muss noch eingekauft werden” maps to `["needs_action"]`; completed items use `["completed"]`. The CLI shows the value and a `select:status` timing row. Native debug uses `glow_assistant_extract_select`, including probabilities and thresholds. Empty or invalid selections stop before execution. Custom values and selectors without fixed options remain unsupported.
 
 ```bash
-python local.py -q "Was steht auf der Einkaufsliste und muss noch eingekauft werden?" --execute --select-threshold 0.3
+python scripts/local.py -q "Was steht auf der Einkaufsliste und muss noch eingekauft werden?" --execute --select-threshold 0.3
 ```
 
 The core expands selected rooms to explicit exposed entity IDs. It groups targets by the parameters each supports, so an unsupported optional field is not sent to that target. Targets lacking any optional values can receive the base action. Missing required values or a target that cannot accept required fields stop before execution. Parameters cannot add broad `area_id`, `device_id`, `floor_id` or `label_id` selectors.
@@ -190,11 +190,11 @@ HA checks current Assist exposure and exclusions before every call, passes the A
 Logging is **off by default** and independent of `--json` and `--llm-answer`.
 
 ```bash
-python local.py -q "stopp die musik" --speaker-area "Küche" --log-runs
-python local.py -q "Wie hell sind die Lampen im Büro?" --log-runs --json
+python scripts/local.py -q "stopp die musik" --speaker-area "Küche" --log-runs
+python scripts/local.py -q "Wie hell sind die Lampen im Büro?" --log-runs --json
 ```
 
-- Local files: `runs/successful/` and `runs/unsuccessful/`, beside `local.py`.
+- Local files: `runs/successful/` and `runs/unsuccessful/`, at the repository root.
 - HA files: `<config>/glow_assistant/runs/successful/` and `unsuccessful/`. Enable **Save run logs to disk** in the integration settings.
 - The benchmark requires its own `--log-runs` flag even when HA logging is enabled.
 

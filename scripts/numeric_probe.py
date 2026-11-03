@@ -7,8 +7,14 @@ from time import perf_counter
 
 from dotenv import load_dotenv
 
-from prototype import call_decider, decider_api_key, decider_model, error_message
-from numeric_values import INSTRUCTIONS, decode_numeric as decode_probe, finite_number, numeric_request as probe_request
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scripts import ROOT
+from scripts._decider import call_decider, decider_api_key, decider_model, error_message
+from scripts._numeric_values import INSTRUCTIONS, finite_number
+from scripts._numeric_values import decode_numeric as decode_probe
+from scripts._numeric_values import numeric_request as probe_request
 
 
 async def run():
@@ -28,7 +34,7 @@ async def run():
     args = parser.parse_args()
     if args.expected is not None and not finite_number(args.expected):
         parser.error("Expected value must be finite.")
-    load_dotenv(Path(__file__).with_name(".env"))
+    load_dotenv(ROOT / ".env")
     api_key = decider_api_key()
     anchors, payload = probe_request(
         args.prompt, args.parameter, args.current, args.minimum, args.maximum,

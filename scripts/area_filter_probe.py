@@ -12,8 +12,11 @@ from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
-from numeric_values import finite_number
-from prototype import (
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scripts import ROOT
+from scripts._decider import (
     call_decider,
     choice_question,
     decider_api_key,
@@ -22,6 +25,7 @@ from prototype import (
     error_message,
     selection_result,
 )
+from scripts._numeric_values import finite_number
 
 INSTRUCTIONS = (
     "Decide whether the requested smart-home targets must be restricted by area. "
@@ -150,7 +154,7 @@ async def run(argv=None):
     parser.add_argument("--json", action="store_true", help="Include exact requests, responses and results.")
     parser.add_argument("--instructions-file", type=Path, help="Use a prompt from a UTF-8 text file instead of the baseline.")
     parser.add_argument("--label", default="", help="Optional run label, e.g. the loaded model's quantization.")
-    parser.add_argument("--output-dir", type=Path, default=Path(__file__).parent / "benchmarks" / "area_filter",
+    parser.add_argument("--output-dir", type=Path, default=ROOT / "benchmarks" / "area_filter",
                         help="Save each completed run as a timestamped JSON file here.")
     args = parser.parse_args(argv)
     if not finite_number(args.confidence) or not 0 <= args.confidence <= 1:
@@ -158,7 +162,7 @@ async def run(argv=None):
     instructions = args.instructions_file.read_text(encoding="utf-8").strip() if args.instructions_file else INSTRUCTIONS
     if not instructions:
         parser.error("Instructions must not be empty.")
-    load_dotenv(Path(__file__).with_name(".env"))
+    load_dotenv(ROOT / ".env")
     api_key = decider_api_key()
     cases = list(matrix_cases())
     started_at = datetime.now(UTC)

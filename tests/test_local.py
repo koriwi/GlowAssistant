@@ -7,11 +7,11 @@ from contextlib import asynccontextmanager, redirect_stdout
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
-import local as benchmark
 from custom_components.glow_assistant.actions import ActionError
 from custom_components.glow_assistant.client import ModelError
 from custom_components.glow_assistant.engine import AgentEngine
 from custom_components.glow_assistant.settings import normalize_settings
+from scripts import local as benchmark
 from tests.test_integration_engine import SNAPSHOT, ScriptedModels
 
 
@@ -134,8 +134,8 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
         exported["snapshot"] = fixture.snapshot()
         args = benchmark.parser().parse_args(["-q", "Was muss noch eingekauft werden?", "--select-threshold", "0.6"])
         client = ScriptedModels(fixture.choices({"value:needs_action": 0.85, "value:completed": 0.1, "none": 0.05}))
-        with (patch("local.fetch_snapshot", new=AsyncMock(return_value=exported)),
-              patch("local.aiohttp.ClientSession", return_value=AsyncMock()), patch("local.ModelClient", return_value=client)):
+        with (patch("scripts.local.fetch_snapshot", new=AsyncMock(return_value=exported)),
+              patch("scripts.local.aiohttp.ClientSession", return_value=AsyncMock()), patch("scripts.local.ModelClient", return_value=client)):
             report = await benchmark.run(args, {})
         self.assertEqual(report["result"]["parameters"], {"status": ["needs_action"]})
         self.assertEqual(report["result"]["parameter_extractions"]["status"]["effective_probability_threshold"], 0.3)
@@ -155,9 +155,9 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
                 manager = AsyncMock()
                 manager.__aenter__.return_value = session
                 executor = AsyncMock(return_value=None)
-                with (patch("local.fetch_snapshot", new=AsyncMock(return_value=self.exported())),
-                      patch("local.aiohttp.ClientSession", return_value=manager),
-                      patch("local.ModelClient", return_value=client), patch("local.execute_action", new=executor)):
+                with (patch("scripts.local.fetch_snapshot", new=AsyncMock(return_value=self.exported())),
+                      patch("scripts.local.aiohttp.ClientSession", return_value=manager),
+                      patch("scripts.local.ModelClient", return_value=client), patch("scripts.local.execute_action", new=executor)):
                     report = await benchmark.run(args, {})
                 self.assertEqual(report["mode"], "live" if enabled else "plan_only")
                 self.assertEqual(report["result"]["execution"]["status"], "completed" if enabled else "planned")
@@ -174,11 +174,6 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
                     benchmark.print_report(report)
                 self.assertIn("live; actions enabled" if enabled else "plan only; no device actions", output.getvalue())
 
-    def test_old_cli_is_a_compatibility_entry_point(self):
-        import benchmark as compatibility
-
-        self.assertIs(compatibility.main, benchmark.main)
-
     async def test_live_list_retrieval_displays_actual_items(self):
         from tests.test_actions import ActionExecutionTests
 
@@ -188,10 +183,10 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
         args = benchmark.parser().parse_args(["-q", "Was steht auf der Einkaufsliste?", "--execute"])
         client = ScriptedModels(fixture.todo_choices())
         response = {"todo.shopping": {"items": [{"summary": "Milch", "status": "needs_action"}]}}
-        with (patch("local.fetch_snapshot", new=AsyncMock(return_value=exported)),
-              patch("local.aiohttp.ClientSession", return_value=AsyncMock()),
-              patch("local.ModelClient", return_value=client),
-              patch("local.execute_action", new=AsyncMock(return_value=response)) as execute):
+        with (patch("scripts.local.fetch_snapshot", new=AsyncMock(return_value=exported)),
+              patch("scripts.local.aiohttp.ClientSession", return_value=AsyncMock()),
+              patch("scripts.local.ModelClient", return_value=client),
+              patch("scripts.local.execute_action", new=AsyncMock(return_value=response)) as execute):
             report = await benchmark.run(args, {})
         self.assertEqual(report["result"]["answer"], "Einkaufsliste: Milch.")
         self.assertEqual(report["result"]["execution"]["calls"][0]["result"], response)
@@ -254,9 +249,9 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
         local, addon = ScriptedModels(choices), ScriptedModels(choices)
         args = benchmark.parser().parse_args(["--query", "Is the desk lamp on?", "--language", "en", "--llm-answer"])
         session = AsyncMock()
-        with (patch("local.fetch_snapshot", new=AsyncMock(return_value=self.exported())),
-              patch("local.aiohttp.ClientSession", return_value=session),
-              patch("local.ModelClient", return_value=local)):
+        with (patch("scripts.local.fetch_snapshot", new=AsyncMock(return_value=self.exported())),
+              patch("scripts.local.aiohttp.ClientSession", return_value=session),
+              patch("scripts.local.ModelClient", return_value=local)):
             report = await benchmark.run(args, {})
 
         await AgentEngine(settings(), addon, dry_run=True).process(args.query, "en", SNAPSHOT)
@@ -273,9 +268,9 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
                    {"query_type": "yes_no"}, {"binary_answer": "yes"}]
         local, addon = ScriptedModels(choices), ScriptedModels(choices)
         args = benchmark.parser().parse_args(["--query", "Is the office light on?", "--language", "en", "--llm-answer"])
-        with (patch("local.fetch_snapshot", new=AsyncMock(return_value=self.exported())),
-              patch("local.aiohttp.ClientSession", return_value=AsyncMock()),
-              patch("local.ModelClient", return_value=local)):
+        with (patch("scripts.local.fetch_snapshot", new=AsyncMock(return_value=self.exported())),
+              patch("scripts.local.aiohttp.ClientSession", return_value=AsyncMock()),
+              patch("scripts.local.ModelClient", return_value=local)):
             report = await benchmark.run(args, {})
 
         await AgentEngine(settings(), addon, dry_run=True).process(args.query, "en", SNAPSHOT)
@@ -308,9 +303,9 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
         choices = [{"service": "todo.add_item"}, {"target_scope": "entities"}, {"action_entities": "entity:todo.shopping"},
                    {"text_words": response_for(probabilities)["answers"]["text_words"]}]
         local, addon = ScriptedModels(choices), ScriptedModels(choices)
-        with (patch("local.fetch_snapshot", new=AsyncMock(return_value=exported)),
-              patch("local.aiohttp.ClientSession", return_value=AsyncMock()),
-              patch("local.ModelClient", return_value=local)):
+        with (patch("scripts.local.fetch_snapshot", new=AsyncMock(return_value=exported)),
+              patch("scripts.local.aiohttp.ClientSession", return_value=AsyncMock()),
+              patch("scripts.local.ModelClient", return_value=local)):
             report = await benchmark.run(args, {})
         configured = benchmark.model_settings(exported["settings"], args, {})
         await AgentEngine(configured, addon, dry_run=True).process(query, "de", exported["snapshot"])
@@ -343,9 +338,9 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
             "numeric_score": {"type": "score", "score": 4, "confidence": 0.9,
                               "probabilities": {str(index): 1 if index == 4 else 0 for index in range(9)}},
         }])
-        with (patch("local.fetch_snapshot", new=AsyncMock(return_value=exported)),
-              patch("local.aiohttp.ClientSession", return_value=AsyncMock()),
-              patch("local.ModelClient", return_value=models)):
+        with (patch("scripts.local.fetch_snapshot", new=AsyncMock(return_value=exported)),
+              patch("scripts.local.aiohttp.ClientSession", return_value=AsyncMock()),
+              patch("scripts.local.ModelClient", return_value=models)):
             report = await benchmark.run(args, {"DECIDER_API_KEY": "private-key"})
         self.assertEqual(report["result"]["service"], "light.turn_on")
         self.assertEqual(report["result"]["action_metadata"]["fields"],
@@ -379,9 +374,9 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
         exported = self.exported()
         exported["snapshot"]["entities"].append({**SNAPSHOT["entities"][0], "entity_id": "light.kitchen",
                                                  "name": "Kitchen light", "area_id": "kitchen", "area_name": "Küche"})
-        with (patch("local.fetch_snapshot", new=AsyncMock(return_value=exported)),
-              patch("local.aiohttp.ClientSession", return_value=AsyncMock()),
-              patch("local.ModelClient", return_value=models)):
+        with (patch("scripts.local.fetch_snapshot", new=AsyncMock(return_value=exported)),
+              patch("scripts.local.aiohttp.ClientSession", return_value=AsyncMock()),
+              patch("scripts.local.ModelClient", return_value=models)):
             report = await benchmark.run(args, {})
         self.assertEqual(models.requests[-1][1]["speaker_area"], "Küche")
         self.assertEqual(report["result"]["target_scope"], "implied_area")
@@ -399,9 +394,9 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
         args = benchmark.parser().parse_args(["--query", "Which lights are on?", "--llm-answer"])
         models = ScriptedModels([{"service": "query_state"}, {"area": "all_areas"}, {"domain": "light"},
                                  {"query_type": "complex"}, {"targets": ["light.desk"]}])
-        with (patch("local.fetch_snapshot", new=AsyncMock(return_value=self.exported())),
-              patch("local.aiohttp.ClientSession", return_value=AsyncMock()),
-              patch("local.ModelClient", return_value=models)):
+        with (patch("scripts.local.fetch_snapshot", new=AsyncMock(return_value=self.exported())),
+              patch("scripts.local.aiohttp.ClientSession", return_value=AsyncMock()),
+              patch("scripts.local.ModelClient", return_value=models)):
             report = await benchmark.run(args, {})
         output = io.StringIO()
         with redirect_stdout(output):
@@ -417,9 +412,9 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
     async def test_model_failure_keeps_stage_diagnostics(self):
         args = benchmark.parser().parse_args(["--query", "test"])
         client = SimpleNamespace(decide=AsyncMock(side_effect=ModelError("Model request timed out.")))
-        with (patch("local.fetch_snapshot", new=AsyncMock(return_value=self.exported())),
-              patch("local.aiohttp.ClientSession", return_value=AsyncMock()),
-              patch("local.ModelClient", return_value=client)):
+        with (patch("scripts.local.fetch_snapshot", new=AsyncMock(return_value=self.exported())),
+              patch("scripts.local.aiohttp.ClientSession", return_value=AsyncMock()),
+              patch("scripts.local.ModelClient", return_value=client)):
             report = await benchmark.run(args, {})
         self.assertEqual(report["result"]["error"], "Model request timed out.")
         self.assertTrue(any(event["stage"] == "failure" for event in report["trace"]))

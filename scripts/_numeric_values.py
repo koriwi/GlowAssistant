@@ -1,6 +1,4 @@
-import json
 import math
-
 
 INSTRUCTIONS = (
     "Infer the requested NEW absolute value of the numeric parameter from the user prompt. "

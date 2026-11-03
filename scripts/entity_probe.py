@@ -10,14 +10,18 @@ from time import perf_counter
 import aiohttp
 from dotenv import load_dotenv
 
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from custom_components.glow_assistant.client import ModelClient, ModelError
 from custom_components.glow_assistant.engine import (
     choice_question,
     read_choice,
     target_options,
 )
-from local import confidence, fetch_snapshot, model_settings, print_table
-from local import parser as local_parser
+from scripts import ROOT
+from scripts.local import confidence, fetch_snapshot, model_settings, print_table
+from scripts.local import parser as local_parser
 
 INSTRUCTIONS = (
     "Select the single Home Assistant entity that best matches the user's request. "
@@ -94,7 +98,7 @@ def print_report(report):
 
 
 def main(argv=None):
-    load_dotenv(Path(__file__).with_name(".env"))
+    load_dotenv(ROOT / ".env")
     arguments = parser()
     args = arguments.parse_args(argv)
     if not args.query.strip() or args.repeat < 1:

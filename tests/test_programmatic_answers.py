@@ -5,7 +5,6 @@ import unittest
 from contextlib import redirect_stdout
 from unittest.mock import AsyncMock, patch
 
-import local as benchmark
 from custom_components.glow_assistant.engine import AgentEngine
 from custom_components.glow_assistant.settings import (
     normalize_settings,
@@ -16,6 +15,7 @@ from custom_components.glow_assistant.state_properties import (
     property_options,
     selected_values,
 )
+from scripts import local as benchmark
 from tests.test_integration_engine import SNAPSHOT, ScriptedModels, entity
 
 
@@ -229,8 +229,8 @@ class ProgrammaticAnswerTests(unittest.IsolatedAsyncioTestCase):
         client = ScriptedModels(choices)
         args = benchmark.parser().parse_args(["-q", "Wie warm ist es im Büro?"])
         exported = {"entry_id": "one", "settings": local_settings(True), "snapshot": copy.deepcopy(SNAPSHOT)}
-        with (patch("local.fetch_snapshot", new=AsyncMock(return_value=exported)),
-              patch("local.aiohttp.ClientSession", return_value=AsyncMock()), patch("local.ModelClient", return_value=client)):
+        with (patch("scripts.local.fetch_snapshot", new=AsyncMock(return_value=exported)),
+              patch("scripts.local.aiohttp.ClientSession", return_value=AsyncMock()), patch("scripts.local.ModelClient", return_value=client)):
             report = await benchmark.run(args, {})
         self.assertEqual(report["result"]["answer"], "[Office]: Room temperature: 22 °C.")
         self.assertFalse(client.chat_requests)

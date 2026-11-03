@@ -6,18 +6,16 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from numeric_values import numeric_request
-from prototype import (
+from scripts._decider import (
     DECISIONS_URL,
     MODEL,
-    area_request,
     call_decider,
     decider_api_key,
     decider_model,
     decider_url,
-    decision_request,
-    service_request,
 )
+from scripts._numeric_values import numeric_request
+from scripts.area_filter_probe import filter_request
 
 
 class DeciderConfigTests(unittest.TestCase):
@@ -45,14 +43,11 @@ class DeciderConfigTests(unittest.TestCase):
         }, clear=True):
             self.assertEqual(decider_api_key(), "provider-key")
 
-    def test_model_override_reaches_service_area_target_and_numeric_payloads(self):
-        entity = {"names": "Lamp", "domain": "light"}
+    def test_model_override_reaches_area_filter_and_numeric_probes(self):
         with patch.dict(os.environ, {"DECIDER_MODEL": "local-decider"}, clear=True):
-            _, _, service = service_request("turn on the lamp", {"tools": []}, [entity])
-            _, area = area_request("turn on the lamp", [entity])
-            _, target = decision_request("turn on the lamp", [entity])
-            _, numeric = numeric_request("set brightness to 50", "brightness", 20, 0, 100, 6, "%", model=decider_model())
-            self.assertEqual([payload["model"] for payload in (service, area, target, numeric)], ["local-decider"] * 4)
+            _, area = filter_request("Turn off the lights", "en", None)
+            _, numeric = numeric_request("Set brightness to 50", "brightness", 20, 0, 100, 6, "%", model=decider_model())
+            self.assertEqual([area["model"], numeric["model"]], ["local-decider"] * 2)
 
     def test_invalid_url_is_reported(self):
         for url in ("localhost:8321", "file:///tmp/model", "https://"):

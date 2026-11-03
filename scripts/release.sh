@@ -7,7 +7,7 @@ if [[ $# -ne 1 || -z ${1:-} ]]; then
 fi
 
 release_tag=$1
-cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 
 if ! command -v gh >/dev/null; then
     printf 'Install the GitHub CLI (gh) first.\n' >&2

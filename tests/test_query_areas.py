@@ -3,10 +3,10 @@ import unittest
 from contextlib import redirect_stdout
 from unittest.mock import AsyncMock
 
-import local
 from custom_components.glow_assistant.client import ModelError
 from custom_components.glow_assistant.engine import AgentEngine
 from custom_components.glow_assistant.settings import normalize_settings
+from scripts import local
 from tests.test_integration_engine import ScriptedModels, entity
 
 

@@ -1,42 +1,42 @@
 # Numeric extraction experiment
 
-Run `numeric_probe.py` to test a decider on numeric settings independently of the conversation agent. It makes one request to the configured decider server and never connects to HA or executes a tool. Numeric request/scaling logic is shared with the main agent through `numeric_values.py`; probe flags and debugging output stay in this command.
+Run `numeric_probe.py` to test a decider on numeric settings independently of the conversation agent. It makes one request to the configured decider server and never connects to HA or executes a tool. The probe uses `scripts/_numeric_values.py`. The HA engine uses its own numeric extractor. Probe flags and output stay isolated.
 
 ## Commands
 
 Absolute brightness:
 
 ```bash
-python numeric_probe.py "Set brightness to 55%" --expected 55
+python scripts/numeric_probe.py "Set brightness to 55%" --expected 55
 ```
 
 Relative brightness:
 
 ```bash
-python numeric_probe.py "Increase brightness by 15 percentage points" --current 40 --expected 55
+python scripts/numeric_probe.py "Increase brightness by 15 percentage points" --current 40 --expected 55
 ```
 
 Vague increase with an explicit default step:
 
 ```bash
-python numeric_probe.py "Increase brightness" --current 40 --default-step 10 --expected 50
+python scripts/numeric_probe.py "Increase brightness" --current 40 --default-step 10 --expected 50
 ```
 
 Temperature:
 
 ```bash
-python numeric_probe.py "Make it 1.5 degrees warmer" --parameter temperature --unit °C --current 21 --min 15 --max 30 --levels 7 --expected 22.5
+python scripts/numeric_probe.py "Make it 1.5 degrees warmer" --parameter temperature --unit °C --current 21 --min 15 --max 30 --levels 7 --expected 22.5
 ```
 
 Vague room-temperature increase, using the prompt's 0.5 °C default:
 
 ```bash
-python numeric_probe.py "Increase room temperature" --parameter temperature --unit °C --current 21.5 --min 18 --max 26 --levels 9 --expected 22
+python scripts/numeric_probe.py "Increase room temperature" --parameter temperature --unit °C --current 21.5 --min 18 --max 26 --levels 9 --expected 22
 ```
 
 The prompt includes increase/decrease examples from 21.5 °C to 22.0/21.0 °C, plus explicit relative and absolute requests. `--default-step` overrides the vague-request default. These examples guide the model; they do not clamp or rewrite its output. Anchor spacing still limits resolution, especially for Choice.
 
-Use your existing environment and `.env` decider settings (`DECIDER_URL`, `DECIDER_MODEL`, optional `DECIDER_API_KEY`), as described in [README.md](README.md#decider-server). The existing OpenRouter key still works for the default endpoint; unauthenticated local servers need no key. Supply the current value, range, and default step in the same units. The probe does not convert raw HA values. Omit `--current` for absolute requests; relative requests need it to determine a new value.
+Use your existing environment and `.env` decider settings (`DECIDER_URL`, `DECIDER_MODEL`, optional `DECIDER_API_KEY`), as described in [model settings](../README.md#configure-the-models). The existing OpenRouter key still works for the default endpoint; unauthenticated local servers need no key. Supply the current value, range, and default step in the same units. The probe does not convert raw HA values. Omit `--current` for absolute requests; relative requests need it to determine a new value.
 
 ## What it compares
 
@@ -62,10 +62,10 @@ Vague Celsius room-temperature requests use a prompted 0.5-degree adjustment whe
 Add `--json` to see the full request, raw response, probabilities per anchor, decoded values, confidence, usage/cost, and latency:
 
 ```bash
-python numeric_probe.py "Set brightness to 55%" --expected 55 --json
+python scripts/numeric_probe.py "Set brightness to 55%" --expected 55 --json
 ```
 
-`--expected` is only used locally for absolute-error reporting. It is never sent to Jev. Use `--instructions "..."` to replace the wording for this probe run. Default numeric instructions live in `numeric_values.py` and are also used by the main agent.
+`--expected` is only used locally for absolute-error reporting. It is never sent to Jev. Use `--instructions "..."` to replace the wording for this probe run. Default probe instructions live in `scripts/_numeric_values.py`.
 
 Offline checks:
 

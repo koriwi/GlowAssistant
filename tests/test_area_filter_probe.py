@@ -7,7 +7,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from area_filter_probe import CASES, SOURCE_AREA, matrix_cases, probe, run
+from scripts.area_filter_probe import CASES, SOURCE_AREA, matrix_cases, probe, run
 
 
 def answer(payload, choice, confidence=0.9):
@@ -40,7 +40,7 @@ class AreaFilterProbeTests(unittest.IsolatedAsyncioTestCase):
             "source_area": SOURCE_AREA, "expected": expected,
         }
         decider = AsyncMock(side_effect=lambda payload, key: answer(payload, selected, score))
-        with patch("area_filter_probe.call_decider", decider):
+        with patch("scripts.area_filter_probe.call_decider", decider):
             result = await probe(case, confidence)
         decider.assert_awaited_once()
         return result, decider
@@ -55,7 +55,7 @@ class AreaFilterProbeTests(unittest.IsolatedAsyncioTestCase):
     async def test_unknown_location_is_null_and_query_is_unchanged_for_each_language(self):
         cases = list(matrix_cases())[:4]
         decider = AsyncMock(side_effect=lambda payload, key: answer(payload, "filter_by_area"))
-        with patch("area_filter_probe.call_decider", decider):
+        with patch("scripts.area_filter_probe.call_decider", decider):
             for case in cases:
                 await probe(case)
         for case, call in zip(cases, decider.await_args_list, strict=True):
@@ -84,12 +84,12 @@ class AreaFilterProbeTests(unittest.IsolatedAsyncioTestCase):
         ])
         output = io.StringIO()
         with (
-            patch("area_filter_probe.matrix_cases", return_value=iter(cases)),
-            patch("area_filter_probe.call_decider", decider),
-            patch("area_filter_probe.load_dotenv"),
-            patch("area_filter_probe.decider_api_key", return_value=None),
-            patch("prototype.inspect_mcp", new=AsyncMock()) as inspector,
-            patch("prototype.execute_mcp", new=AsyncMock()) as executor,
+            patch("scripts.area_filter_probe.matrix_cases", return_value=iter(cases)),
+            patch("scripts.area_filter_probe.call_decider", decider),
+            patch("scripts.area_filter_probe.load_dotenv"),
+            patch("scripts.area_filter_probe.decider_api_key", return_value=None),
+            patch("scripts.local.fetch_snapshot", new=AsyncMock()) as inspector,
+            patch("scripts.local.execute_action", new=AsyncMock()) as executor,
             redirect_stdout(output),
         ):
             self.assertEqual(await run(["--json", "--output-dir", str(self.output_dir)]), 1)
@@ -107,10 +107,10 @@ class AreaFilterProbeTests(unittest.IsolatedAsyncioTestCase):
         decider = AsyncMock(side_effect=lambda payload, key: answer(payload, "filter_by_area"))
         output = io.StringIO()
         with (
-            patch("area_filter_probe.matrix_cases", return_value=iter(cases)),
-            patch("area_filter_probe.call_decider", decider),
-            patch("area_filter_probe.load_dotenv"),
-            patch("area_filter_probe.decider_api_key", return_value=None),
+            patch("scripts.area_filter_probe.matrix_cases", return_value=iter(cases)),
+            patch("scripts.area_filter_probe.call_decider", decider),
+            patch("scripts.area_filter_probe.load_dotenv"),
+            patch("scripts.area_filter_probe.decider_api_key", return_value=None),
             redirect_stdout(output),
         ):
             self.assertEqual(await run(["--output-dir", str(self.output_dir)]), 0)
@@ -125,12 +125,12 @@ class AreaFilterProbeTests(unittest.IsolatedAsyncioTestCase):
         prompt_file.write_text(instructions, encoding="utf-8")
         decider = AsyncMock(side_effect=lambda payload, key: answer(payload, "filter_by_area", 0.1))
         with (
-            patch("area_filter_probe.matrix_cases", side_effect=lambda: iter([case])),
-            patch("area_filter_probe.call_decider", decider),
-            patch("area_filter_probe.load_dotenv"),
-            patch("area_filter_probe.decider_api_key", return_value="secret-key"),
-            patch("area_filter_probe.decider_model", return_value="local-model"),
-            patch("area_filter_probe.decider_url", return_value="http://user:password@localhost:8321/v1/systemone?key=private"),
+            patch("scripts.area_filter_probe.matrix_cases", side_effect=lambda: iter([case])),
+            patch("scripts.area_filter_probe.call_decider", decider),
+            patch("scripts.area_filter_probe.load_dotenv"),
+            patch("scripts.area_filter_probe.decider_api_key", return_value="secret-key"),
+            patch("scripts.area_filter_probe.decider_model", return_value="local-model"),
+            patch("scripts.area_filter_probe.decider_url", return_value="http://user:password@localhost:8321/v1/systemone?key=private"),
             redirect_stdout(io.StringIO()),
         ):
             for _ in range(2):
@@ -162,7 +162,7 @@ class AreaFilterProbeTests(unittest.IsolatedAsyncioTestCase):
                          json.loads(files[1].read_text())["suite_sha256"])
 
     async def test_malformed_response_counts_as_failed_case(self):
-        with patch("area_filter_probe.call_decider", new=AsyncMock(return_value={"answers": {}})):
+        with patch("scripts.area_filter_probe.call_decider", new=AsyncMock(return_value={"answers": {}})):
             result = await probe(next(matrix_cases()))
         self.assertFalse(result["passed"])
         self.assertIsNone(result["selected"])
