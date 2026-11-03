@@ -8,7 +8,7 @@ STAGE_LABELS = {
     "service": "Choose an action",
     "optional_parameters": "Choose optional action parameters",
     "parameter_capabilities": "Filter action fields by target capabilities",
-    "area": "Choose a room",
+    "area": "Select query areas",
     "domain": "Choose a state-query domain",
     "query_type": "Choose a yes/no or detailed answer",
     "binary_answer": "Answer the yes/no state question",
@@ -123,6 +123,7 @@ def decision_details(questions, answers, config):
         confidence = answer.get("confidence")
         confidence = confidence if finite_number(confidence) else None
         probability_fields = {
+            "area": "area_confidence",
             "optional_parameters": "parameter_probability_threshold",
             "action_areas": "action_area_probability_threshold",
             "action_entities": "action_entity_probability_threshold",

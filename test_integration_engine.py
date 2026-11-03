@@ -664,7 +664,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
     async def test_unsure_at_each_stage_bypasses_chat_and_execution(self):
         cases = [
             ([{"service": "unsure"}], "service"),
-            ([{"service": "query_state"}, {"area": "unsure"}], "area"),
+            ([{"service": "query_state"}, {"area": "none"}], "area"),
             ([{"service": "query_state"}, {"area": "all_areas"}, {"domain": "light"},
               {"query_type": "complex"}, {"targets": []}], "target"),
         ]
@@ -808,7 +808,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("all_areas", area_question["criteria"])
         self.assertNotIn("no_area", area_question["criteria"])
         self.assertIn("Custom area rules", area_question["instructions"])
-        self.assertIn("choose all_areas", area_question["instructions"])
+        self.assertEqual(area_question["instructions"], "Custom area rules")
         self.assertEqual(models.requests[4][2]["query_targets"]["instructions"], settings["decider"]["query_target_prompt"])
         self.assertIn("binary_sensor.unassigned_window", targets)
         self.assertNotIn("light.desk", targets)
@@ -1099,11 +1099,18 @@ class IntegrationSettingsTests(unittest.TestCase):
         self.assertEqual(custom["decider"]["target_scope_prompt"], "Custom scope rules")
 
     def test_domain_selection_settings_are_preserved_and_blank_prompt_restores_default(self):
+        from custom_components.glow_assistant.const import (
+            AREA_PROMPT,
+            LEGACY_QUERY_AREA_PROMPT,
+        )
+
         settings = normalize_settings({"decider": {"domain_prompt": "Custom rules", "domain_confidence": 0.2}})
         self.assertEqual(settings["decider"]["domain_prompt"], "Custom rules")
         self.assertEqual(settings["decider"]["domain_confidence"], 0.2)
         reset = normalize_settings({"decider": {"domain_prompt": " "}})
         self.assertEqual(reset["decider"]["domain_prompt"], DEFAULTS["decider"]["domain_prompt"])
+        self.assertEqual(normalize_settings({"decider": {"area_prompt": LEGACY_QUERY_AREA_PROMPT}})["decider"]["area_prompt"], AREA_PROMPT)
+        self.assertEqual(normalize_settings({"decider": {"area_prompt": "Custom area rules"}})["decider"]["area_prompt"], "Custom area rules")
 
 
     def test_domain_selection_migrates_the_previous_threshold_but_not_keep_drop_prompts(self):

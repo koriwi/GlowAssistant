@@ -26,7 +26,7 @@ from custom_components.glow_assistant.settings import (
 
 LOG_DIRECTORY = Path(__file__).parent / "runs"
 
-CONFIDENCE_FIELDS = tuple(key for key in DEFAULTS["decider"] if key.endswith("_confidence"))
+CONFIDENCE_FIELDS = tuple(key for key in DEFAULTS["decider"] if key.endswith("_confidence") and key != "area_confidence")
 
 
 def confidence(value):
@@ -49,6 +49,8 @@ def parser():
     result.add_argument("--action-entity-threshold", type=confidence, help="Relative probability threshold for action entities.")
     result.add_argument("--query-target-threshold", type=confidence,
                         help="Relative probability threshold for state-query entities; independent of --confidence.")
+    result.add_argument("--query-area-threshold", "--area-confidence", type=confidence,
+                        help="Relative probability threshold for state-query areas; --area-confidence is a legacy alias. Default 0.8.")
     result.add_argument("--text-threshold", type=confidence, help="Relative probability threshold for item/message words.")
     result.add_argument("--select-threshold", type=confidence, help="Relative probability threshold for multi-value select extraction; default 0.3.")
     for field in CONFIDENCE_FIELDS:
@@ -87,6 +89,8 @@ def model_settings(exported, args, env, record=None):
         decider["parameter_probability_threshold"] = args.parameter_threshold
     if args.query_target_threshold is not None:
         decider["query_target_probability_threshold"] = args.query_target_threshold
+    if args.query_area_threshold is not None:
+        decider["area_confidence"] = args.query_area_threshold
     if args.text_threshold is not None:
         decider["text_probability_threshold"] = args.text_threshold
     if args.select_threshold is not None:
@@ -265,6 +269,12 @@ def print_report(report, show_answer_input=False):
         summary.append(("answer mode", result["answer_source"]))
     if "state_property" in result:
         summary.append(("state property", result["state_property"]))
+    if "area_selection" in result:
+        names = result["area_selection"]["selected_names"]
+        scope = "all_areas" if result["all_areas"] else (", ".join(names[:5]) or "none")
+        if len(names) > 5:
+            scope += f" (+{len(names) - 5} more)"
+        summary.append(("area filter", scope))
     if "action_metadata" in result:
         summary.append(("speaker area", result.get("speaker_area") or "unknown"))
         scopes = {"entities": "Specific arealess entities",
@@ -333,9 +343,10 @@ def print_report(report, show_answer_input=False):
                       else f"{output['parameter']}={output['value']}")
         if event["stage"] == "optional_parameters" and "selected_parameters" in output:
             detail = "selected: " + (", ".join(output["selected_parameters"]) or "none")
-        if event["stage"] in ("action_areas", "action_entities") and "selected_names" in output:
+        if event["stage"] in ("area", "action_areas", "action_entities") and "selected_names" in output:
             names = output["selected_names"]
-            detail = "selected: " + (", ".join(names[:5]) or "none") + (f" (+{len(names) - 5} more)" if len(names) > 5 else "")
+            detail = ("all_areas" if output.get("all_areas") else
+                      "selected: " + (", ".join(names[:5]) or "none") + (f" (+{len(names) - 5} more)" if len(names) > 5 else ""))
         if event["stage"] == "target" and "selected_entity_ids" in output:
             detail = f"selected {output['entities_after']}/{output['entities_before']} (one Choice)"
         if event["stage"] == "parameter_capabilities" and "fields_after" in output:

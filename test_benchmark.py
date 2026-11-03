@@ -23,6 +23,18 @@ def settings():
 
 
 class BenchmarkSettingsTests(unittest.TestCase):
+    def test_query_area_threshold_reuses_the_saved_setting_and_ignores_global_confidence(self):
+        exported = settings()
+        exported["decider"]["area_confidence"] = 0.25
+        args = benchmark.parser().parse_args(["-q", "test", "--confidence", "0.95"])
+        config = benchmark.model_settings(exported, args, {})["decider"]
+        self.assertEqual(config["area_confidence"], 0.25)
+        self.assertEqual(config["service_confidence"], 0.95)
+        for flag in ("--query-area-threshold", "--area-confidence"):
+            with self.subTest(flag=flag):
+                args = benchmark.parser().parse_args(["-q", "test", "--confidence", "0.95", flag, "0.6"])
+                self.assertEqual(benchmark.model_settings(exported, args, {})["decider"]["area_confidence"], 0.6)
+
     def test_select_extraction_settings_are_independent_of_parameter_detection(self):
         args = benchmark.parser().parse_args(["-q", "test", "--parameter-threshold", "0.5", "--select-threshold", "0.6",
                                              "--confidence", "0.1", "--select-confidence", "0.8"])
@@ -46,7 +58,8 @@ class BenchmarkSettingsTests(unittest.TestCase):
         self.assertEqual(result["decider"]["query_target_prompt"], "Custom rules from HA")
         for field in benchmark.CONFIDENCE_FIELDS:
             self.assertEqual(result["decider"][field], 0.7 if field == "area_confidence" else 0.3)
-        self.assertEqual(exported["decider"]["area_confidence"], 0)
+        self.assertEqual(result["decider"]["area_confidence"], 0.7)
+        self.assertEqual(exported["decider"]["area_confidence"], 0.8)
 
     def test_legacy_openrouter_key_is_only_used_for_openrouter_decider(self):
         args = benchmark.parser().parse_args(["--query", "test"])

@@ -129,6 +129,15 @@ class ChatLogTraceTests(unittest.TestCase):
         self.assertEqual(self.messages[0].tool_calls[0].tool_name, "glow_assistant_select_target_scope")
         self.assertEqual(self.messages[1].tool_result, result)
 
+    def test_query_area_card_shows_selected_rooms_and_effective_scope(self):
+        result = {"selected_names": ["Küche", "Büro"], "effective_choices": ["area:kitchen", "area:office"],
+                  "selected_choices": ["area:kitchen", "area:office", "all_areas"], "all_areas": False,
+                  "probability_threshold": 0.8, "effective_probability_threshold": 0.16}
+        self.trace("area", {"candidate_counts": {"area": 6}})
+        self.trace("area", {}, result)
+        self.assertEqual(self.messages[0].tool_calls[0].tool_name, "glow_assistant_select_query_areas")
+        self.assertEqual(self.messages[1].tool_result, result)
+
     def test_select_extraction_has_a_native_card_with_values_and_scores(self):
         result = {"value": ["needs_action"], "parameter": "status", "effective_probability_threshold": 0.15,
                   "probabilities": {"value:needs_action": 0.9, "value:completed": 0.05, "none": 0.05}}

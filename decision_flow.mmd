@@ -8,9 +8,12 @@ flowchart TD
     Enabled -->|Yes| General["General model + optional HTTP MCP tools"]
     General --> Reply["Assistant reply"]
 
-    Service -->|query_state| QueryArea{"Decider: area"}
-    QueryArea -->|Specific room| Room["Filter entities by room"]
-    QueryArea -->|"all_areas: no room specified or whole home"| Domains["Decider: choose one domain"]
+    Service -->|query_state| QueryArea["Decider: one Choice over areas + all_areas + none; relative cutoff"]
+    QueryArea --> QueryScope{"Retained query scope?"}
+    QueryScope -->|Named areas take priority| Room["Filter entities to the union of selected areas"]
+    QueryScope -->|Only all_areas| WholeHome["Keep all exposed entities, including entities without a room"]
+    QueryScope -->|No retained scope| Unsure
+    WholeHome --> Domains["Decider: choose one domain"]
     Room --> Domains
     Domains --> DomainEntities["Filter entities by selected domain"]
     DomainEntities --> QueryType{"Decider: yes/no question?"}

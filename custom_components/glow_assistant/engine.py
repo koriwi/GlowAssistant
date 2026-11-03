@@ -300,28 +300,8 @@ class AgentEngine:
             return
 
         result["service"] = QUERY
-        areas = {f"area:{key}": value for key, value in areas_from(entities).items()}
-        areas["all_areas"] = "All areas: the whole home, including exposed entities without a room assignment."
-        area_prompt = config["area_prompt"].replace("Choose no_area when no room is identified. ", "")
-        area_prompt += (
-            " For state queries, choose all_areas when no specific room is identified or the whole home is requested. "
-            "Examples: 'is the lamp Aurora on?', 'are there any windows open in the house?' and "
-            "'sind irgendwo im Haus Fenster offen?'. Choose a specific room only when identified by the request or history. "
-            "all_areas means search across all rooms, including entities without a room assignment; "
-            "it does not mean every entity is requested. Any no_area guidance applies to all_areas for state queries; "
-            "no_area is not an available choice. The whole home is one supported scope, not ambiguous multiple areas."
-        )
-        response = await self._decide(result, "area", {"prompt": prompt}, {
-            "area": choice_question(areas, area_prompt),
-        })
-        area = self._choice(response, "area", areas)
-        candidates = [entity for entity in entities
-                      if area == "all_areas" or entity.get("area_id") == area.removeprefix("area:")]
-        if not candidates:
-            raise Uncertain("target", "No exposed devices match the selected room filter.",
-                            "Check the device's room, Assist exposure settings, and GlowAssistant exclusions.",
-                            area=areas[area])
-        candidates = await self._select_domain(result, candidates, areas[area])
+        candidates, area = await self._select_query_areas(result, entities)
+        candidates = await self._select_domain(result, candidates, area)
         query_types = {"yes_no": "A yes/no question about current states.",
                        "complex": "A question requesting values, names, counts or other details."}
         response = await self._decide(result, "query_type", {"prompt": prompt}, {
@@ -329,9 +309,9 @@ class AgentEngine:
         })
         result["query_type"] = self._choice(response, "query_type", query_types)
         if result["query_type"] == "yes_no":
-            await self._answer_yes_no(result, candidates, areas[area], language_instruction)
+            await self._answer_yes_no(result, candidates, area, language_instruction)
             return
-        target_state = {"prompt": prompt, "service": QUERY, "domain": result["domain"], "area": areas[area]}
+        target_state = {"prompt": prompt, "service": QUERY, "domain": result["domain"], "area": area}
         members = await self._select_targets(result, candidates, target_state)
         result["state_info"] = [
             {"entity_id": entity["entity_id"], "domain": entity["domain"], "area": entity.get("area_name"),
@@ -349,7 +329,7 @@ class AgentEngine:
             self._programmatic_answer(result, format_values(result["state_values"], result["language"]))
             return
         facts = {key: value for key, value in result.items()
-                 if key not in ("decisions", "usage", "timings_ms", "failures", "domain_filter", "target_selection",
+                 if key not in ("decisions", "usage", "timings_ms", "failures", "domain_filter", "target_selection", "area_selection",
                                 "target", "state_info")}
         facts["entities"] = result["state_info"]
         if self.dry_run:
@@ -358,6 +338,43 @@ class AgentEngine:
             {"role": "system", "content": f"{self.settings['answer']['prompt']}\n{language_instruction}"},
             {"role": "user", "content": json.dumps(facts, ensure_ascii=False, default=str)},
         ])
+
+    async def _select_query_areas(self, result, entities):
+        config = self.settings["decider"]
+        areas = {f"area:{key}": {"area_id": key, **value} for key, value in areas_from(entities).items()}
+        options = {**areas, "all_areas": "The whole home or no specific room; include exposed entities without a room."}
+
+        def summarize(response):
+            selection = decode_selection(response, "area", options, config["area_confidence"])
+            selected = [key for key in selection["selected_choices"] if key in areas]
+            whole_home = not selected and "all_areas" in selection["selected_choices"]
+            area_ids = {areas[key]["area_id"] for key in selected}
+            candidates = [entity for entity in entities if whole_home or entity.get("area_id") in area_ids]
+            result["selected_areas"] = [areas[key] for key in selected]
+            result["all_areas"] = whole_home
+            result["area_selection"] = {
+                **selection, "effective_choices": selected or (["all_areas"] if whole_home else []),
+                "selected_area_ids": [areas[key]["area_id"] for key in selected],
+                "selected_names": [areas[key]["name"] for key in selected], "all_areas": whole_home,
+                "scope_policy": "named areas take priority over all_areas",
+                "entities_before": len(entities), "entities_after": len(candidates),
+            }
+            return result["area_selection"]
+
+        await self._decide(result, "area", {"prompt": result["request"]}, {
+            "area": selection_question(options, config["area_prompt"]),
+        }, summarize=summarize)
+        selection = result["area_selection"]
+        if not selection["effective_choices"]:
+            raise Uncertain("area", "No matching areas were retained for this state query.",
+                            "Name the requested rooms. Review the area probabilities and query-area threshold.")
+        selected_ids = set(selection["selected_area_ids"])
+        candidates = [entity for entity in entities if result["all_areas"] or entity.get("area_id") in selected_ids]
+        area = {"type": "all_areas"} if result["all_areas"] else {"type": "areas", "areas": result["selected_areas"]}
+        if not candidates:
+            raise Uncertain("target", "No exposed devices match the selected room filter.",
+                            "Check the devices' rooms, Assist exposure settings and GlowAssistant exclusions.", area=area)
+        return candidates, area
 
     async def _execute_action(self, result, members):
         self.stage = "execution"
