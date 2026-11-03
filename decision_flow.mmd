@@ -2,7 +2,7 @@ flowchart TD
     Input["User request"] --> Snapshot["Read exposed entities, states and available actions"]
     Snapshot --> Service{"Decider: service / route"}
 
-    Service -->|unsure| Unsure["Unsure reply"]
+    Service -->|Below service confidence gate| Unsure["Unsure reply"]
     Service -->|general| Enabled{"General model enabled?"}
     Enabled -->|No| Unsure
     Enabled -->|Yes| General["General model + optional HTTP MCP tools"]

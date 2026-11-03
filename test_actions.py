@@ -203,9 +203,10 @@ class ActionExecutionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_queries_and_failed_selections_never_execute(self):
         for choices in ([{"service": "query_state"}, {"area": "area:office"}, {"domain": "light"},
-                         {"query_type": "yes_no"}, {"binary_answer": "yes"}], [{"service": "unsure"}]):
+                         {"query_type": "yes_no"}, {"binary_answer": "yes"}], [{"service": "light.turn_off"}]):
             execute = AsyncMock()
-            result = await AgentEngine(normalize_settings({}), ScriptedModels(choices), execute=execute).process("test", "en", SNAPSHOT)
+            client = ScriptedModels(choices, confidence=0.9 if len(choices) > 1 else 0.1)
+            result = await AgentEngine(normalize_settings({}), client, execute=execute).process("test", "en", SNAPSHOT)
             execute.assert_not_awaited()
             self.assertNotIn("execution", result)
 

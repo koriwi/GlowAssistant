@@ -43,6 +43,8 @@ def parser():
     result.add_argument("--execute", action="store_true", help="Execute selected HA actions and allow general-model MCP calls; default is dry-run.")
     result.add_argument("--log-runs", action="store_true", help="Save each run to runs/successful or runs/unsuccessful; disabled by default.")
     result.add_argument("--llm-answer", action="store_true", help="Generate smart-home replies with the answer LLM; disabled by default.")
+    result.add_argument("--max-attribute-chars", type=int,
+                        help="Omit entity attributes larger than this many characters from query model context; default 1024 or saved HA setting.")
     result.add_argument("--confidence", type=confidence, help="Override every decider confidence threshold.")
     result.add_argument("--parameter-threshold", type=confidence,
                         help="Relative probability threshold for optional parameters; independent of --confidence.")
@@ -82,6 +84,8 @@ def model_settings(exported, args, env, record=None):
     settings["answer"]["enable"] = args.llm_answer
     settings["log_runs"] = args.log_runs
     decider = settings["decider"]
+    if args.max_attribute_chars is not None:
+        decider["max_attribute_chars"] = args.max_attribute_chars
     if not decider["api_key"] and urlsplit(decider["url"]).hostname == "openrouter.ai":
         decider["api_key"] = env.get("OPENROUTER_API_KEY", "").strip()
     for field in CONFIDENCE_FIELDS:

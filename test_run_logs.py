@@ -179,7 +179,7 @@ class RunLogTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(Path(failed["log_file"]).parent.name, "unsuccessful")
             self.assertIn("Snapshot access denied", failed["result"]["error"])
             self.assertIn("traceback", failed["exception"])
-            client = ScriptedModels([{"service": "unsure"}])
+            client = ScriptedModels([{"service": "light.turn_off"}], confidence=0.1)
             with (patch("local.LOG_DIRECTORY", Path(directory)),
                   patch("local.fetch_snapshot", new=AsyncMock(return_value={"entry_id": "one", "settings": settings(), "snapshot": SNAPSHOT})),
                   patch("local.aiohttp.ClientSession", return_value=AsyncMock()), patch("local.ModelClient", return_value=client)):

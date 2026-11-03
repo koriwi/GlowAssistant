@@ -44,20 +44,20 @@ class Uncertain(Exception):
         self.details = failure_details(stage, reason, suggestion, status="stopped", **details)
 
 
-def choice_question(options, instructions):
+def choice_question(options, instructions, *, allow_unsure=True):
     return {
         "type": "choice", "instructions": instructions,
         "criteria": {
             **{key: json.dumps(value, ensure_ascii=False) for key, value in options.items()},
-            UNSURE: "Unclear, unsupported, or no single matching choice.",
+            **({UNSURE: "Unclear, unsupported, or no single matching choice."} if allow_unsure else {}),
         },
     }
 
 
-def read_choice(response, question, options, threshold):
+def read_choice(response, question, options, threshold, *, allow_unsure=True):
     try:
         answer = response["answers"][question]
-        labels = set(options) | {UNSURE}
+        labels = set(options) | ({UNSURE} if allow_unsure else set())
         probabilities = answer["probabilities"]
         if (
             answer["type"] != "choice" or answer["choice"] not in labels
@@ -117,6 +117,16 @@ def target_options(entities):
             "unit": attributes.get("unit_of_measurement"),
         }
     return options
+
+
+def filter_entity_attributes(entities, max_chars):
+    return [
+        {**entity, "attributes": {
+            name: value for name, value in entity.get("attributes", {}).items()
+            if len(value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)) <= max_chars
+        }}
+        for entity in entities
+    ]
 
 
 class AgentEngine:
@@ -185,7 +195,7 @@ class AgentEngine:
     def _choice(self, response, question, options):
         self.stage = question
         threshold = self.settings["decider"][f"{question}_confidence"]
-        choice = read_choice(response, question, options, threshold)
+        choice = read_choice(response, question, options, threshold, allow_unsure=question != "service")
         if choice == UNSURE:
             confidence = response["answers"][question]["confidence"]
             reason = (f"The model's confidence ({confidence:.0%}) is below the configured minimum ({threshold:.0%})."
@@ -233,7 +243,7 @@ class AgentEngine:
             GENERAL: "General knowledge or conversation unrelated to the home.",
         }
         def summarize_action(response):
-            selected = read_choice(response, "service", services, config["service_confidence"])
+            selected = read_choice(response, "service", services, config["service_confidence"], allow_unsure=False)
             if selected not in actions:
                 return {}
             service = actions[selected]["service"]
@@ -242,7 +252,7 @@ class AgentEngine:
             return {"action_metadata": metadata}
 
         response = await self._decide(result, "service", {"prompt": prompt}, {
-            "service": choice_question(services, config["service_prompt"]),
+            "service": choice_question(services, config["service_prompt"], allow_unsure=False),
         }, summarize=summarize_action)
         service_choice = self._choice(response, "service", services)
         if service_choice == GENERAL:
@@ -300,6 +310,7 @@ class AgentEngine:
             return
 
         result["service"] = QUERY
+        entities = filter_entity_attributes(entities, config["max_attribute_chars"])
         try:
             await self._query_state(result, entities, language_instruction)
         except Uncertain as error:

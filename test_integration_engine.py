@@ -666,21 +666,18 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_unsure_at_each_stage_bypasses_chat_and_execution(self):
         cases = [
-            ([{"service": "unsure"}], "service"),
             ([{"service": "query_state"}, {"area": "none"}], "area"),
             ([{"service": "query_state"}, {"area": "all_areas"}, {"domain": "light"},
               {"query_type": "complex"}, {"targets": []}], "target"),
         ]
         for choices, expected_stage in cases:
             with self.subTest(stage=expected_stage):
-                if expected_stage != "service":
-                    choices.append({"query_fallback": "none"})
+                choices.append({"query_fallback": "none"})
                 result, models = await self.run_agent(choices)
                 self.assertEqual(result["route"], "unsure")
                 self.assertEqual(result["answer"], DEFAULTS["unsure_reply"])
-                self.assertEqual(result["failures"][0]["stage"], "service" if expected_stage == "service" else "query_fallback")
-                if expected_stage != "service":
-                    self.assertEqual(result["query_fallback"]["trigger"]["stage"], expected_stage)
+                self.assertEqual(result["failures"][0]["stage"], "query_fallback")
+                self.assertEqual(result["query_fallback"]["trigger"]["stage"], expected_stage)
                 self.assertNotIn("action_metadata", result)
                 self.assertFalse(models.chat_requests)
 
@@ -710,6 +707,18 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         result, models = await self.run_agent([{"service": "light.turn_off"}], settings=settings)
         self.assertEqual(result["route"], "unsure")
         self.assertEqual(len(models.requests), 1)
+        self.assertNotIn("unsure", models.requests[0][2]["service"]["criteria"])
+
+    async def test_service_unsure_response_is_invalid_and_never_executes(self):
+        models = ScriptedModels([{"service": "unsure"}])
+        execute = AsyncMock()
+        engine = AgentEngine(normalize_settings({}), models, execute=execute)
+        with self.assertRaises(ModelError):
+            await engine.process("test", "en", SNAPSHOT)
+        criteria = models.requests[0][2]["service"]["criteria"]
+        self.assertEqual(set(criteria), set(action_options(SNAPSHOT["services"])) | {"query_state", "not-smarthome-related"})
+        self.assertNotIn("query_fallback", engine.result)
+        execute.assert_not_awaited()
 
 
     async def test_room_query_selects_one_available_domain_before_entity_choice(self):
@@ -1184,6 +1193,7 @@ class IntegrationSettingsTests(unittest.TestCase):
             LEGACY_RESPONSE_SERVICE_PROMPT,
             LEGACY_SELECT_SERVICE_PROMPT,
             LEGACY_SERVICE_PROMPT,
+            LEGACY_TIMESTAMP_SERVICE_PROMPT,
             SERVICE_PROMPT,
         )
 
@@ -1197,6 +1207,9 @@ class IntegrationSettingsTests(unittest.TestCase):
         saved = normalize_settings({"decider": {"service_prompt": LEGACY_RESPONSE_SERVICE_PROMPT}})
         self.assertEqual(saved["decider"]["service_prompt"], SERVICE_PROMPT)
         self.assertIn("fixed-option select", saved["decider"]["service_prompt"])
+        saved = normalize_settings({"decider": {"service_prompt": LEGACY_TIMESTAMP_SERVICE_PROMPT}})
+        self.assertEqual(saved["decider"]["service_prompt"], SERVICE_PROMPT)
+        self.assertNotIn("unsure", SERVICE_PROMPT)
         saved = normalize_settings({"decider": {"service_prompt": LEGACY_SELECT_SERVICE_PROMPT}})
         self.assertEqual(saved["decider"]["service_prompt"], SERVICE_PROMPT)
         custom = normalize_settings({"decider": {"service_prompt": "Custom action rules", "text_prompt": "Custom extraction rules"}})

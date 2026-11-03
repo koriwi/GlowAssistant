@@ -15,6 +15,8 @@ HA_TOKEN=your-administrator-token
 GLOW_ENTRY_ID=
 ```
 
+Use `--max-attribute-chars 1024` to omit oversized entity attributes from state-query model context. The HA setting is **Decider → Maximum entity attribute characters**, default **1024**. Strings use character count; other values use JSON character count. Values exactly at the limit remain; larger attributes are omitted entirely. Both the query decider and answer model use the filtered context. The original snapshot/run logs and action capability checks keep full attributes.
+
 The authenticated `GET /api/glow_assistant/snapshot` endpoint returns the exposed entities, available actions and integration settings. Exclusions apply. API keys and MCP bearer tokens are removed. It reads HA state without calling devices.
 
 State queries that stop with unsure or no retained matches try one fallback over all exposed entities, without area/domain filters.
@@ -53,6 +55,8 @@ python local.py --query "Sind im Haus Fenster offen?" --domain-confidence 0.4 --
 `--confidence` overrides the single-choice confidence thresholds; probability cutoffs are separate. Individual flags override that value: `--service-confidence`, `--target-scope-confidence`, `--domain-confidence`, `--query-type-confidence`, `--binary-answer-confidence`, `--numeric-confidence`.
 
 Match `--language` to the Assist pipeline. It defaults to `BENCHMARK_LANGUAGE` or `de`. Each run starts with no conversation history.
+
+Service routing offers advertised actions, `query_state` and `not-smarthome-related`, without an `unsure` choice. The service confidence gate can still stop a run.
 
 State queries follow service → one or more areas → single-domain selection → answer-type selection. Area selection uses one Choice call plus a relative probability cutoff. Keep entities whose area is any retained named area; named areas take priority if all_areas also passes. With only all_areas retained, include all exposed entities, including those without an area. No retained scope skips domain selection and tries the unfiltered fallback. Yes/no queries ask the decider for yes/no/unsure from all candidate states, without entity keep/drop. With LLM replies off, yes/no is formatted directly as Ja/Nein for German or Yes/No otherwise. With LLM replies on, the answer model translates the result into the Assist language. Other queries use one entity Choice question → probability filtering → reply generation. With LLM replies off, one state_property Choice question selects the requested states/attributes using a relative cutoff; multiple properties can be retained. Code groups their values by entity and area. With LLM replies on, the answer model receives the selected entity states as before. Unsure query decisions try the unfiltered fallback once, then stop with the configured unsure reply if recovery fails. Domain selection runs for rooms and `all_areas`; actions get their domain from the service. `--domain-filter-confidence` remains an alias for `--domain-confidence`.
 

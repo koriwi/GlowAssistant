@@ -67,9 +67,12 @@ class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
             if key.schema == "decider":
                 prompt = next(selector for field, selector in block.schema.schema.items() if field.schema == "text_prompt")
                 confidence = next(selector for field, selector in block.schema.schema.items() if field.schema == "text_probability_threshold")
+                attributes = next(selector for field, selector in block.schema.schema.items() if field.schema == "max_attribute_chars")
                 self.assertTrue(prompt.config["multiline"])
                 self.assertEqual(confidence.config["min"], 0)
                 self.assertEqual(confidence.config["max"], 1)
+                self.assertEqual(attributes.config["mode"], "box")
+                self.assertEqual(attributes.config["min"], 1)
             if key.schema == "answer":
                 enabled = next(selector for field, selector in block.schema.schema.items() if field.schema == "enable")
                 self.assertEqual(enabled.selector_type, "boolean")

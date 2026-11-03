@@ -48,7 +48,7 @@ LEGACY_SELECT_SERVICE_PROMPT = LEGACY_RESPONSE_SERVICE_PROMPT.replace(
     "Text and number extraction are supported; other formats report not yet supported.",
     "Text, number and fixed-option select extraction are supported; other formats report not yet supported.",
 )
-SERVICE_PROMPT = LEGACY_SELECT_SERVICE_PROMPT.replace(
+LEGACY_TIMESTAMP_SERVICE_PROMPT = LEGACY_SELECT_SERVICE_PROMPT.replace(
     "Choose query_state for questions answered from current entity states or measurements.",
     "Choose query_state for questions answered from current entity states, measurements or attributes. "
     "This includes timestamps recording past events, such as last run, last mowed, last opened or last triggered. "
@@ -57,6 +57,18 @@ SERVICE_PROMPT = LEGACY_SELECT_SERVICE_PROMPT.replace(
     "Past-tense wording alone does not require historical data. Actual history or event-log retrieval "
     "beyond exposed states and attributes requires a suitable advertised retrieval action; otherwise choose unsure. "
     "Select the query route without assuming whether a matching sensor is available; later steps check the entities.",
+)
+SERVICE_PROMPT = LEGACY_TIMESTAMP_SERVICE_PROMPT.replace(
+    "Select one advertised Home Assistant action, query_state, unsure or not-smarthome-related.",
+    "Select exactly one advertised Home Assistant action, query_state or not-smarthome-related. "
+    "These are the only available choices.",
+).replace(
+    "beyond exposed states and attributes requires a suitable advertised retrieval action; otherwise choose unsure.",
+    "beyond exposed states and attributes requires a suitable advertised retrieval action; do not assume history is available.",
+).replace(
+    "Unsupported home operations, conditional actions or multiple different operations mean unsure.",
+    "Choose the best matching supplied option. Report low confidence for unsupported home operations, "
+    "unclear requests, conditional actions or multiple different operations. Never invent an action.",
 )
 LEGACY_QUERY_AREA_PROMPT = (
     "Select the single area explicitly referred to by the request, using names and aliases and "

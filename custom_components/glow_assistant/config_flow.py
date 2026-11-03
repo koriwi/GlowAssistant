@@ -49,6 +49,8 @@ def settings_schema(values):
                 selector = _number(1, 600)
             elif field == "max_input_chars":
                 selector = _number(100, 2000000)
+            elif field == "max_attribute_chars":
+                selector = _number(1, 2000000)
             elif field == "max_tokens":
                 selector = _number(1, 100000)
             elif field == "mcp_max_rounds":
