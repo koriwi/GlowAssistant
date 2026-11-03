@@ -229,7 +229,7 @@ class AgentEngine:
         entities = snapshot["entities"]
         actions = action_options(snapshot["services"])
         services = {
-            **actions, QUERY: "Query current home states or measurements, no action.",
+            **actions, QUERY: "Read entity states or attributes, including last-event timestamps; no action or history lookup.",
             GENERAL: "General knowledge or conversation unrelated to the home.",
         }
         def summarize_action(response):
@@ -300,19 +300,45 @@ class AgentEngine:
             return
 
         result["service"] = QUERY
-        candidates, area = await self._select_query_areas(result, entities)
-        candidates = await self._select_domain(result, candidates, area)
-        query_types = {"yes_no": "A yes/no question about current states.",
-                       "complex": "A question requesting values, names, counts or other details."}
-        response = await self._decide(result, "query_type", {"prompt": prompt}, {
-            "query_type": choice_question(query_types, config["query_type_prompt"]),
-        })
-        result["query_type"] = self._choice(response, "query_type", query_types)
+        try:
+            await self._query_state(result, entities, language_instruction)
+        except Uncertain as error:
+            if not entities:
+                raise
+            result["query_fallback"] = {"status": "pending", "trigger": error.details}
+            try:
+                members = await self._select_query_fallback(result, entities)
+                await self._query_state(result, entities, language_instruction, members=members)
+            except (Uncertain, ModelError) as fallback_error:
+                result["query_fallback"].update(status="failed", reason=str(fallback_error))
+                raise
+            result["query_fallback"]["status"] = "completed"
+
+    async def _query_state(self, result, entities, language_instruction, members=None):
+        prompt = result["request"]
+        config = self.settings["decider"]
+        fallback = members is not None
+        if fallback:
+            candidates, area = members, {"type": "selected_entities"}
+        else:
+            candidates, area = await self._select_query_areas(result, entities)
+            candidates = await self._select_domain(result, candidates, area)
+        if result.get("query_type") not in ("yes_no", "complex"):
+            query_types = {"yes_no": "A yes/no question about current states.",
+                           "complex": "A question requesting values, names, counts or other details."}
+            state = {"prompt": prompt}
+            if fallback:
+                state["entities"] = list(target_options(candidates).values())
+            response = await self._decide(result, "query_type:fallback" if fallback else "query_type", state, {
+                "query_type": choice_question(query_types, config["query_type_prompt"]),
+            })
+            result["query_type"] = self._choice(response, "query_type", query_types)
         if result["query_type"] == "yes_no":
-            await self._answer_yes_no(result, candidates, area, language_instruction)
+            await self._answer_yes_no(result, candidates, area, language_instruction, fallback=fallback)
             return
-        target_state = {"prompt": prompt, "service": QUERY, "domain": result["domain"], "area": area}
-        members = await self._select_targets(result, candidates, target_state)
+        if not fallback:
+            target_state = {"prompt": prompt, "service": QUERY, "domain": result["domain"], "area": area}
+            members = await self._select_targets(result, candidates, target_state)
         result["state_info"] = [
             {"entity_id": entity["entity_id"], "domain": entity["domain"], "area": entity.get("area_name"),
              "name": entity["name"], "state": entity["state"], "attributes":
@@ -330,7 +356,13 @@ class AgentEngine:
 
             question = selection_question(options, config["state_property_prompt"])
             question["criteria"]["none"] = "No supplied state property matches the request."
-            await self._decide(result, "state_property", {"prompt": prompt, "domain": result["domain"]}, {
+            selected_entities = [
+                {**target, "state": entity["state"]}
+                for target, entity in zip(target_options(members).values(), members, strict=True)
+            ]
+            await self._decide(result, "state_property:fallback" if fallback else "state_property", {
+                "prompt": prompt, "service": QUERY, "domain": result["domain"], "entities": selected_entities,
+            }, {
                 "state_property": question,
             }, summarize=summarize_properties)
             if not result["state_properties"]:
@@ -341,14 +373,63 @@ class AgentEngine:
             return
         facts = {key: value for key, value in result.items()
                  if key not in ("decisions", "usage", "timings_ms", "failures", "domain_filter", "target_selection", "area_selection",
-                                "target", "state_info")}
+                                "target", "state_info", "query_fallback")}
         facts["entities"] = result["state_info"]
+        if fallback:
+            facts.pop("selected_areas", None)
+            facts.pop("all_areas", None)
         if self.dry_run:
             language_instruction += " This is a plan-only benchmark. No device command was sent; describe actions as plans."
         await self._answer(result, [
             {"role": "system", "content": f"{self.settings['answer']['prompt']}\n{language_instruction}"},
             {"role": "user", "content": json.dumps(facts, ensure_ascii=False, default=str)},
         ])
+
+    async def _select_query_fallback(self, result, entities):
+        config = self.settings["decider"]
+        options = target_options(entities)
+        for entity in entities:
+            options[f"entity:{entity['entity_id']}"]["state"] = entity["state"]
+
+        def summarize(response):
+            selection = decode_selection(response, "query_fallback", options, config["query_fallback_probability_threshold"])
+            answer = response["answers"]["query_fallback"]
+            confidence_passed = answer["confidence"] >= config["query_fallback_confidence"]
+            accepted = confidence_passed and answer["choice"] in options
+            selected = selection["selected_choices"] if accepted else []
+            threshold_choices = selection["selected_choices"]
+            selection["selected_choices"] = selected
+            result["query_fallback"].update(
+                **selection, confidence=answer["confidence"], minimum_confidence=config["query_fallback_confidence"],
+                status="selected" if selected else "rejected", threshold_choices=threshold_choices,
+                selected_names=[options[key]["name"] for key in selected],
+                confidence_gate_passed=confidence_passed, matching_choice=answer["choice"] in options,
+                selected_entity_ids=[options[key]["entity_id"] for key in selected],
+                entities_before=len(entities), entities_after=len(selected),
+            )
+            return result["query_fallback"]
+
+        await self._decide(result, "query_fallback", {"prompt": result["request"], "service": QUERY,
+                           "trigger": result["query_fallback"]["trigger"]}, {
+            "query_fallback": selection_question(options, config["query_fallback_prompt"]),
+        }, summarize=summarize)
+        selection = result["query_fallback"]
+        if not selection["selected_entity_ids"]:
+            raise Uncertain("query_fallback", "The unfiltered entity fallback did not retain a confident matching target.",
+                            "Name the requested devices or measurements. Review fallback confidence and entity probabilities.",
+                            confidence=selection["confidence"], minimum_confidence=selection["minimum_confidence"],
+                            confidence_gate_passed=selection["confidence_gate_passed"])
+        selected = set(selection["selected_entity_ids"])
+        members = [entity for entity in entities if entity["entity_id"] in selected]
+        domains = sorted({entity["domain"] for entity in members})
+        result["domains"] = domains
+        result["domain"] = domains[0] if len(domains) == 1 else None
+        if len(members) == 1:
+            result["target"] = options[f"entity:{members[0]['entity_id']}"]
+        else:
+            result["target"] = {"type": "entities", "entity_ids": selection["selected_entity_ids"],
+                                "names": [entity["name"] for entity in members]}
+        return members
 
     async def _select_query_areas(self, result, entities):
         config = self.settings["decider"]
@@ -593,7 +674,7 @@ class AgentEngine:
             values[name] = value
         result["parameters"] = values
 
-    async def _answer_yes_no(self, result, entities, area, language_instruction):
+    async def _answer_yes_no(self, result, entities, area, language_instruction, fallback=False):
         candidates = [
             {**target, "state": entity["state"], "attributes":
              entity.get("attributes", {}) if entity["state"] not in ("unknown", "unavailable") else {}}
@@ -601,7 +682,7 @@ class AgentEngine:
         ]
         options = {"yes": "The proposition in the user's question is true.",
                    "no": "The proposition in the user's question is false."}
-        response = await self._decide(result, "binary_answer", {
+        response = await self._decide(result, "binary_answer:fallback" if fallback else "binary_answer", {
             "prompt": result["request"], "area": area, "domain": result["domain"], "entities": candidates,
         }, {"binary_answer": choice_question(options, self.settings["decider"]["binary_answer_prompt"])})
         result["state_answer"] = self._choice(response, "binary_answer", options)

@@ -12,25 +12,38 @@ flowchart TD
     QueryArea --> QueryScope{"Retained query scope?"}
     QueryScope -->|Named areas take priority| Room["Filter entities to the union of selected areas"]
     QueryScope -->|Only all_areas| WholeHome["Keep all exposed entities, including entities without a room"]
-    QueryScope -->|No retained scope| Unsure
+    QueryScope -->|No retained scope| FallbackAllowed
     WholeHome --> Domains["Decider: choose one domain"]
     Room --> Domains
+    Domains -->|unsure| FallbackAllowed
     Domains --> DomainEntities["Filter entities by selected domain"]
     DomainEntities --> QueryType{"Decider: yes/no question?"}
     QueryType -->|Yes| BinaryAnswer["Decider: yes / no / unsure from candidate states"]
-    BinaryAnswer -->|unsure| Unsure
+    BinaryAnswer -->|unsure| FallbackAllowed
     BinaryAnswer -->|yes / no| BinaryMode{"LLM answer enabled?"}
     BinaryMode -->|Yes| Translate["Answer model: translate yes/no into Assist language"]
     BinaryMode -->|No| FixedBinary["Fixed Ja/Nein or Yes/No reply"]
     Translate --> Reply
     FixedBinary --> Reply
     QueryType -->|No| QueryTargets["Decider: one Choice over entities + none; retain at or above relative probability cutoff"]
-    QueryType -->|unsure| Unsure
-    QueryTargets --> States["Read selected states from snapshot"]
+    QueryType -->|unsure| FallbackAllowed
+    QueryTargets -->|Selected| States["Read selected states from snapshot"]
+    QueryTargets -->|None retained| FallbackAllowed
+    FallbackAllowed{"Query fallback already used?"} -->|Yes| Unsure
+    FallbackAllowed -->|No| Fallback["One Choice over all exposed entities + none; no area/domain filters"]
+    Fallback --> FallbackGate{"Confidence gate, real entity top choice and relative cutoff pass?"}
+    FallbackGate -->|No| Unsure
+    FallbackGate -->|Yes| Recovered["Use recovered entities and their actual domains; keep original stop in debug"]
+    Recovered --> RecoveredType{"Reuse accepted answer type or classify again"}
+    RecoveredType -->|unsure| Unsure
+    RecoveredType -->|Detailed| States
+    RecoveredType -->|Yes/no| RecoveredBinary["Recheck yes / no / unsure using recovered entities only"]
+    RecoveredBinary -->|unsure| Unsure
+    RecoveredBinary -->|yes / no| BinaryMode
     States --> QueryReplyMode{"LLM answer enabled?"}
     QueryReplyMode -->|Yes| Answer["Smart-home answer model"]
     QueryReplyMode -->|No| Property["Decider: one Choice over state properties + none; relative cutoff"]
-    Property -->|No retained properties| Unsure
+    Property -->|No retained properties| FallbackAllowed
     Property -->|Selected| StateText["Group by area and entity; label multiple properties with values and units"]
     StateText --> Reply
     Answer --> Reply

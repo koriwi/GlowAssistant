@@ -101,7 +101,8 @@ class ProgrammaticAnswerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(missing["status"], "missing")
         self.assertIsNone(missing["value"])
         self.assertEqual(len(client.requests), 6)
-        self.assertNotIn("entities", client.requests[-1][1])
+        self.assertEqual({entity["entity_id"] for entity in client.requests[-1][1]["entities"]}, {"light.office", "light.kitchen"})
+        self.assertTrue(all(entity["state"] == "on" for entity in client.requests[-1][1]["entities"]))
         self.assertIn("Choosing multiple properties is allowed", client.requests[-1][2]["state_property"]["instructions"])
         self.assertEqual(client.requests[-1][2]["state_property"]["criteria"]["none"], "No supplied state property matches the request.")
         output = next(output for stage, _, output in events if stage == "state_property" and output)
@@ -132,7 +133,10 @@ class ProgrammaticAnswerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(client.requests[-1][2]), {"state_property"})
         self.assertEqual(client.requests[-1][1]["history"], history)
         self.assertEqual(client.requests[-1][1]["language"], "de")
-        self.assertNotIn("entities", client.requests[-1][1])
+        self.assertEqual([entity["entity_id"] for entity in client.requests[-1][1]["entities"]], ["light.desk", "light.ceiling"])
+        self.assertEqual(client.requests[-1][1]["service"], "query_state")
+        self.assertEqual(client.requests[-1][1]["entities"][0]["name"], "Desk lamp")
+        self.assertNotIn("attributes", client.requests[-1][1]["entities"][0])
         self.assertFalse(client.chat_requests)
         output = next(output for stage, _, output in events if stage == "answer" and output)
         self.assertFalse(output["model_call"])
@@ -210,10 +214,12 @@ class ProgrammaticAnswerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_unsure_property_stops_instead_of_answering_with_an_unrelated_value(self):
         client = ScriptedModels([{"service": "query_state"}, {"area": "area:office"}, {"domain": "sensor"},
-                                 {"query_type": "complex"}, {"targets": ["sensor.office"]}, {"state_property": "none"}])
+                                 {"query_type": "complex"}, {"targets": ["sensor.office"]}, {"state_property": "none"},
+                                 {"query_fallback": "none"}])
         result = await AgentEngine(local_settings(), client, dry_run=True).process("What is its unsupported value?", "en", SNAPSHOT)
         self.assertEqual(result["route"], "unsure")
-        self.assertEqual(result["failures"][0]["stage"], "state_property")
+        self.assertEqual(result["query_fallback"]["trigger"]["stage"], "state_property")
+        self.assertEqual(result["failures"][0]["stage"], "query_fallback")
         self.assertNotIn("state_values", result)
         self.assertFalse(client.chat_requests)
 
@@ -242,6 +248,7 @@ class AnswerConfigurationTests(unittest.TestCase):
         from custom_components.glow_assistant.state_properties import (
             INSTRUCTIONS,
             LEGACY_INSTRUCTIONS,
+            LEGACY_MULTI_INSTRUCTIONS,
         )
 
         settings = local_settings()
@@ -250,6 +257,7 @@ class AnswerConfigurationTests(unittest.TestCase):
         configured = benchmark.model_settings(settings, args, {})["decider"]
         self.assertEqual(configured["state_property_confidence"], 0.25)
         self.assertEqual(configured["state_property_prompt"], INSTRUCTIONS)
+        self.assertEqual(normalize_settings({"decider": {"state_property_prompt": LEGACY_MULTI_INSTRUCTIONS}})["decider"]["state_property_prompt"], INSTRUCTIONS)
         self.assertEqual(configured["service_confidence"], 0.9)
         self.assertEqual(normalize_settings({"decider": {"state_property_confidence": 0}})["decider"]["state_property_confidence"], 0)
         for flag in ("--state-property-threshold", "--state-property-confidence"):

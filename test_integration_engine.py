@@ -179,7 +179,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["state_answer"], "yes")
 
 
-    async def test_uncertain_query_type_or_binary_answer_stops_without_chat_or_entity_filter(self):
+    async def test_uncertain_query_type_or_binary_answer_stops_after_rejected_fallback(self):
         for stage in ("query_type", "binary_answer"):
             for choice, threshold in (("unsure", 0), ("yes_no" if stage == "query_type" else "yes", 0.95)):
                 with self.subTest(stage=stage, choice=choice, threshold=threshold):
@@ -187,6 +187,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
                     if stage == "binary_answer":
                         choices.append({"query_type": "yes_no"})
                     choices.append({stage: choice})
+                    choices.append({"query_fallback": "none"})
                     settings = normalize_settings({"decider": {f"{stage}_confidence": threshold}})
                     events = []
                     result, models = await self.run_agent(
@@ -194,7 +195,8 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
                     )
                     self.assertEqual(result["route"], "unsure")
                     self.assertEqual(result["answer"], settings["unsure_reply"])
-                    self.assertEqual(result["failures"][0]["stage"], stage)
+                    self.assertEqual(result["query_fallback"]["trigger"]["stage"], stage)
+                    self.assertEqual(result["failures"][0]["stage"], "query_fallback")
                     self.assertFalse(models.chat_requests)
                     self.assertNotIn("target", result["decisions"])
                     output = next(output for name, _, output in events if name == stage and output)
@@ -607,6 +609,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         await self.run_agent([
             {"service": "query_state"},
             {"area": "area:office"}, {"target": "area:office"},
+            {"query_fallback": "none"},
         ], settings=settings, trace=lambda *event: events.append(event))
         serialized = json.dumps(events)
         for secret in ("secret-decider", "secret-answer", "private-template"):
@@ -670,10 +673,14 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         ]
         for choices, expected_stage in cases:
             with self.subTest(stage=expected_stage):
+                if expected_stage != "service":
+                    choices.append({"query_fallback": "none"})
                 result, models = await self.run_agent(choices)
                 self.assertEqual(result["route"], "unsure")
                 self.assertEqual(result["answer"], DEFAULTS["unsure_reply"])
-                self.assertEqual(result["failures"][0]["stage"], expected_stage)
+                self.assertEqual(result["failures"][0]["stage"], "service" if expected_stage == "service" else "query_fallback")
+                if expected_stage != "service":
+                    self.assertEqual(result["query_fallback"]["trigger"]["stage"], expected_stage)
                 self.assertNotIn("action_metadata", result)
                 self.assertFalse(models.chat_requests)
 
@@ -895,6 +902,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
             {"service": "query_state"}, {"area": "area:office"}, {"domain": "light"}, {"query_type": "complex"},
             {"query_targets": {"type": "choice", "choice": "none", "confidence": 0.9,
                                "probabilities": {"entity:light.desk": 0.1, "entity:light.ceiling": 0.14, "none": 0.76}}},
+            {"query_fallback": "none"},
         ], settings=settings)
         self.assertEqual(result["route"], "unsure")
         self.assertEqual(result["target_selection"]["selected_entity_ids"], [])
@@ -971,20 +979,21 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("domain", result["usage"])
 
 
-    async def test_uncertain_domain_selection_stops_without_restoring_all_domains(self):
+    async def test_uncertain_domain_selection_uses_separate_fallback_without_restoring_domain_candidates(self):
         for choice, threshold in (("unsure", 0.5), ("light", 0.95)):
             with self.subTest(choice=choice, threshold=threshold):
                 settings = normalize_settings({"decider": {"domain_confidence": threshold}})
                 events = []
                 result, models = await self.run_agent([
-                    {"service": "query_state"}, {"area": "all_areas"}, {"domain": choice}, {"query_type": "complex"},
+                    {"service": "query_state"}, {"area": "all_areas"}, {"domain": choice}, {"query_fallback": "none"},
                 ], settings=settings, trace=lambda *event: events.append(event))
                 self.assertEqual(result["route"], "unsure")
                 self.assertEqual(result["domain_filter"]["kept_domains"], [])
                 self.assertEqual(result["domain_filter"]["entities_after"], 0)
-                self.assertEqual(len(models.requests), 3)
+                self.assertEqual(len(models.requests), 4)
                 self.assertFalse(models.chat_requests)
-                self.assertEqual(result["failures"][0]["stage"], "domain")
+                self.assertEqual(result["query_fallback"]["trigger"]["stage"], "domain")
+                self.assertEqual(result["failures"][0]["stage"], "query_fallback")
 
 
     async def test_malformed_domain_selection_stops_before_building_the_target_request(self):
@@ -1173,6 +1182,7 @@ class IntegrationSettingsTests(unittest.TestCase):
         from custom_components.glow_assistant.const import (
             LEGACY_PARAMETER_SERVICE_PROMPT,
             LEGACY_RESPONSE_SERVICE_PROMPT,
+            LEGACY_SELECT_SERVICE_PROMPT,
             LEGACY_SERVICE_PROMPT,
             SERVICE_PROMPT,
         )
@@ -1187,6 +1197,8 @@ class IntegrationSettingsTests(unittest.TestCase):
         saved = normalize_settings({"decider": {"service_prompt": LEGACY_RESPONSE_SERVICE_PROMPT}})
         self.assertEqual(saved["decider"]["service_prompt"], SERVICE_PROMPT)
         self.assertIn("fixed-option select", saved["decider"]["service_prompt"])
+        saved = normalize_settings({"decider": {"service_prompt": LEGACY_SELECT_SERVICE_PROMPT}})
+        self.assertEqual(saved["decider"]["service_prompt"], SERVICE_PROMPT)
         custom = normalize_settings({"decider": {"service_prompt": "Custom action rules", "text_prompt": "Custom extraction rules"}})
         self.assertEqual(custom["decider"]["service_prompt"], "Custom action rules")
         self.assertEqual(custom["decider"]["text_prompt"], "Custom extraction rules")

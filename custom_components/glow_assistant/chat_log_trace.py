@@ -15,6 +15,7 @@ STAGE_NAMES = {
     "query_type": "glow_assistant_select_query_type",
     "binary_answer": "glow_assistant_answer_yes_no",
     "state_property": "glow_assistant_select_state_property",
+    "query_fallback": "glow_assistant_select_query_fallback",
     "target_scope": "glow_assistant_select_target_scope",
     "action_areas": "glow_assistant_select_action_areas",
     "action_entities": "glow_assistant_select_action_entities",

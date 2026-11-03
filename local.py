@@ -50,6 +50,8 @@ def parser():
     result.add_argument("--action-entity-threshold", type=confidence, help="Relative probability threshold for action entities.")
     result.add_argument("--query-target-threshold", type=confidence,
                         help="Relative probability threshold for state-query entities; independent of --confidence.")
+    result.add_argument("--query-fallback-threshold", type=confidence,
+                        help="Relative entity threshold for the unfiltered state-query fallback; default 0.8. Requires its confidence gate too.")
     result.add_argument("--query-area-threshold", "--area-confidence", type=confidence,
                         help="Relative probability threshold for state-query areas; --area-confidence is a legacy alias. Default 0.8.")
     result.add_argument("--state-property-threshold", "--state-property-confidence", type=confidence,
@@ -92,6 +94,8 @@ def model_settings(exported, args, env, record=None):
         decider["parameter_probability_threshold"] = args.parameter_threshold
     if args.query_target_threshold is not None:
         decider["query_target_probability_threshold"] = args.query_target_threshold
+    if args.query_fallback_threshold is not None:
+        decider["query_fallback_probability_threshold"] = args.query_fallback_threshold
     if args.query_area_threshold is not None:
         decider["area_confidence"] = args.query_area_threshold
     if args.state_property_threshold is not None:
@@ -266,7 +270,10 @@ def print_report(report, show_answer_input=False):
                ("context", f"{report['context']['entities']} entities; {report['context']['actions']} actions")]
     for field in ("route", "service", "domain"):
         if field in result:
-            summary.append((field, result[field] if result[field] is not None else "-"))
+            value = result[field]
+            if field == "domain" and value is None and result.get("domains"):
+                value = ", ".join(result["domains"])
+            summary.append((field, value if value is not None else "-"))
     if "execution" in result:
         execution = result["execution"]
         summary.append(("execution", f"{execution['status']}; {len(execution['calls'])} call(s)"))
@@ -279,7 +286,10 @@ def print_report(report, show_answer_input=False):
         scope = "all_areas" if result["all_areas"] else (", ".join(names[:5]) or "none")
         if len(names) > 5:
             scope += f" (+{len(names) - 5} more)"
-        summary.append(("area filter", scope))
+        summary.append(("initial area" if "query_fallback" in result else "area filter", scope))
+    if "query_fallback" in result:
+        fallback = result["query_fallback"]
+        summary.append(("query fallback", f"{fallback['status']}; triggered by {fallback['trigger']['stage']}"))
     if "action_metadata" in result:
         summary.append(("speaker area", result.get("speaker_area") or "unknown"))
         scopes = {"entities": "Specific arealess entities",
@@ -352,9 +362,11 @@ def print_report(report, show_answer_input=False):
             names = output["selected_names"]
             detail = ("all_areas" if output.get("all_areas") else
                       "selected: " + (", ".join(names[:5]) or "none") + (f" (+{len(names) - 5} more)" if len(names) > 5 else ""))
-        if event["stage"] == "target" and "selected_entity_ids" in output:
+        if event["stage"] in ("target", "query_fallback") and "selected_entity_ids" in output:
             detail = f"selected {output['entities_after']}/{output['entities_before']} (one Choice)"
-        if event["stage"] == "state_property" and "selected_properties" in output:
+            if event["stage"] == "query_fallback" and not output["confidence_gate_passed"]:
+                detail += f"; confidence < {output['minimum_confidence']:g}"
+        if event["stage"].split(":", 1)[0] == "state_property" and "selected_properties" in output:
             detail = "selected: " + (", ".join(output["selected_properties"]) or "none")
         if event["stage"] == "parameter_capabilities" and "fields_after" in output:
             detail = f"{output['fields_before']} → {output['fields_after']} fields; no model call"

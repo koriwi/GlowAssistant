@@ -13,6 +13,7 @@ STAGE_LABELS = {
     "query_type": "Choose a yes/no or detailed answer",
     "binary_answer": "Answer the yes/no state question",
     "state_property": "Select requested state properties",
+    "query_fallback": "Recover state query from all exposed entities",
     "target_scope": "Classify entity targets and explicit or implied areas",
     "action_areas": "Select action areas",
     "action_entities": "Select action entities",
@@ -129,6 +130,7 @@ def decision_details(questions, answers, config):
             "action_areas": "action_area_probability_threshold",
             "action_entities": "action_entity_probability_threshold",
             "query_targets": "query_target_probability_threshold",
+            "query_fallback": "query_fallback_probability_threshold",
             "text_words": "text_probability_threshold",
             "select_values": "select_probability_threshold",
         }
@@ -143,6 +145,14 @@ def decision_details(questions, answers, config):
                 "real_option_count": option_count,
                 "selection_basis": "relative_probability_cutoff; overall confidence is not a filter",
             }
+            if name == "query_fallback":
+                minimum = config["query_fallback_confidence"]
+                details[name].update(
+                    minimum_confidence=minimum,
+                    confidence_gate_passed=confidence is not None and confidence >= minimum,
+                    matching_choice=answer.get("choice") not in (None, "none", "unsure"),
+                    selection_basis="relative_probability_cutoff_and_minimum_confidence; none rejects fallback",
+                )
             continue
         threshold = config["numeric_confidence"] if name in ("numeric_mode", "numeric_score") else config[f"{name}_confidence"]
         if question["type"] == "score":

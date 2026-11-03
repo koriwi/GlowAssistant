@@ -113,14 +113,15 @@ class QueryAreaTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["area_selection"]["entities_after"], 7)
         self.assertIn("light.unassigned", {state["entity_id"] for state in client.requests[-1][1]["entities"]})
 
-    async def test_no_retained_area_stops_before_domain_or_device_calls(self):
-        client = ScriptedModels([{"service": "query_state"}, area_choice({"none": 1})])
+    async def test_no_retained_area_tries_fallback_before_stopping_without_device_calls(self):
+        client = ScriptedModels([{"service": "query_state"}, area_choice({"none": 1}), {"query_fallback": "none"}])
         execute = AsyncMock()
         result = await AgentEngine(normalize_settings({}), client, execute=execute).process("Unknown room", "en", snapshot())
         self.assertEqual(result["route"], "unsure")
-        self.assertEqual(result["failures"][0]["stage"], "area")
+        self.assertEqual(result["query_fallback"]["trigger"]["stage"], "area")
+        self.assertEqual(result["failures"][0]["stage"], "query_fallback")
         self.assertEqual(result["area_selection"]["effective_choices"], [])
-        self.assertEqual(len(client.requests), 2)
+        self.assertEqual(len(client.requests), 3)
         self.assertNotIn("domain_filter", result)
         execute.assert_not_awaited()
 

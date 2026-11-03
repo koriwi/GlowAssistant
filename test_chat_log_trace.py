@@ -74,6 +74,19 @@ class ChatLogTraceTests(unittest.TestCase):
         self.assertEqual(json.loads(json.dumps(asdict(result_message)))["tool_result"], result)
         self.assertFalse(self.trace.calls)
 
+    def test_query_fallback_has_a_native_card_with_original_stop_and_both_gates(self):
+        arguments = {"trigger": {"stage": "target", "reason": "No matching entities were retained."}}
+        output = {"status": "selected", "minimum_confidence": 0.8, "confidence": 0.99,
+                  "probability_threshold": 0.8, "effective_probability_threshold": 0.8 / 159,
+                  "selected_entity_ids": ["sensor.last_mowed"], "duration_ms": 1500}
+        self.trace("query_fallback", arguments)
+        self.trace("query_fallback", {}, output)
+        call, result = self.messages
+        self.assertEqual(call.tool_calls[0].tool_name, "glow_assistant_select_query_fallback")
+        self.assertEqual(call.tool_calls[0].tool_args, arguments)
+        self.assertEqual(result.tool_result, output)
+        self.assertFalse(self.trace.calls)
+
     def test_each_parameter_has_an_independent_native_extraction_card(self):
         for stage, name, value, tool in (("text:item", "item", "nudeln", "glow_assistant_extract_text"),
                                         ("text:description", "description", "weizen", "glow_assistant_extract_text"),

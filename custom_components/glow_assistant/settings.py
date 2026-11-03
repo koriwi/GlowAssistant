@@ -16,10 +16,12 @@ from .const import (
     LEGACY_PARAMETER_SERVICE_PROMPT,
     LEGACY_QUERY_AREA_PROMPT,
     LEGACY_RESPONSE_SERVICE_PROMPT,
+    LEGACY_SELECT_SERVICE_PROMPT,
     LEGACY_SERVICE_PROMPT,
     LEGACY_TARGET_SCOPE_PROMPT,
     LEGACY_TEXT_SERVICE_PROMPT,
     LEGACY_UNSCOPED_TARGET_SCOPE_PROMPT,
+    QUERY_FALLBACK_PROMPT,
     QUERY_TARGET_PROMPT,
     QUERY_TYPE_PROMPT,
     SERVICE_PROMPT,
@@ -35,6 +37,9 @@ from .parameter_values import (
 from .select_values import INSTRUCTIONS as SELECT_INSTRUCTIONS
 from .state_properties import INSTRUCTIONS as STATE_PROPERTY_INSTRUCTIONS
 from .state_properties import LEGACY_INSTRUCTIONS as LEGACY_STATE_PROPERTY_INSTRUCTIONS
+from .state_properties import (
+    LEGACY_MULTI_INSTRUCTIONS as LEGACY_MULTI_STATE_PROPERTY_INSTRUCTIONS,
+)
 from .text_values import INSTRUCTIONS as TEXT_INSTRUCTIONS
 from .text_values import LEGACY_PROMPTS, MESSAGE_INSTRUCTIONS
 
@@ -51,6 +56,8 @@ DEFAULTS = {
         "binary_answer_confidence": 0.5,
         "query_target_probability_threshold": 0.7,
         "state_property_confidence": 0.5,  # Legacy key; state properties now use a relative threshold.
+        "query_fallback_confidence": 0.8,
+        "query_fallback_probability_threshold": 0.8,
         "target_scope_confidence": 0,
         "action_area_confidence": 0.8,
         "action_area_probability_threshold": 0.8,
@@ -67,6 +74,7 @@ DEFAULTS = {
         "binary_answer_prompt": BINARY_ANSWER_PROMPT,
         "query_target_prompt": QUERY_TARGET_PROMPT,
         "state_property_prompt": STATE_PROPERTY_INSTRUCTIONS,
+        "query_fallback_prompt": QUERY_FALLBACK_PROMPT,
         "target_scope_prompt": TARGET_SCOPE_PROMPT,
         "action_area_prompt": ACTION_AREA_INSTRUCTIONS,
         "action_entity_prompt": ACTION_ENTITY_INSTRUCTIONS,
@@ -122,12 +130,13 @@ def normalize_settings(data):
         settings["general"]["prompt"] = GENERAL_PROMPT
     if settings["decider"]["service_prompt"] in (
         LEGACY_SERVICE_PROMPT, LEGACY_TEXT_SERVICE_PROMPT, LEGACY_PARAMETER_SERVICE_PROMPT, LEGACY_RESPONSE_SERVICE_PROMPT,
+        LEGACY_SELECT_SERVICE_PROMPT,
     ):
         settings["decider"]["service_prompt"] = SERVICE_PROMPT
     decider = data.get("decider", {})
     if settings["decider"]["area_prompt"] == LEGACY_QUERY_AREA_PROMPT:
         settings["decider"]["area_prompt"] = AREA_PROMPT
-    if settings["decider"]["state_property_prompt"] == LEGACY_STATE_PROPERTY_INSTRUCTIONS:
+    if settings["decider"]["state_property_prompt"] in (LEGACY_STATE_PROPERTY_INSTRUCTIONS, LEGACY_MULTI_STATE_PROPERTY_INSTRUCTIONS):
         settings["decider"]["state_property_prompt"] = STATE_PROPERTY_INSTRUCTIONS
     if settings["decider"]["target_scope_prompt"] in (
         LEGACY_TARGET_SCOPE_PROMPT, LEGACY_ACTION_TARGET_SCOPE_PROMPT, LEGACY_UNSCOPED_TARGET_SCOPE_PROMPT,
@@ -168,9 +177,10 @@ def validate_settings(data):
             _range(config, "temperature", 0, 2, group)
     decider = settings["decider"]
     for field in ("area_confidence", "parameter_probability_threshold", "action_area_probability_threshold", "action_entity_probability_threshold",
-                  "query_target_probability_threshold", "text_probability_threshold", "select_probability_threshold", "state_property_confidence"):
+                  "query_target_probability_threshold", "text_probability_threshold", "select_probability_threshold", "state_property_confidence",
+                  "query_fallback_probability_threshold"):
         _range(decider, field, 0, 1, "decider")
-    for stage in ("service", "domain", "query_type", "binary_answer", "target_scope", "action_area", "numeric", "select"):
+    for stage in ("service", "domain", "query_type", "binary_answer", "query_fallback", "target_scope", "action_area", "numeric", "select"):
         _range(decider, f"{stage}_confidence", 0, 1, "decider")
     if not isinstance(settings["log_runs"], bool):
         raise TypeError("log_runs must be a boolean.")
