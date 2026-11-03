@@ -26,7 +26,8 @@ from custom_components.glow_assistant.settings import (
 
 LOG_DIRECTORY = Path(__file__).parent / "runs"
 
-CONFIDENCE_FIELDS = tuple(key for key in DEFAULTS["decider"] if key.endswith("_confidence") and key != "area_confidence")
+CONFIDENCE_FIELDS = tuple(key for key in DEFAULTS["decider"] if key.endswith("_confidence")
+                          and key not in ("area_confidence", "state_property_confidence"))
 
 
 def confidence(value):
@@ -51,6 +52,8 @@ def parser():
                         help="Relative probability threshold for state-query entities; independent of --confidence.")
     result.add_argument("--query-area-threshold", "--area-confidence", type=confidence,
                         help="Relative probability threshold for state-query areas; --area-confidence is a legacy alias. Default 0.8.")
+    result.add_argument("--state-property-threshold", "--state-property-confidence", type=confidence,
+                        help="Relative probability threshold for requested state properties; old confidence flag is an alias. Default 0.5.")
     result.add_argument("--text-threshold", type=confidence, help="Relative probability threshold for item/message words.")
     result.add_argument("--select-threshold", type=confidence, help="Relative probability threshold for multi-value select extraction; default 0.3.")
     for field in CONFIDENCE_FIELDS:
@@ -91,6 +94,8 @@ def model_settings(exported, args, env, record=None):
         decider["query_target_probability_threshold"] = args.query_target_threshold
     if args.query_area_threshold is not None:
         decider["area_confidence"] = args.query_area_threshold
+    if args.state_property_threshold is not None:
+        decider["state_property_confidence"] = args.state_property_threshold
     if args.text_threshold is not None:
         decider["text_probability_threshold"] = args.text_threshold
     if args.select_threshold is not None:
@@ -267,8 +272,8 @@ def print_report(report, show_answer_input=False):
         summary.append(("execution", f"{execution['status']}; {len(execution['calls'])} call(s)"))
     if "answer_source" in result:
         summary.append(("answer mode", result["answer_source"]))
-    if "state_property" in result:
-        summary.append(("state property", result["state_property"]))
+    if "state_properties" in result:
+        summary.append(("properties", ", ".join(result["state_properties"]) or "none"))
     if "area_selection" in result:
         names = result["area_selection"]["selected_names"]
         scope = "all_areas" if result["all_areas"] else (", ".join(names[:5]) or "none")
@@ -349,6 +354,8 @@ def print_report(report, show_answer_input=False):
                       "selected: " + (", ".join(names[:5]) or "none") + (f" (+{len(names) - 5} more)" if len(names) > 5 else ""))
         if event["stage"] == "target" and "selected_entity_ids" in output:
             detail = f"selected {output['entities_after']}/{output['entities_before']} (one Choice)"
+        if event["stage"] == "state_property" and "selected_properties" in output:
+            detail = "selected: " + (", ".join(output["selected_properties"]) or "none")
         if event["stage"] == "parameter_capabilities" and "fields_after" in output:
             detail = f"{output['fields_before']} → {output['fields_after']} fields; no model call"
         scores = [info["confidence"] for info in decisions.values() if isinstance(info.get("confidence"), (int, float))]

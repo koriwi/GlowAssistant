@@ -34,6 +34,7 @@ from .parameter_values import (
 )
 from .select_values import INSTRUCTIONS as SELECT_INSTRUCTIONS
 from .state_properties import INSTRUCTIONS as STATE_PROPERTY_INSTRUCTIONS
+from .state_properties import LEGACY_INSTRUCTIONS as LEGACY_STATE_PROPERTY_INSTRUCTIONS
 from .text_values import INSTRUCTIONS as TEXT_INSTRUCTIONS
 from .text_values import LEGACY_PROMPTS, MESSAGE_INSTRUCTIONS
 
@@ -49,7 +50,7 @@ DEFAULTS = {
         "query_type_confidence": 0.7,
         "binary_answer_confidence": 0.5,
         "query_target_probability_threshold": 0.7,
-        "state_property_confidence": 0.5,
+        "state_property_confidence": 0.5,  # Legacy key; state properties now use a relative threshold.
         "target_scope_confidence": 0,
         "action_area_confidence": 0.8,
         "action_area_probability_threshold": 0.8,
@@ -126,6 +127,8 @@ def normalize_settings(data):
     decider = data.get("decider", {})
     if settings["decider"]["area_prompt"] == LEGACY_QUERY_AREA_PROMPT:
         settings["decider"]["area_prompt"] = AREA_PROMPT
+    if settings["decider"]["state_property_prompt"] == LEGACY_STATE_PROPERTY_INSTRUCTIONS:
+        settings["decider"]["state_property_prompt"] = STATE_PROPERTY_INSTRUCTIONS
     if settings["decider"]["target_scope_prompt"] in (
         LEGACY_TARGET_SCOPE_PROMPT, LEGACY_ACTION_TARGET_SCOPE_PROMPT, LEGACY_UNSCOPED_TARGET_SCOPE_PROMPT,
         LEGACY_AREALESS_TARGET_SCOPE_PROMPT,
@@ -165,9 +168,9 @@ def validate_settings(data):
             _range(config, "temperature", 0, 2, group)
     decider = settings["decider"]
     for field in ("area_confidence", "parameter_probability_threshold", "action_area_probability_threshold", "action_entity_probability_threshold",
-                  "query_target_probability_threshold", "text_probability_threshold", "select_probability_threshold"):
+                  "query_target_probability_threshold", "text_probability_threshold", "select_probability_threshold", "state_property_confidence"):
         _range(decider, field, 0, 1, "decider")
-    for stage in ("service", "domain", "query_type", "binary_answer", "target_scope", "action_area", "numeric", "state_property", "select"):
+    for stage in ("service", "domain", "query_type", "binary_answer", "target_scope", "action_area", "numeric", "select"):
         _range(decider, f"{stage}_confidence", 0, 1, "decider")
     if not isinstance(settings["log_runs"], bool):
         raise TypeError("log_runs must be a boolean.")

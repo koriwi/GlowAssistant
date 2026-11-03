@@ -37,17 +37,20 @@ class StatePropertyTests(unittest.TestCase):
 
     def test_sensor_measurement_and_climate_target_and_current_temperature_remain_distinct(self):
         sensor = entity("sensor.room", "Room temperature", state="22.5", unit_of_measurement="°C")
-        self.assertEqual(format_values(selected_values([sensor], "state"), "de-DE"), "Room temperature: 22.5 °C.")
+        self.assertEqual(format_values(selected_values([sensor], "state"), "de-DE"), "[Office]: Room temperature: 22.5 °C.")
         climate = entity("climate.room", "Thermostat", state="heat", temperature=24, current_temperature=22, temperature_unit="°C")
         self.assertEqual(selected_values([climate], "attribute:temperature")[0]["value"], 24)
         self.assertEqual(selected_values([climate], "attribute:current_temperature")[0]["value"], 22)
+        rows = selected_values([climate], "attribute:temperature") + selected_values([climate], "attribute:current_temperature")
+        self.assertEqual(format_values(rows, "de"), "[Office]: Thermostat: Solltemperatur: 24 °C, Gemessene Temperatur: 22 °C.")
+        self.assertEqual(format_values(rows, "en"), "[Office]: Thermostat: Target temperature: 24 °C, Measured temperature: 22 °C.")
 
     def test_window_states_and_duplicate_names_include_room_context(self):
         windows = [entity("binary_sensor.left", "Window", state="on", area="office", device_class="window"),
                    entity("binary_sensor.right", "Window", state="off", area="bedroom", device_class="window")]
         rows = selected_values(windows, "state")
-        self.assertEqual(format_values(rows, "de"), "Window (Office): offen; Window (Bedroom): geschlossen.")
-        self.assertEqual(format_values(rows, "en"), "Window (Office): open; Window (Bedroom): closed.")
+        self.assertEqual(format_values(rows, "de"), "[Office]: Window: offen. [Bedroom]: Window: geschlossen.")
+        self.assertEqual(format_values(rows, "en"), "[Office]: Window: open. [Bedroom]: Window: closed.")
 
     def test_unavailable_unknown_and_missing_attributes_do_not_use_stale_values_or_main_state(self):
         entities = [entity("light.good", "Good", brightness=255), entity("light.missing", "Missing", state="on"),
@@ -56,11 +59,59 @@ class StatePropertyTests(unittest.TestCase):
         rows = selected_values(entities, "attribute:brightness")
         self.assertEqual([row["value"] for row in rows], [100, None, None, None])
         self.assertEqual([row["status"] for row in rows], ["available", "missing", "unavailable", "unknown"])
-        self.assertEqual(format_values(rows, "de"), "Good: 100 %; Missing: nicht verfügbar; Stale: nicht verfügbar; Unknown: unbekannt.")
+        self.assertEqual(format_values(rows, "de"), "[Office]: Good: 100 %; Missing: nicht verfügbar; Stale: nicht verfügbar; Unknown: unbekannt.")
+
+    def test_entities_are_grouped_by_area_even_when_interleaved_and_unassigned_are_retained(self):
+        rows = selected_values([
+            entity("light.kitchen", "Ceiling", area="kitchen"),
+            entity("light.office", "Desk", area="office", state="off"),
+            entity("light.unassigned", "Portable", area=None),
+            entity("light.kitchen_counter", "Counter", area="kitchen", state="off"),
+            entity("light.unassigned_second", "Spare", area=None, state="off"),
+        ], "state")
+        self.assertEqual(format_values(rows, "en"),
+                         "[Kitchen]: Ceiling: on; Counter: off. [Office]: Desk: off. [No area]: Portable: on; Spare: off.")
+        self.assertEqual(format_values(rows, "de"),
+                         "[Kitchen]: Ceiling: an; Counter: aus. [Office]: Desk: aus. [Ohne Bereich]: Portable: an; Spare: aus.")
 
 
 class ProgrammaticAnswerTests(unittest.IsolatedAsyncioTestCase):
-    async def test_complex_query_uses_one_property_choice_for_all_selected_entities_without_chat(self):
+    async def test_multiple_properties_share_one_choice_call_and_render_per_entity_and_area(self):
+        snapshot = {"entities": [
+            entity("light.office", "Lampe", area="office", brightness=128, color_temp_kelvin=3000),
+            entity("light.kitchen", "Lampe", area="kitchen", brightness=255),
+        ], "services": {}}
+        probabilities = {"state": 0.02, "attribute:brightness": 0.35, "attribute:color_temp_kelvin": 0.25, "none": 0.38}
+        client = ScriptedModels([
+            {"service": "query_state"}, {"area": "all_areas"}, {"domain": "light"},
+            {"query_type": "complex"}, {"targets": "all"},
+            {"state_property": {"type": "choice", "choice": "none", "confidence": 0, "probabilities": probabilities}},
+        ])
+        events = []
+        execute = AsyncMock()
+        result = await AgentEngine(local_settings(), client, execute=execute, trace=lambda *event: events.append(event)).process(
+            "Wie hell sind die Lampen und welche Farbtemperatur haben sie?", "de", snapshot)
+        self.assertEqual(result["state_properties"], ["attribute:brightness", "attribute:color_temp_kelvin"])
+        self.assertEqual(result["property_selection"]["probability_threshold"], 0.5)
+        self.assertAlmostEqual(result["property_selection"]["effective_probability_threshold"], 0.5 / 3)
+        self.assertEqual(result["answer"], "[Office]: Lampe: Helligkeit: 50.2 %, Farbtemperatur: 3000 K. "
+                         "[Kitchen]: Lampe: Helligkeit: 100 %, Farbtemperatur: nicht verfügbar.")
+        self.assertEqual(len(result["state_values"]), 4)
+        missing = next(row for row in result["state_values"] if row["entity_id"] == "light.kitchen" and row["property"] == "attribute:color_temp_kelvin")
+        self.assertEqual(missing["status"], "missing")
+        self.assertIsNone(missing["value"])
+        self.assertEqual(len(client.requests), 6)
+        self.assertNotIn("entities", client.requests[-1][1])
+        self.assertIn("Choosing multiple properties is allowed", client.requests[-1][2]["state_property"]["instructions"])
+        self.assertEqual(client.requests[-1][2]["state_property"]["criteria"]["none"], "No supplied state property matches the request.")
+        output = next(output for stage, _, output in events if stage == "state_property" and output)
+        self.assertEqual(output["selected_properties"], result["state_properties"])
+        self.assertEqual(output["decisions"]["state_property"]["confidence"], 0)
+        self.assertNotIn("minimum_confidence", output["decisions"]["state_property"])
+        self.assertFalse(client.chat_requests)
+        execute.assert_not_awaited()
+
+    async def test_complex_query_selects_one_requested_property_without_chat(self):
         snapshot = copy.deepcopy(SNAPSHOT)
         snapshot["entities"][0]["attributes"]["brightness"] = 255
         snapshot["entities"][1]["attributes"]["brightness"] = 127.5
@@ -73,9 +124,9 @@ class ProgrammaticAnswerTests(unittest.IsolatedAsyncioTestCase):
         settings["history_enabled"] = True
         result = await AgentEngine(settings, client, trace=lambda *event: events.append(event), history=history, dry_run=True).process(
             "Wie hell sind sie?", "de", snapshot)
-        self.assertEqual(result["answer"], "Desk lamp: 100 %; Ceiling lamp: 50 %.")
+        self.assertEqual(result["answer"], "[Office]: Desk lamp: 100 %; Ceiling lamp: 50 %.")
         self.assertEqual(result["answer_source"], "programmatic")
-        self.assertEqual(result["state_property"], "attribute:brightness")
+        self.assertEqual(result["state_properties"], ["attribute:brightness"])
         self.assertEqual([row["entity_id"] for row in result["state_values"]], ["light.desk", "light.ceiling"])
         self.assertEqual(len(client.requests), 6)
         self.assertEqual(set(client.requests[-1][2]), {"state_property"})
@@ -159,7 +210,7 @@ class ProgrammaticAnswerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_unsure_property_stops_instead_of_answering_with_an_unrelated_value(self):
         client = ScriptedModels([{"service": "query_state"}, {"area": "area:office"}, {"domain": "sensor"},
-                                 {"query_type": "complex"}, {"targets": ["sensor.office"]}, {"state_property": "unsure"}])
+                                 {"query_type": "complex"}, {"targets": ["sensor.office"]}, {"state_property": "none"}])
         result = await AgentEngine(local_settings(), client, dry_run=True).process("What is its unsupported value?", "en", SNAPSHOT)
         self.assertEqual(result["route"], "unsure")
         self.assertEqual(result["failures"][0]["stage"], "state_property")
@@ -175,7 +226,7 @@ class ProgrammaticAnswerTests(unittest.IsolatedAsyncioTestCase):
         with (patch("local.fetch_snapshot", new=AsyncMock(return_value=exported)),
               patch("local.aiohttp.ClientSession", return_value=AsyncMock()), patch("local.ModelClient", return_value=client)):
             report = await benchmark.run(args, {})
-        self.assertEqual(report["result"]["answer"], "Room temperature: 22 °C.")
+        self.assertEqual(report["result"]["answer"], "[Office]: Room temperature: 22 °C.")
         self.assertFalse(client.chat_requests)
         self.assertIsNone(benchmark.answer_input(report))
         output = io.StringIO()
@@ -187,6 +238,27 @@ class ProgrammaticAnswerTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AnswerConfigurationTests(unittest.TestCase):
+    def test_property_threshold_reuses_settings_and_legacy_flag_without_global_confidence_override(self):
+        from custom_components.glow_assistant.state_properties import (
+            INSTRUCTIONS,
+            LEGACY_INSTRUCTIONS,
+        )
+
+        settings = local_settings()
+        settings["decider"].update(state_property_confidence=0.25, state_property_prompt=LEGACY_INSTRUCTIONS)
+        args = benchmark.parser().parse_args(["-q", "test", "--confidence", "0.9"])
+        configured = benchmark.model_settings(settings, args, {})["decider"]
+        self.assertEqual(configured["state_property_confidence"], 0.25)
+        self.assertEqual(configured["state_property_prompt"], INSTRUCTIONS)
+        self.assertEqual(configured["service_confidence"], 0.9)
+        self.assertEqual(normalize_settings({"decider": {"state_property_confidence": 0}})["decider"]["state_property_confidence"], 0)
+        for flag in ("--state-property-threshold", "--state-property-confidence"):
+            with self.subTest(flag=flag):
+                args = benchmark.parser().parse_args(["-q", "test", "--confidence", "0.9", flag, "0.6"])
+                self.assertEqual(benchmark.model_settings(settings, args, {})["decider"]["state_property_confidence"], 0.6)
+        custom = normalize_settings({"decider": {"state_property_prompt": "My property instructions"}})
+        self.assertEqual(custom["decider"]["state_property_prompt"], "My property instructions")
+
     def test_reply_defaults_validation_and_exported_ha_overrides(self):
         settings = local_settings()
         self.assertEqual(settings["ok_reply"], "Okay")

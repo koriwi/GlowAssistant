@@ -12,7 +12,7 @@ STAGE_LABELS = {
     "domain": "Choose a state-query domain",
     "query_type": "Choose a yes/no or detailed answer",
     "binary_answer": "Answer the yes/no state question",
-    "state_property": "Choose the requested state property",
+    "state_property": "Select requested state properties",
     "target_scope": "Classify entity targets and explicit or implied areas",
     "action_areas": "Select action areas",
     "action_entities": "Select action entities",
@@ -124,6 +124,7 @@ def decision_details(questions, answers, config):
         confidence = confidence if finite_number(confidence) else None
         probability_fields = {
             "area": "area_confidence",
+            "state_property": "state_property_confidence",
             "optional_parameters": "parameter_probability_threshold",
             "action_areas": "action_area_probability_threshold",
             "action_entities": "action_entity_probability_threshold",

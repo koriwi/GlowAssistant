@@ -29,9 +29,9 @@ flowchart TD
     QueryTargets --> States["Read selected states from snapshot"]
     States --> QueryReplyMode{"LLM answer enabled?"}
     QueryReplyMode -->|Yes| Answer["Smart-home answer model"]
-    QueryReplyMode -->|No| Property["Decider: choose one requested state property"]
-    Property -->|unsure| Unsure
-    Property -->|Selected| StateText["Format entity names + values + units"]
+    QueryReplyMode -->|No| Property["Decider: one Choice over state properties + none; relative cutoff"]
+    Property -->|No retained properties| Unsure
+    Property -->|Selected| StateText["Group by area and entity; label multiple properties with values and units"]
     StateText --> Reply
     Answer --> Reply
 

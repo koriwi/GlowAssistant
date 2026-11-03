@@ -138,6 +138,14 @@ class ChatLogTraceTests(unittest.TestCase):
         self.assertEqual(self.messages[0].tool_calls[0].tool_name, "glow_assistant_select_query_areas")
         self.assertEqual(self.messages[1].tool_result, result)
 
+    def test_state_property_card_shows_multiple_retained_properties(self):
+        result = {"selected_properties": ["attribute:brightness", "attribute:color_temp_kelvin"],
+                  "probability_threshold": 0.5, "effective_probability_threshold": 0.5 / 3}
+        self.trace("state_property", {"candidate_counts": {"state_property": 4}})
+        self.trace("state_property", {}, result)
+        self.assertEqual(self.messages[0].tool_calls[0].tool_name, "glow_assistant_select_state_property")
+        self.assertEqual(self.messages[1].tool_result, result)
+
     def test_select_extraction_has_a_native_card_with_values_and_scores(self):
         result = {"value": ["needs_action"], "parameter": "status", "effective_probability_threshold": 0.15,
                   "probabilities": {"value:needs_action": 0.9, "value:completed": 0.05, "none": 0.05}}

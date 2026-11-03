@@ -321,11 +321,22 @@ class AgentEngine:
         ]
         if not self.settings["answer"]["enable"]:
             options = property_options(members)
-            response = await self._decide(result, "state_property", {"prompt": prompt, "domain": result["domain"]}, {
-                "state_property": choice_question(options, config["state_property_prompt"]),
-            })
-            result["state_property"] = self._choice(response, "state_property", options)
-            result["state_values"] = selected_values(members, result["state_property"])
+
+            def summarize_properties(response):
+                selection = decode_selection(response, "state_property", options, config["state_property_confidence"])
+                result["property_selection"] = {**selection, "selected_properties": selection["selected_choices"]}
+                result["state_properties"] = selection["selected_choices"]
+                return result["property_selection"]
+
+            question = selection_question(options, config["state_property_prompt"])
+            question["criteria"]["none"] = "No supplied state property matches the request."
+            await self._decide(result, "state_property", {"prompt": prompt, "domain": result["domain"]}, {
+                "state_property": question,
+            }, summarize=summarize_properties)
+            if not result["state_properties"]:
+                raise Uncertain("state_property", "No requested state properties were retained.",
+                                "Name the requested properties. Review their probabilities and the state-property threshold.")
+            result["state_values"] = [row for name in result["state_properties"] for row in selected_values(members, name)]
             self._programmatic_answer(result, format_values(result["state_values"], result["language"]))
             return
         facts = {key: value for key, value in result.items()

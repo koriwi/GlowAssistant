@@ -66,8 +66,8 @@ class QueryAreaTests(unittest.IsolatedAsyncioTestCase):
                 candidates = client.requests[4][2]["query_targets"]["criteria"]
                 self.assertEqual(set(candidates), {"entity:light.kitchen", "entity:light.office", "entity:light.desk", "none"})
                 self.assertEqual({state["entity_id"] for state in result["state_info"]}, {"light.kitchen", "light.office"})
-                self.assertIn("Küche", result["answer"])
-                self.assertIn("Büro", result["answer"])
+                state = "an" if language == "de" else "on"
+                self.assertEqual(result["answer"], f"[Küche]: Deckenlampe: {state}. [Büro]: Deckenlampe: {state}.")
                 self.assertEqual(client.requests[1][1]["history"], history)
                 self.assertEqual(client.requests[1][1]["language"], language)
                 self.assertNotIn("entities", client.requests[1][1])
