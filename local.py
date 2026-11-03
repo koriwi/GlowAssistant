@@ -345,7 +345,7 @@ def print_report(report, show_answer_input=False):
         print_table(["Parameter", "Value"], [(name, json.dumps(value, ensure_ascii=False) if isinstance(value, list) else value)
                                              for name, value in result["parameters"].items()], [32, max(30, columns - 36)])
         print()
-    stages = [("snapshot", str(report["timings_ms"]["snapshot"]), "Read HA context and settings", "-")]
+    stages = [("snapshot", str(report["timings_ms"]["snapshot"]), "Read HA context and settings", "-", "-")]
     for event in report["trace"]:
         output = event.get("output", {})
         if "duration_ms" not in output:
@@ -374,12 +374,23 @@ def print_report(report, show_answer_input=False):
         score = "-"
         if scores:
             score = f"{min(scores):.3f}" if min(scores) == max(scores) else f"{min(scores):.3f}–{max(scores):.3f}"
+        probabilities = []
+        for info in decisions.values():
+            value = info.get("probability")
+            if value is None:
+                value = info.get("probabilities", {}).get(info.get("choice"))
+            if isinstance(value, (int, float)):
+                probabilities.append(value)
+        probability = "-"
+        if probabilities:
+            low, high = min(probabilities), max(probabilities)
+            probability = f"{low:.3f}" if low == high else f"{low:.3f}–{high:.3f}"
         stage_label = "capabilities" if event["stage"] == "parameter_capabilities" else event["stage"]
-        stages.append((stage_label, str(output["duration_ms"]), detail, score))
+        stages.append((stage_label, str(output["duration_ms"]), detail, score, probability))
     timings = report["timings_ms"]
-    stages.extend([("engine subtotal", str(timings["engine"]), "", "-"), ("total", str(timings["total"]), "", "-")])
-    print_table(["Stage", "Time (ms)", "Decision / status", "Confidence"], stages,
-                [20, 9, max(24, columns - 50), 12], right_columns=(1, 3))
+    stages.extend([("engine subtotal", str(timings["engine"]), "", "-", "-"), ("total", str(timings["total"]), "", "-", "-")])
+    print_table(["Stage", "Time (ms)", "Decision / status", "Confidence", "Probability"], stages,
+                [20, 9, max(24, columns - 64), 12, 12], right_columns=(1, 3, 4))
     print()
     for field in ("answer", "error"):
         if field in result and not (field == "answer" and result.get("error") == result[field]):
