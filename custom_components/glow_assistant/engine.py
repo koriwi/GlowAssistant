@@ -169,6 +169,10 @@ class AgentEngine:
                     for decision in details["decisions"].values():
                         decision.update(probability_threshold=None, effective_probability_threshold=None,
                                         selection_basis="unique_highest_probability")
+                        if "minimum_confidence" in details:
+                            decision.update(minimum_confidence=details["minimum_confidence"],
+                                            effective_choice=next(iter(details["selected_choices"]), "none"),
+                                            selection_basis="unique_highest_probability_and_minimum_confidence")
             return response
         except ModelError as error:
             details.update(status="error", error=str(error), **error.details)
@@ -450,6 +454,13 @@ class AgentEngine:
 
         def summarize(response):
             selection = decode_selection(response, stage, options, threshold)
+            if single:
+                confidence = response["answers"][stage]["confidence"]
+                minimum = config["action_area_confidence"]
+                selection.update(confidence=confidence, minimum_confidence=minimum)
+                if confidence < minimum:
+                    selection.update(selected_choices=[], reason=(
+                        f"Area selection confidence ({confidence:g}) is below the configured minimum ({minimum:g})."))
             selection["selected_names"] = [options[key]["name"] for key in selection["selected_choices"]]
             result[stage] = selection
             return selection
@@ -461,7 +472,7 @@ class AgentEngine:
         }, {stage: selection_question(options, config[f"action_{kind}_prompt"])}, summarize=summarize)
         selected = result[stage]["selected_choices"]
         if not selected:
-            raise Uncertain(stage, "No unambiguous action targets were retained.",
+            raise Uncertain(stage, result[stage].get("reason", "No unambiguous action targets were retained."),
                             "Name the requested rooms or devices. Review the option probabilities and selection threshold.")
         return selected
 

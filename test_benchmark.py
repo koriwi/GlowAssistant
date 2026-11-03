@@ -83,10 +83,12 @@ class BenchmarkSettingsTests(unittest.TestCase):
 
     def test_action_selection_thresholds_are_independent_of_global_confidence(self):
         args = benchmark.parser().parse_args([
-            "--query", "test", "--confidence", "0.9", "--action-area-threshold", "0.1", "--action-entity-threshold", "0.2",
+            "--query", "test", "--confidence", "0.9", "--action-area-confidence", "0.85",
+            "--action-area-threshold", "0.1", "--action-entity-threshold", "0.2",
         ])
         configured = benchmark.model_settings(settings(), args, {})["decider"]
         self.assertEqual(configured["service_confidence"], 0.9)
+        self.assertEqual(configured["action_area_confidence"], 0.85)
         self.assertEqual(configured["action_area_probability_threshold"], 0.1)
         self.assertEqual(configured["action_entity_probability_threshold"], 0.2)
 

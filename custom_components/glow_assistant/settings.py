@@ -50,6 +50,7 @@ DEFAULTS = {
         "query_target_probability_threshold": 0.7,
         "state_property_confidence": 0.5,
         "target_scope_confidence": 0,
+        "action_area_confidence": 0.8,
         "action_area_probability_threshold": 0.8,
         "action_entity_probability_threshold": 0.8,
         "parameter_probability_threshold": 0.5,
@@ -163,7 +164,7 @@ def validate_settings(data):
     for field in ("parameter_probability_threshold", "action_area_probability_threshold", "action_entity_probability_threshold",
                   "query_target_probability_threshold", "text_probability_threshold", "select_probability_threshold"):
         _range(decider, field, 0, 1, "decider")
-    for stage in ("service", "area", "domain", "query_type", "binary_answer", "target_scope", "numeric", "state_property", "select"):
+    for stage in ("service", "area", "domain", "query_type", "binary_answer", "target_scope", "action_area", "numeric", "state_property", "select"):
         _range(decider, f"{stage}_confidence", 0, 1, "decider")
     if not isinstance(settings["log_runs"], bool):
         raise TypeError("log_runs must be a boolean.")

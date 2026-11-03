@@ -9,9 +9,9 @@ from custom_components.glow_assistant.settings import normalize_settings
 from test_integration_engine import SNAPSHOT, ScriptedModels, entity
 
 
-def answer(probabilities):
+def answer(probabilities, confidence=0):
     return {"type": "choice", "choice": max(probabilities, key=probabilities.get),
-            "confidence": 0, "probabilities": probabilities}
+            "confidence": confidence, "probabilities": probabilities}
 
 
 def snapshot():
@@ -135,7 +135,7 @@ class ActionRoutingTests(unittest.IsolatedAsyncioTestCase):
     async def test_explicit_areas_are_final_targets_without_entity_decision(self):
         result, client, _ = await self.run_route("areas", [{"action_areas": answer({
             "area:office": 0.45, "area:kitchen": 0.4, "none": 0.15,
-        })}])
+        })}], settings=normalize_settings({"decider": {"action_area_confidence": 1}}))
         self.assertEqual(result["target"]["type"], "areas")
         self.assertEqual(result["target"]["area_ids"], ["office", "kitchen"])
         self.assertEqual(len(client.requests), 3)
@@ -153,7 +153,7 @@ class ActionRoutingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_entities_in_one_explicit_area_choose_highest_area_then_only_matching_entities(self):
         result, client, events = await self.run_route("entities_explicit_area", [
-            {"action_areas": answer({"area:office": 0.45, "area:kitchen": 0.4, "none": 0.15})},
+            {"action_areas": answer({"area:office": 0.45, "area:kitchen": 0.4, "none": 0.15}, confidence=0.9)},
             {"action_entities": answer({"entity:light.desk": 0.45, "entity:light.ceiling": 0.4, "none": 0.15})},
         ], settings=normalize_settings({"decider": {"action_area_probability_threshold": 0.99}}))
         self.assertEqual([area["area_id"] for area in result["selected_areas"]], ["office"])
@@ -164,6 +164,39 @@ class ActionRoutingTests(unittest.IsolatedAsyncioTestCase):
         output = next(output for stage, _, output in events if stage == "action_entities" and output)
         self.assertEqual(output["selected_names"], ["Desk lamp", "Ceiling lamp"])
         self.assertEqual(output["probability_threshold"], 0.8)
+
+    async def test_single_area_confidence_gates_entity_selection_and_execution_at_the_boundary(self):
+        for confidence, accepted in ((0.79, False), (0.8, True), (0.95, True)):
+            with self.subTest(confidence=confidence):
+                client = ScriptedModels([
+                    {"service": "light.turn_off"}, {"target_scope": "entities_explicit_area"},
+                    {"action_areas": answer({"area:office": 0.96, "area:kitchen": 0.02, "none": 0.02}, confidence=confidence)},
+                    {"action_entities": "entity:light.desk"},
+                ])
+                execute = AsyncMock(return_value=None)
+                events = []
+                result = await AgentEngine(normalize_settings({}), client, execute=execute,
+                                           trace=lambda *event: events.append(event)).process(
+                    "Turn off the desk lamp in the office", "en", snapshot())
+                output = next(output for stage, _, output in events if stage == "action_areas" and output)
+                decision = output["decisions"]["action_areas"]
+                self.assertEqual(output["confidence"], confidence)
+                self.assertEqual(output["minimum_confidence"], 0.8)
+                self.assertEqual(decision["minimum_confidence"], 0.8)
+                self.assertIsNone(decision["effective_probability_threshold"])
+                self.assertEqual(decision["selection_basis"], "unique_highest_probability_and_minimum_confidence")
+                self.assertEqual(decision["effective_choice"], "area:office" if accepted else "none")
+                if accepted:
+                    self.assertEqual(result["route"], "smarthome")
+                    execute.assert_awaited_once_with("light.turn_off", {"entity_id": ["light.desk"]})
+                else:
+                    self.assertEqual(result["route"], "unsure")
+                    self.assertEqual(len(client.requests), 3)
+                    self.assertIsNone(result["target"])
+                    self.assertEqual(result["failures"][0]["stage"], "action_areas")
+                    self.assertIn("0.79", result["failures"][0]["reason"])
+                    self.assertNotIn("execution", result)
+                    execute.assert_not_awaited()
 
     async def test_entities_in_implied_area_skip_area_decision_and_resolve_room_alias(self):
         result, client, _ = await self.run_route("entities_implied_area", [
@@ -292,7 +325,7 @@ class ActionRoutingTests(unittest.IsolatedAsyncioTestCase):
     async def test_none_or_tied_area_selection_stops_without_entity_call(self):
         for probabilities in ({"area:office": 0.1, "area:kitchen": 0.2, "none": 0.7},
                               {"area:office": 0.5, "area:kitchen": 0.5, "none": 0}):
-            result, client, _ = await self.run_route("entities_explicit_area", [{"action_areas": answer(probabilities)}])
+            result, client, _ = await self.run_route("entities_explicit_area", [{"action_areas": answer(probabilities, confidence=0.95)}])
             self.assertEqual(result["route"], "unsure")
             self.assertEqual(len(client.requests), 3)
             self.assertIsNone(result["target"])

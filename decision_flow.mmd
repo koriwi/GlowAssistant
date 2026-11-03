@@ -34,7 +34,8 @@ flowchart TD
 
     Service -->|HA action| Scope{"Decider: intended target type"}
     Scope -->|Arealess entities| DomainOnly["Filter entities by action domain"]
-    Scope -->|"Entities + explicit area"| OneArea["Decider: choose the one highest-probability area"]
+    Scope -->|"Entities + explicit area"| OneArea["Decider: unique highest-probability area; confidence at least configured minimum"]
+    OneArea -->|None, tie or low confidence| Unsure
     OneArea --> DomainArea["Filter entities by action domain and selected area"]
     Scope -->|"Entities + implied area"| Speaker["Use speaker area from HA context"]
     Speaker --> DomainArea

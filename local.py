@@ -55,7 +55,9 @@ def parser():
         flags = ["--" + field.replace("_", "-")]
         if field == "domain_confidence":
             flags.append("--domain-filter-confidence")
-        result.add_argument(*flags, type=confidence)
+        help_text = ("Minimum area confidence for specific entities in one explicit room; independent of --action-area-threshold."
+                     if field == "action_area_confidence" else None)
+        result.add_argument(*flags, type=confidence, help=help_text)
     result.add_argument("--language", help="Assist pipeline language to simulate; defaults to BENCHMARK_LANGUAGE or de.")
     result.add_argument("--speaker-area", help="Optional speaker room, e.g. Küche; omitted means location unknown.")
     result.add_argument("--json", action="store_true", help="Print complete decisions, trace and timings.")
