@@ -13,7 +13,7 @@ from custom_components.glow_assistant.client import ModelClient, ModelError
 from custom_components.glow_assistant.engine import AgentEngine
 from custom_components.glow_assistant.run_logs import RunRecord, redact, successful
 from custom_components.glow_assistant.settings import normalize_settings
-from test_integration_engine import SNAPSHOT, ScriptedModels
+from tests.test_integration_engine import SNAPSHOT, ScriptedModels
 
 
 def settings(log_runs=False):
@@ -204,7 +204,7 @@ class RunLogTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(list(Path(directory).rglob("*.json"))), 1)
 
     async def test_executed_local_run_logs_live_mode_and_returned_action_data(self):
-        from test_actions import ActionExecutionTests
+        from tests.test_actions import ActionExecutionTests
 
         fixture = ActionExecutionTests()
         args = benchmark.parser().parse_args(["-q", "Read the shopping list", "--execute", "--log-runs"])

@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock, patch
 
 from numeric_probe import decode_probe, probe_request, run
 
-
 RESPONSE = {
     "answers": {
         "numeric_score": {

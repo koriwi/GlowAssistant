@@ -40,7 +40,7 @@ class ToolResultContent:
 
 class ChatLogTraceTests(unittest.TestCase):
     def setUp(self):
-        path = Path(__file__).parent / "custom_components/glow_assistant/chat_log_trace.py"
+        path = Path(__file__).parents[1] / "custom_components/glow_assistant/chat_log_trace.py"
         spec = importlib.util.spec_from_file_location("custom_components.glow_assistant._chat_log_trace_test", path)
         module = importlib.util.module_from_spec(spec)
         with patch.dict(sys.modules, {

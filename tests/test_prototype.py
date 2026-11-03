@@ -8,8 +8,19 @@ from contextlib import asynccontextmanager, redirect_stdout
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
-from prototype import area_request, current_numeric_values, decision_request, execute_mcp, parse_entities, print_result, query_state_info, run, selection_result, service_request, target_arguments
-
+from prototype import (
+    area_request,
+    current_numeric_values,
+    decision_request,
+    execute_mcp,
+    parse_entities,
+    print_result,
+    query_state_info,
+    run,
+    selection_result,
+    service_request,
+    target_arguments,
+)
 
 CONTEXT = """Live Context: An overview of the areas and the devices in this smart home:
 - names: Desk lamp, Work light

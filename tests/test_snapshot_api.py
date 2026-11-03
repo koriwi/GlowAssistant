@@ -26,7 +26,7 @@ class SnapshotAPITests(unittest.IsolatedAsyncioTestCase):
         self.loaded = object()
         self.snapshot = AsyncMock(return_value={"entities": [], "services": {}})
         self.execute = AsyncMock(return_value=None)
-        path = Path(__file__).parent / "custom_components/glow_assistant/snapshot_api.py"
+        path = Path(__file__).parents[1] / "custom_components/glow_assistant/snapshot_api.py"
         spec = importlib.util.spec_from_file_location("custom_components.glow_assistant._snapshot_api_test", path)
         module = importlib.util.module_from_spec(spec)
         with patch.dict(sys.modules, {

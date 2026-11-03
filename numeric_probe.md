@@ -70,7 +70,7 @@ python numeric_probe.py "Set brightness to 55%" --expected 55 --json
 Offline checks:
 
 ```bash
-python -m unittest -v test_numeric_probe
+python -m unittest -v tests.test_numeric_probe
 ```
 
 These check request construction, scaling, validation, and isolation. Numeric extraction accuracy requires live runs against your prompts.

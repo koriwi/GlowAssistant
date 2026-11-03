@@ -12,7 +12,7 @@ from custom_components.glow_assistant.actions import ActionError
 from custom_components.glow_assistant.client import ModelError
 from custom_components.glow_assistant.engine import AgentEngine
 from custom_components.glow_assistant.settings import normalize_settings
-from test_integration_engine import SNAPSHOT, ScriptedModels
+from tests.test_integration_engine import SNAPSHOT, ScriptedModels
 
 
 def settings():
@@ -127,7 +127,7 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
         return {"entry_id": "one", "snapshot": copy.deepcopy(SNAPSHOT), "settings": settings()}
 
     async def test_select_extraction_prints_json_list_and_its_own_timing_row(self):
-        from test_parameter_values import SelectParameterEngineTests
+        from tests.test_parameter_values import SelectParameterEngineTests
 
         fixture = SelectParameterEngineTests()
         exported = self.exported()
@@ -180,7 +180,7 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(compatibility.main, benchmark.main)
 
     async def test_live_list_retrieval_displays_actual_items(self):
-        from test_actions import ActionExecutionTests
+        from tests.test_actions import ActionExecutionTests
 
         fixture = ActionExecutionTests()
         exported = self.exported()
@@ -292,8 +292,8 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
             INSTRUCTIONS,
             text_request,
         )
-        from test_integration_engine import entity
-        from test_text_values import response_for
+        from tests.test_integration_engine import entity
+        from tests.test_text_values import response_for
 
         query = "Schreibe Energy Drinks auf die Einkaufsliste"
         args = benchmark.parser().parse_args(["-q", query, "--text-threshold", "0.05"])

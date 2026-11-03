@@ -7,7 +7,7 @@ import local
 from custom_components.glow_assistant.client import ModelError
 from custom_components.glow_assistant.engine import AgentEngine
 from custom_components.glow_assistant.settings import normalize_settings
-from test_integration_engine import ScriptedModels, entity
+from tests.test_integration_engine import ScriptedModels, entity
 
 
 def snapshot():

@@ -7,7 +7,13 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from tts_answer import answer_config, answer_context, general_config, generate_answer, generate_general_answer
+from tts_answer import (
+    answer_config,
+    answer_context,
+    general_config,
+    generate_answer,
+    generate_general_answer,
+)
 
 
 class AnswerTests(unittest.TestCase):

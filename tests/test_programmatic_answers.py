@@ -16,7 +16,7 @@ from custom_components.glow_assistant.state_properties import (
     property_options,
     selected_values,
 )
-from test_integration_engine import SNAPSHOT, ScriptedModels, entity
+from tests.test_integration_engine import SNAPSHOT, ScriptedModels, entity
 
 
 def local_settings(enabled=False):

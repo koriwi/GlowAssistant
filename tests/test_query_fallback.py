@@ -13,7 +13,7 @@ from custom_components.glow_assistant.settings import (
     normalize_settings,
     validate_settings,
 )
-from test_integration_engine import ScriptedModels, entity
+from tests.test_integration_engine import ScriptedModels, entity
 
 SNAPSHOT = {
     "entities": [

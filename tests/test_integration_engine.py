@@ -1310,7 +1310,7 @@ class IntegrationSettingsTests(unittest.TestCase):
             read_choice(response, "target", {}, 0)
 
     def test_translation_fields_match_settings_blocks(self):
-        root = Path(__file__).parent / "custom_components/glow_assistant"
+        root = Path(__file__).parents[1] / "custom_components/glow_assistant"
         strings = json.loads((root / "strings.json").read_text())
         self.assertEqual(strings, json.loads((root / "translations/en.json").read_text()))
         for group in ("decider", "answer", "general"):

@@ -43,7 +43,7 @@ class EntityContextTests(unittest.TestCase):
             "homeassistant.helpers": helpers,
             "homeassistant.helpers.service": SimpleNamespace(async_get_all_descriptions=Mock()),
         }
-        path = Path(__file__).parent / "custom_components/glow_assistant/ha_context.py"
+        path = Path(__file__).parents[1] / "custom_components/glow_assistant/ha_context.py"
         spec = importlib.util.spec_from_file_location("custom_components.glow_assistant._context_test", path)
         module = importlib.util.module_from_spec(spec)
         with patch.dict(sys.modules, dependencies):

@@ -92,7 +92,7 @@ class TextValuesTests(unittest.TestCase):
 
 class TextEngineTests(unittest.IsolatedAsyncioTestCase):
     async def run_text(self, service, prompt, selected_positions, *, optional=False, settings=None, history=None):
-        from test_integration_engine import ScriptedModels, entity
+        from tests.test_integration_engine import ScriptedModels, entity
 
         parameter = "item" if service == "todo.add_item" else "message"
         domain = service.split(".")[0]
@@ -159,7 +159,7 @@ class TextEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[-1][0], "failure")
 
     async def test_malformed_word_choices_fail_without_retry_or_answer_call(self):
-        from test_integration_engine import ScriptedModels, entity
+        from tests.test_integration_engine import ScriptedModels, entity
 
         choices = [{"service": "todo.add_item"}, {"target_scope": "entities"},
                    {"action_entities": "entity:todo.shopping"}, {"text_words": {"type": "choice", "probabilities": {"none": 1}}}]
@@ -174,7 +174,7 @@ class TextEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[-1][2]["stage"], "text:item")
 
     async def test_optional_message_not_selected_skips_extraction(self):
-        from test_integration_engine import ScriptedModels, entity
+        from tests.test_integration_engine import ScriptedModels, entity
 
         client = ScriptedModels([{"service": "notify.send_message"}, {"target_scope": "entities"},
                                  {"action_entities": "entity:notify.kitchen"}, {"optional_parameters": "none"}])

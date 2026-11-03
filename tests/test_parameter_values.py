@@ -21,7 +21,7 @@ from custom_components.glow_assistant.settings import (
     validate_settings,
 )
 from custom_components.glow_assistant.text_values import text_request
-from test_integration_engine import ScriptedModels, entity
+from tests.test_integration_engine import ScriptedModels, entity
 
 
 def numeric_answers(score, mode="absolute", confidence=0.9):

@@ -6,11 +6,18 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from prototype import (
-    DECISIONS_URL, MODEL, call_decider, decider_api_key, decider_model,
-    decider_url, decision_request, service_request, area_request,
-)
 from numeric_values import numeric_request
+from prototype import (
+    DECISIONS_URL,
+    MODEL,
+    area_request,
+    call_decider,
+    decider_api_key,
+    decider_model,
+    decider_url,
+    decision_request,
+    service_request,
+)
 
 
 class DeciderConfigTests(unittest.TestCase):
