@@ -794,7 +794,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         area_question = models.requests[1][2]["area"]
         self.assertNotIn("no_area", area_question["criteria"])
         self.assertIn("all_areas", area_question["criteria"])
-        self.assertIn("when no specific room is identified", area_question["instructions"])
+        self.assertIn("when no room can be resolved", area_question["instructions"])
         self.assertNotIn("Choose no_area when no room is identified.", area_question["instructions"])
         self.assertEqual(set(models.requests[2][2]), {"domain"})
         targets = {target["entity_id"] for target in query_candidates(models.requests[4])}

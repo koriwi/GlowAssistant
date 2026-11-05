@@ -319,6 +319,7 @@ class AgentEngine:
             return
 
         result["service"] = QUERY
+        result["speaker_area"] = speaker_area
         entities = filter_entity_attributes(entities, config["max_attribute_chars"])
         try:
             await self._query_state(result, entities, language_instruction)
@@ -432,6 +433,7 @@ class AgentEngine:
             return result["query_fallback"]
 
         await self._decide(result, "query_fallback", {"prompt": result["request"], "service": QUERY,
+                           "speaker_area": result.get("speaker_area"),
                            "trigger": result["query_fallback"]["trigger"]}, {
             "query_fallback": selection_question(options, config["query_fallback_prompt"]),
         }, summarize=summarize)
@@ -456,7 +458,7 @@ class AgentEngine:
     async def _select_query_areas(self, result, entities):
         config = self.settings["decider"]
         areas = {f"area:{key}": {"area_id": key, **value} for key, value in areas_from(entities).items()}
-        options = {**areas, "all_areas": "The whole home or no specific room; include exposed entities without a room."}
+        options = {**areas, "all_areas": "The whole home, or no room resolved from the request, history or speaker_area; include exposed entities without a room."}
 
         def summarize(response):
             selection = decode_selection(response, "area", options, config["area_confidence"])
@@ -475,7 +477,7 @@ class AgentEngine:
             }
             return result["area_selection"]
 
-        await self._decide(result, "area", {"prompt": result["request"]}, {
+        await self._decide(result, "area", {"prompt": result["request"], "speaker_area": result.get("speaker_area")}, {
             "area": selection_question(options, config["area_prompt"]),
         }, summarize=summarize)
         selection = result["area_selection"]

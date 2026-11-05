@@ -35,6 +35,44 @@ def area_choice(probabilities):
 
 
 class QueryAreaTests(unittest.IsolatedAsyncioTestCase):
+    async def test_speaker_context_reaches_query_area_selection_without_overriding_explicit_scope(self):
+        data = {"entities": [
+            entity("binary_sensor.kitchen", "Window", area="kitchen", state="off", device_class="window"),
+            entity("binary_sensor.office", "Window", area="office", state="on", device_class="window"),
+        ], "services": {}}
+        scenarios = [
+            ("de", "Sind hier Fenster offen?", "area:kitchen", "no", {"binary_sensor.kitchen"}),
+            ("en", "Are any windows open in here?", "area:kitchen", "no", {"binary_sensor.kitchen"}),
+            ("de", "Sind im Büro Fenster offen?", "area:office", "yes", {"binary_sensor.office"}),
+            ("en", "Are any office windows open?", "area:office", "yes", {"binary_sensor.office"}),
+            ("de", "Sind im ganzen Haus Fenster offen?", "all_areas", "yes", {"binary_sensor.kitchen", "binary_sensor.office"}),
+            ("en", "Are any windows open in the whole house?", "all_areas", "yes", {"binary_sensor.kitchen", "binary_sensor.office"}),
+        ]
+        for language, query, area, answer, expected_ids in scenarios:
+            with self.subTest(query=query):
+                client = ScriptedModels([
+                    {"service": "query_state"}, {"area": area}, {"domain": "binary_sensor"},
+                    {"query_type": "yes_no"}, {"binary_answer": answer},
+                ])
+                result = await AgentEngine(normalize_settings({}), client, decisions_only=True).process(
+                    query, language, data, speaker_area="kitchen")
+                self.assertEqual(client.requests[1][1]["speaker_area"], "kitchen")
+                self.assertEqual(result["speaker_area"], "kitchen")
+                self.assertEqual(result["state_answer"], answer)
+                self.assertEqual({row["entity_id"] for row in client.requests[-1][1]["entities"]}, expected_ids)
+
+    async def test_query_fallback_receives_speaker_context_for_local_references(self):
+        client = ScriptedModels([
+            {"service": "query_state"}, {"area": "none"}, {"query_fallback": "entity:light.kitchen"},
+            {"query_type": "yes_no"}, {"binary_answer": "yes"},
+        ])
+        result = await AgentEngine(normalize_settings({}), client, decisions_only=True).process(
+            "Is the light on in here?", "en", snapshot(), speaker_area="kitchen")
+        self.assertEqual(client.requests[2][1]["speaker_area"], "kitchen")
+        self.assertEqual(result["query_fallback"]["status"], "completed")
+        self.assertEqual(result["target"]["entity_id"], "light.kitchen")
+        self.assertNotIn("answer", result)
+
     async def test_named_areas_form_a_union_before_domain_and_target_selection(self):
         for language, prompt in (("en", "Which lights are on in the kitchen and office?"),
                                  ("de", "Welche Lichter sind in Küche und Büro an?")):
