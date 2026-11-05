@@ -1,9 +1,44 @@
 import asyncio
 import json
+import re
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import timedelta
 
 from .client import ModelError
+from .run_logs import redact
+
+
+def _tool_error_details(error, secrets):
+    pending = [error]
+    seen = set()
+    messages = []
+    details = {"error_type": type(error).__name__}
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        nested = getattr(current, "exceptions", ())
+        pending.extend(reversed(nested))
+        remote = getattr(current, "error", None)
+        if not nested:
+            messages.append(redact(str(getattr(remote, "message", None) or current), secrets))
+        code = getattr(remote, "code", None)
+        if isinstance(code, int) and not isinstance(code, bool):
+            details.setdefault("mcp_error_code", code)
+        status = getattr(getattr(current, "response", None), "status_code", None)
+        if isinstance(status, int) and 100 <= status <= 599:
+            details.setdefault("http_status", status)
+        cause = current.__cause__ or (current.__context__ if not current.__suppress_context__ else None)
+        if cause is not None:
+            pending.append(cause)
+    message = "\n".join(dict.fromkeys(messages))
+    if "http_status" not in details:
+        match = re.search(r"\bHTTP(?:\s+error|\s+status)?\s*[:=]?\s*([1-5]\d\d)\b", message, re.IGNORECASE)
+        if match:
+            details["http_status"] = int(match[1])
+    details["tool_error"] = message[:2048]
+    return details
 
 
 @asynccontextmanager
@@ -101,7 +136,8 @@ class MCPTools:
             async with asyncio.timeout(server["timeout"]):
                 response = await session.call_tool(tool_name, arguments)
         except Exception as error:
-            raise ModelError("MCP tool call failed; its outcome is unconfirmed. It was not retried.") from error
+            details = _tool_error_details(error, [item["token"] for item in self.servers])
+            raise ModelError("MCP tool call failed; its outcome is unconfirmed. It was not retried.", **details) from error
         result = response.model_dump(mode="json", exclude_none=True)
         if len(json.dumps(result, ensure_ascii=False)) > self.max_result_chars:
             raise ModelError("MCP tool result exceeds the configured character limit; the tool was not retried.")

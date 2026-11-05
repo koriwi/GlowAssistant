@@ -134,14 +134,60 @@ class GeneralTests(unittest.IsolatedAsyncioTestCase):
             await self.run_loop([{"tool_calls": [tool_call(), tool_call(identifier="call-2")]}], tools=tools, config=config)
         tools.call.assert_not_awaited()
 
-    async def test_uncertain_tool_failure_does_not_request_another_completion(self):
+    async def test_uncertain_tool_failure_reaches_the_model_without_retrying_the_tool(self):
         tools = FakeTools()
         tools.call.side_effect = ModelError("MCP tool call failed; outcome unconfirmed.")
-        model = FakeModel([{"tool_calls": [tool_call()]}])
-        with self.assertRaisesRegex(ModelError, "unconfirmed"):
-            await general_answer(model, normalize_settings({})["general"], [{"role": "system", "content": "Brief"}],
-                                 tools_factory=lambda *_: tools)
-        self.assertEqual(len(model.requests), 1)
+        answer, _, model, _ = await self.run_loop([
+            {"tool_calls": [tool_call()]}, {"content": "The lookup failed; its outcome is unconfirmed."},
+        ], tools=tools)
+        self.assertIn("unconfirmed", answer)
+        result = json.loads(model.requests[1][1][-1]["content"])
+        self.assertTrue(result["isError"])
+        self.assertIn("unconfirmed", result["content"][0]["text"])
+        tools.call.assert_awaited_once()
+
+    async def test_rpc_http_errors_reach_the_model_and_debug_with_status_and_original_message(self):
+        for status in (404, 503):
+            with self.subTest(status=status):
+                tools = FakeTools()
+                tools.call.side_effect = ModelError("MCP tool call failed; its outcome is unconfirmed.",
+                                                   mcp_error_code=-32603, http_status=status,
+                                                   tool_error=f"Failed to fetch https://example.test: HTTP error: {status}")
+                events = []
+                _, _, model, _ = await self.run_loop([
+                    {"tool_calls": [tool_call()]}, {"content": f"The request failed with HTTP {status}."},
+                ], tools=tools, trace=lambda *event: events.append(copy.deepcopy(event)))
+                result = json.loads(model.requests[1][1][-1]["content"])
+                details = json.loads(result["content"][0]["text"])
+                self.assertEqual(details["http_status"], status)
+                self.assertEqual(details["mcp_error_code"], -32603)
+                self.assertIn(f"HTTP error: {status}", details["tool_error"])
+                output = next(output for stage, _, output in events if stage == "mcp" and output)
+                self.assertEqual(output["status"], "error")
+                self.assertEqual(output["http_status"], status)
+                self.assertEqual(output["result"], result)
+                tools.call.assert_awaited_once()
+
+    async def test_model_can_correct_arguments_after_a_tool_failure(self):
+        tools = FakeTools()
+        tools.call.side_effect = [ModelError("HTTP 404"), tools.result]
+        answer, _, model, _ = await self.run_loop([
+            {"tool_calls": [tool_call(arguments={"query": "wrong URL"})]},
+            {"tool_calls": [tool_call(arguments={"query": "correct URL"}, identifier="call-2")]},
+            {"content": "330 metres."},
+        ], tools=tools)
+        self.assertEqual(answer, "330 metres.")
+        self.assertEqual(tools.call.await_count, 2)
+        self.assertTrue(json.loads(model.requests[1][1][-1]["content"])["isError"])
+        self.assertFalse(json.loads(model.requests[2][1][-1]["content"])["isError"])
+
+    async def test_failed_call_cannot_be_replayed_with_the_same_arguments(self):
+        tools = FakeTools()
+        tools.call.side_effect = ModelError("HTTP 503")
+        with self.assertRaisesRegex(ModelError, "repeated"):
+            await self.run_loop([
+                {"tool_calls": [tool_call()]}, {"tool_calls": [tool_call(identifier="call-2")]},
+            ], tools=tools)
         tools.call.assert_awaited_once()
 
     async def test_error_results_reach_the_model_and_are_visible_in_debug(self):

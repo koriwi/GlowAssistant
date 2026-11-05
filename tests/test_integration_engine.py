@@ -1074,71 +1074,25 @@ class IntegrationSettingsTests(unittest.TestCase):
         self.assertEqual(saved["decider"]["text_probability_threshold"], 0.4)
         self.assertEqual(normalize_settings({"decider": {"text_probability_threshold": 0.05}})["decider"]["text_probability_threshold"], 0.05)
 
-    def test_saved_thresholds_and_custom_prompts_are_preserved(self):
-        from custom_components.glow_assistant.parameter_values import (
-            LEGACY_NUMERIC_INSTRUCTIONS,
-            LEGACY_NUMERIC_MODE_INSTRUCTIONS,
-        )
-
+    def test_saved_thresholds_are_preserved(self):
         saved = normalize_settings({"decider": {"text_probability_threshold": 0.02, "parameter_probability_threshold": 0.3}})["decider"]
         self.assertEqual(saved["text_probability_threshold"], 0.02)
         self.assertEqual(saved["parameter_probability_threshold"], 0.3)
-        for name, old in (("numeric_prompt", LEGACY_NUMERIC_INSTRUCTIONS), ("numeric_mode_prompt", LEGACY_NUMERIC_MODE_INSTRUCTIONS)):
-            self.assertEqual(normalize_settings({"decider": {name: old}})["decider"][name], DEFAULTS["decider"][name])
-            self.assertEqual(normalize_settings({"decider": {name: "Custom rules"}})["decider"][name], "Custom rules")
 
-    def test_old_stock_text_prompts_upgrade_and_custom_prompts_are_preserved(self):
-        from custom_components.glow_assistant.text_values import LEGACY_PROMPTS
-
-        for old in LEGACY_PROMPTS:
-            saved = normalize_settings({"decider": {"text_prompt": old, "message_prompt": old}})["decider"]
-            self.assertEqual(saved["text_prompt"], DEFAULTS["decider"]["text_prompt"])
-            self.assertEqual(saved["message_prompt"], DEFAULTS["decider"]["message_prompt"])
-        custom = normalize_settings({"decider": {"text_prompt": "My item rules", "message_prompt": "My message rules"}})["decider"]
-        self.assertEqual(custom["text_prompt"], "My item rules")
-        self.assertEqual(custom["message_prompt"], "My message rules")
-        shared = normalize_settings({"decider": {"text_prompt": "My shared rules"}})["decider"]
-        self.assertEqual(shared["message_prompt"], "My shared rules")
-
-    def test_stock_scope_prompt_upgrades_and_custom_prompt_is_preserved(self):
-        from custom_components.glow_assistant.const import (
-            LEGACY_ACTION_TARGET_SCOPE_PROMPT,
-            LEGACY_AREALESS_TARGET_SCOPE_PROMPT,
-            LEGACY_TARGET_SCOPE_PROMPT,
-            LEGACY_UNSCOPED_TARGET_SCOPE_PROMPT,
-            TARGET_SCOPE_PROMPT,
-        )
-
-        for previous in (LEGACY_TARGET_SCOPE_PROMPT, LEGACY_ACTION_TARGET_SCOPE_PROMPT, LEGACY_UNSCOPED_TARGET_SCOPE_PROMPT,
-                         LEGACY_AREALESS_TARGET_SCOPE_PROMPT):
-            upgraded = normalize_settings({"decider": {"target_scope_prompt": previous}})
-            self.assertEqual(upgraded["decider"]["target_scope_prompt"], TARGET_SCOPE_PROMPT)
-        custom = normalize_settings({"decider": {"target_scope_prompt": "Custom scope rules"}})
-        self.assertEqual(custom["decider"]["target_scope_prompt"], "Custom scope rules")
 
     def test_domain_selection_settings_are_preserved_and_blank_prompt_restores_default(self):
-        from custom_components.glow_assistant.const import (
-            AREA_PROMPT,
-            LEGACY_QUERY_AREA_PROMPT,
-        )
-
         settings = normalize_settings({"decider": {"domain_prompt": "Custom rules", "domain_confidence": 0.2}})
         self.assertEqual(settings["decider"]["domain_prompt"], "Custom rules")
         self.assertEqual(settings["decider"]["domain_confidence"], 0.2)
         reset = normalize_settings({"decider": {"domain_prompt": " "}})
         self.assertEqual(reset["decider"]["domain_prompt"], DEFAULTS["decider"]["domain_prompt"])
-        self.assertEqual(normalize_settings({"decider": {"area_prompt": LEGACY_QUERY_AREA_PROMPT}})["decider"]["area_prompt"], AREA_PROMPT)
-        self.assertEqual(normalize_settings({"decider": {"area_prompt": "Custom area rules"}})["decider"]["area_prompt"], "Custom area rules")
 
 
-    def test_domain_selection_migrates_the_previous_threshold_but_not_keep_drop_prompts(self):
-        settings = normalize_settings({"decider": {"domain_filter_prompt": "Keep/drop rules", "domain_filter_confidence": 0.3,
-                                                  "domain_filter_keep_uncertain": True}})
-        self.assertEqual(settings["decider"]["domain_prompt"], DEFAULTS["decider"]["domain_prompt"])
-        self.assertEqual(settings["decider"]["domain_confidence"], 0.3)
-        self.assertNotIn("domain_filter_keep_uncertain", settings["decider"])
-        custom = normalize_settings({"decider": {"domain_filter_confidence": 0.3, "domain_confidence": 0.7}})
-        self.assertEqual(custom["decider"]["domain_confidence"], 0.7)
+    def test_removed_domain_filter_settings_are_ignored(self):
+        old = {"domain_filter_prompt": "Old rules", "domain_filter_confidence": 0.3, "domain_filter_keep_uncertain": True}
+        settings = normalize_settings({"decider": old})
+        self.assertFalse(set(old) & set(settings["decider"]))
+        self.assertEqual(settings["decider"]["domain_confidence"], DEFAULTS["decider"]["domain_confidence"])
 
     def test_http_mcp_settings_are_normalized_without_changing_model_keys(self):
         settings = self.local_settings()
@@ -1178,44 +1132,6 @@ class IntegrationSettingsTests(unittest.TestCase):
             with self.subTest(size=size), self.assertRaises(ValueError):
                 validate_settings(settings)
 
-    def test_legacy_stock_general_prompt_is_updated_but_custom_prompts_are_preserved(self):
-        from custom_components.glow_assistant.const import (
-            GENERAL_PROMPT,
-            LEGACY_GENERAL_PROMPT,
-        )
-
-        self.assertEqual(normalize_settings({"general": {"prompt": LEGACY_GENERAL_PROMPT}})["general"]["prompt"], GENERAL_PROMPT)
-        self.assertEqual(normalize_settings({"general": {"prompt": "My custom rules"}})["general"]["prompt"], "My custom rules")
-
-    def test_stock_action_prompt_is_updated_for_text_but_custom_rules_are_preserved(self):
-        from custom_components.glow_assistant.const import (
-            LEGACY_PARAMETER_SERVICE_PROMPT,
-            LEGACY_RESPONSE_SERVICE_PROMPT,
-            LEGACY_SELECT_SERVICE_PROMPT,
-            LEGACY_SERVICE_PROMPT,
-            LEGACY_TIMESTAMP_SERVICE_PROMPT,
-            SERVICE_PROMPT,
-        )
-
-        saved = normalize_settings({"decider": {"service_prompt": LEGACY_SERVICE_PROMPT}})
-        self.assertEqual(saved["decider"]["service_prompt"], SERVICE_PROMPT)
-        self.assertIn("field metadata", saved["decider"]["service_prompt"])
-        self.assertEqual(saved["decider"]["text_probability_threshold"], 0.4)
-        saved = normalize_settings({"decider": {"service_prompt": LEGACY_PARAMETER_SERVICE_PROMPT}})
-        self.assertEqual(saved["decider"]["service_prompt"], SERVICE_PROMPT)
-        self.assertIn("todo.get_items", saved["decider"]["service_prompt"])
-        saved = normalize_settings({"decider": {"service_prompt": LEGACY_RESPONSE_SERVICE_PROMPT}})
-        self.assertEqual(saved["decider"]["service_prompt"], SERVICE_PROMPT)
-        self.assertIn("fixed-option select", saved["decider"]["service_prompt"])
-        saved = normalize_settings({"decider": {"service_prompt": LEGACY_TIMESTAMP_SERVICE_PROMPT}})
-        self.assertEqual(saved["decider"]["service_prompt"], SERVICE_PROMPT)
-        self.assertNotIn("unsure", SERVICE_PROMPT)
-        saved = normalize_settings({"decider": {"service_prompt": LEGACY_SELECT_SERVICE_PROMPT}})
-        self.assertEqual(saved["decider"]["service_prompt"], SERVICE_PROMPT)
-        custom = normalize_settings({"decider": {"service_prompt": "Custom action rules", "text_prompt": "Custom extraction rules"}})
-        self.assertEqual(custom["decider"]["service_prompt"], "Custom action rules")
-        self.assertEqual(custom["decider"]["text_prompt"], "Custom extraction rules")
-
 
     def test_ui_numeric_selectors_produce_integer_token_limits(self):
         settings = self.local_settings()
@@ -1225,15 +1141,18 @@ class IntegrationSettingsTests(unittest.TestCase):
         self.assertIsInstance(saved["answer"]["max_tokens"], int)
         self.assertIsInstance(saved["decider"]["max_input_chars"], int)
 
-    def test_prompt_reset_and_customization_survive_normalization(self):
-        settings = normalize_settings({"decider": {"query_target_prompt": "My rules", "area_prompt": " ", "target_scope_prompt": " "}})
-        self.assertEqual(settings["decider"]["query_target_prompt"], "My rules")
-        self.assertEqual(settings["decider"]["area_prompt"], DEFAULTS["decider"]["area_prompt"])
-        self.assertEqual(settings["decider"]["target_scope_prompt"], DEFAULTS["decider"]["target_scope_prompt"])
-        self.assertNotEqual(id(settings["decider"]), id(DEFAULTS["decider"]))
-        for field in ("query_type_prompt", "binary_answer_prompt"):
-            self.assertEqual(normalize_settings({"decider": {field: " "}})["decider"][field], DEFAULTS["decider"][field])
-            self.assertEqual(normalize_settings({"decider": {field: "Custom rules"}})["decider"][field], "Custom rules")
+    def test_saved_prompts_stay_unchanged_and_blank_prompts_restore_current_defaults(self):
+        for group in ("decider", "answer", "general"):
+            for field, default in DEFAULTS[group].items():
+                if field != "prompt" and not field.endswith("_prompt"):
+                    continue
+                for saved in ("", "   ", "Saved prompt text"):
+                    with self.subTest(group=group, field=field, saved=saved):
+                        settings = normalize_settings({group: {field: saved}})
+                        self.assertEqual(settings[group][field], saved if saved.strip() else default)
+                        self.assertIsNot(settings[group], DEFAULTS[group])
+        settings = normalize_settings({"decider": {"text_prompt": "Custom item rules"}})
+        self.assertEqual(settings["decider"]["message_prompt"], DEFAULTS["decider"]["message_prompt"])
 
     def test_invalid_ranges_and_models_are_rejected(self):
         for group, field, value in (

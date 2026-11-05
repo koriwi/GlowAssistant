@@ -10,18 +10,6 @@ from .const import (
     BINARY_ANSWER_PROMPT,
     DOMAIN_PROMPT,
     GENERAL_PROMPT,
-    LEGACY_ACTION_TARGET_SCOPE_PROMPT,
-    LEGACY_AREALESS_TARGET_SCOPE_PROMPT,
-    LEGACY_GENERAL_PROMPT,
-    LEGACY_PARAMETER_SERVICE_PROMPT,
-    LEGACY_QUERY_AREA_PROMPT,
-    LEGACY_RESPONSE_SERVICE_PROMPT,
-    LEGACY_SELECT_SERVICE_PROMPT,
-    LEGACY_SERVICE_PROMPT,
-    LEGACY_TARGET_SCOPE_PROMPT,
-    LEGACY_TEXT_SERVICE_PROMPT,
-    LEGACY_TIMESTAMP_SERVICE_PROMPT,
-    LEGACY_UNSCOPED_TARGET_SCOPE_PROMPT,
     QUERY_FALLBACK_PROMPT,
     QUERY_TARGET_PROMPT,
     QUERY_TYPE_PROMPT,
@@ -29,20 +17,11 @@ from .const import (
     TARGET_SCOPE_PROMPT,
 )
 from .optional_parameters import INSTRUCTIONS as PARAMETER_INSTRUCTIONS
-from .parameter_values import (
-    LEGACY_NUMERIC_INSTRUCTIONS,
-    LEGACY_NUMERIC_MODE_INSTRUCTIONS,
-    NUMERIC_INSTRUCTIONS,
-    NUMERIC_MODE_INSTRUCTIONS,
-)
+from .parameter_values import NUMERIC_INSTRUCTIONS, NUMERIC_MODE_INSTRUCTIONS
 from .select_values import INSTRUCTIONS as SELECT_INSTRUCTIONS
 from .state_properties import INSTRUCTIONS as STATE_PROPERTY_INSTRUCTIONS
-from .state_properties import LEGACY_INSTRUCTIONS as LEGACY_STATE_PROPERTY_INSTRUCTIONS
-from .state_properties import (
-    LEGACY_MULTI_INSTRUCTIONS as LEGACY_MULTI_STATE_PROPERTY_INSTRUCTIONS,
-)
 from .text_values import INSTRUCTIONS as TEXT_INSTRUCTIONS
-from .text_values import LEGACY_PROMPTS, MESSAGE_INSTRUCTIONS
+from .text_values import MESSAGE_INSTRUCTIONS
 
 DEFAULTS = {
     "name": "GlowAssistant",
@@ -128,33 +107,6 @@ def normalize_settings(data):
                     settings[key][field] = value
         elif key in data:
             settings[key] = data[key]
-    if settings["general"]["prompt"] == LEGACY_GENERAL_PROMPT:
-        settings["general"]["prompt"] = GENERAL_PROMPT
-    if settings["decider"]["service_prompt"] in (
-        LEGACY_SERVICE_PROMPT, LEGACY_TEXT_SERVICE_PROMPT, LEGACY_PARAMETER_SERVICE_PROMPT, LEGACY_RESPONSE_SERVICE_PROMPT,
-        LEGACY_SELECT_SERVICE_PROMPT, LEGACY_TIMESTAMP_SERVICE_PROMPT,
-    ):
-        settings["decider"]["service_prompt"] = SERVICE_PROMPT
-    decider = data.get("decider", {})
-    if settings["decider"]["area_prompt"] == LEGACY_QUERY_AREA_PROMPT:
-        settings["decider"]["area_prompt"] = AREA_PROMPT
-    if settings["decider"]["state_property_prompt"] in (LEGACY_STATE_PROPERTY_INSTRUCTIONS, LEGACY_MULTI_STATE_PROPERTY_INSTRUCTIONS):
-        settings["decider"]["state_property_prompt"] = STATE_PROPERTY_INSTRUCTIONS
-    if settings["decider"]["target_scope_prompt"] in (
-        LEGACY_TARGET_SCOPE_PROMPT, LEGACY_ACTION_TARGET_SCOPE_PROMPT, LEGACY_UNSCOPED_TARGET_SCOPE_PROMPT,
-        LEGACY_AREALESS_TARGET_SCOPE_PROMPT,
-    ):
-        settings["decider"]["target_scope_prompt"] = TARGET_SCOPE_PROMPT
-    if "domain_confidence" not in decider and "domain_filter_confidence" in decider:
-        settings["decider"]["domain_confidence"] = decider["domain_filter_confidence"]
-    for field, old in (("numeric_prompt", LEGACY_NUMERIC_INSTRUCTIONS), ("numeric_mode_prompt", LEGACY_NUMERIC_MODE_INSTRUCTIONS)):
-        if settings["decider"][field] == old:
-            settings["decider"][field] = DEFAULTS["decider"][field]
-    for field in ("text_prompt", "message_prompt"):
-        if settings["decider"][field] in LEGACY_PROMPTS:
-            settings["decider"][field] = DEFAULTS["decider"][field]
-    if "message_prompt" not in decider and "text_prompt" in decider and decider["text_prompt"].strip() not in (*LEGACY_PROMPTS, TEXT_INSTRUCTIONS, ""):
-        settings["decider"]["message_prompt"] = settings["decider"]["text_prompt"]
     return settings
 
 

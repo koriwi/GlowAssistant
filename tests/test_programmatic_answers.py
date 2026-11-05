@@ -247,17 +247,14 @@ class AnswerConfigurationTests(unittest.TestCase):
     def test_property_threshold_reuses_settings_and_legacy_flag_without_global_confidence_override(self):
         from custom_components.glow_assistant.state_properties import (
             INSTRUCTIONS,
-            LEGACY_INSTRUCTIONS,
-            LEGACY_MULTI_INSTRUCTIONS,
         )
 
         settings = local_settings()
-        settings["decider"].update(state_property_confidence=0.25, state_property_prompt=LEGACY_INSTRUCTIONS)
+        settings["decider"].update(state_property_confidence=0.25, state_property_prompt=" ")
         args = benchmark.parser().parse_args(["-q", "test", "--confidence", "0.9"])
         configured = benchmark.model_settings(settings, args, {})["decider"]
         self.assertEqual(configured["state_property_confidence"], 0.25)
         self.assertEqual(configured["state_property_prompt"], INSTRUCTIONS)
-        self.assertEqual(normalize_settings({"decider": {"state_property_prompt": LEGACY_MULTI_INSTRUCTIONS}})["decider"]["state_property_prompt"], INSTRUCTIONS)
         self.assertEqual(configured["service_confidence"], 0.9)
         self.assertEqual(normalize_settings({"decider": {"state_property_confidence": 0}})["decider"]["state_property_confidence"], 0)
         for flag in ("--state-property-threshold", "--state-property-confidence"):

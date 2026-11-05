@@ -24,6 +24,7 @@ Set the endpoint URL, model ID, and API key for each model.
 Use a native decision model, such as Jev, for **Decider**.
 Use chat models for the optional answer and general sections.
 Each model section also contains its prompts and limits.
+Clear a prompt and save to load its current default. Updates keep saved prompt text.
 Local servers without authentication do not need an API key.
 
 | Provider | Decider endpoint | Answer and general endpoints |
@@ -48,6 +49,7 @@ Enable each server that you want to use.
 Set its URL and bearer token, if required.
 Use a General model with tool-call support.
 For stdio servers, supply your own HTTP proxy.
+Tool-call failures go back to the General model with their error details. The model can correct arguments or explain the failure. Identical calls are not retried.
 
 ## Conversation history
 

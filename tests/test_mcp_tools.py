@@ -3,6 +3,7 @@ import importlib.util
 import json
 import sys
 import unittest
+from builtins import ExceptionGroup
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -96,6 +97,38 @@ class MCPToolsTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(ModelError, "outcome is unconfirmed") as caught:
                 await tools.call("mcp_001_001", {"query": "x"})
         self.assertNotIn("secret", str(caught.exception))
+        self.assertNotIn("secret", json.dumps(caught.exception.details))
+        target.call_tool.assert_awaited_once()
+
+    async def test_rpc_http_error_preserves_status_and_code_and_redacts_credentials(self):
+        for status in (404, 503):
+            with self.subTest(status=status):
+                error = RuntimeError("RPC failure")
+                error.error = SimpleNamespace(code=-32603, message=(
+                    f"Failed to fetch http://user:password@example.test/?token=private-token: HTTP error: {status} bearer-secret"))
+                target = session()
+                target.call_tool.side_effect = error
+                async with MCPTools([server(token="bearer-secret")], 2000, self.connection({"search": target})) as tools:
+                    with self.assertRaises(ModelError) as caught:
+                        await tools.call("mcp_001_001", {"query": "x"})
+                details = caught.exception.details
+                self.assertEqual(details["mcp_error_code"], -32603)
+                self.assertEqual(details["http_status"], status)
+                self.assertIn(f"HTTP error: {status}", details["tool_error"])
+                for secret in ("user:password", "private-token", "bearer-secret"):
+                    self.assertNotIn(secret, details["tool_error"])
+                target.call_tool.assert_awaited_once()
+
+    async def test_grouped_http_errors_preserve_transport_status_and_bound_error_text(self):
+        underlying = RuntimeError("x" * 5000)
+        underlying.response = SimpleNamespace(status_code=503)
+        target = session()
+        target.call_tool.side_effect = ExceptionGroup("transport", [underlying])
+        async with MCPTools([server()], 2000, self.connection({"search": target})) as tools:
+            with self.assertRaises(ModelError) as caught:
+                await tools.call("mcp_001_001", {"query": "x"})
+        self.assertEqual(caught.exception.details["http_status"], 503)
+        self.assertLessEqual(len(caught.exception.details["tool_error"]), 2048)
         target.call_tool.assert_awaited_once()
 
     async def test_large_results_are_not_retried_or_silently_truncated(self):
