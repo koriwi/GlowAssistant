@@ -7,6 +7,7 @@ Files starting with `_` are internal helpers, not commands.
 | Tool | Purpose |
 | --- | --- |
 | `local.py` | Test the shared HA engine. Actions require `--execute`. See [setup](../local.md). |
+| `decision_tests.py` | Test DE/EN decisions on a fixed household snapshot. Score extraction separately. See [cases](../tests/decisions/README.md). |
 | `entity_probe.py` | Select one entity from the full exposed snapshot. No actions. |
 | `numeric_probe.py` | Compare numeric Score and Choice results. See [options](numeric_probe.md). |
 | `area_filter_probe.py` | Run the DE/EN area-filter benchmark. Save results for model comparisons. |
@@ -15,4 +16,7 @@ Files starting with `_` are internal helpers, not commands.
 ```bash
 python scripts/local.py -q "Ist die Lampe im Büro an?"
 python scripts/entity_probe.py -q "Wann wurde zuletzt gemäht?" --repeat 5
+python scripts/decision_tests.py
+python scripts/decision_tests.py --category shutters
+python scripts/decision_tests.py --list
 ```

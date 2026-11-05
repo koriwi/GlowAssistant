@@ -130,13 +130,14 @@ def filter_entity_attributes(entities, max_chars):
 
 
 class AgentEngine:
-    def __init__(self, settings, client, trace=None, history=None, dry_run=False, execute=None):
+    def __init__(self, settings, client, trace=None, history=None, dry_run=False, execute=None, decisions_only=False):
         self.settings = settings
         self.client = client
         self.trace = trace
         self.history = list(history or []) if settings["history_enabled"] else []
         self.stage = "service"
-        self.dry_run = dry_run
+        self.decisions_only = decisions_only
+        self.dry_run = dry_run or decisions_only
         self.execute = execute
 
     def _trace(self, stage, arguments, result=None):
@@ -228,6 +229,9 @@ class AgentEngine:
             result.update(error=str(error), answer=self.settings["error_reply"])
             self._failure(result, model_failure(self.stage, error))
             raise
+        finally:
+            if self.decisions_only:
+                result.pop("answer", None)
         return result
 
     async def _process(self, result, snapshot, speaker_area):
@@ -256,6 +260,9 @@ class AgentEngine:
         }, summarize=summarize_action)
         service_choice = self._choice(response, "service", services)
         if service_choice == GENERAL:
+            if self.decisions_only:
+                result["route"] = GENERAL
+                return
             if not self.settings["general"]["enable"]:
                 raise Uncertain("general", "The request is not about the smart home, but the general model is disabled.",
                                 "Enable General model to answer general questions.")
@@ -295,6 +302,8 @@ class AgentEngine:
             members = await self._select_action_targets(result, entities)
             await self._select_parameters(result, members)
             await self._extract_parameters(result, members)
+            if self.decisions_only:
+                return
             await self._execute_action(result, members)
             if self.settings["answer"]["enable"]:
                 facts = {"request": prompt, "service": result["service"], "target": result["target"],
@@ -356,7 +365,7 @@ class AgentEngine:
              entity.get("attributes", {}) if entity["state"] not in ("unknown", "unavailable") else {}}
             for entity in members
         ]
-        if not self.settings["answer"]["enable"]:
+        if not self.settings["answer"]["enable"] or self.decisions_only:
             options = property_options(members)
 
             def summarize_properties(response):
@@ -380,6 +389,8 @@ class AgentEngine:
                 raise Uncertain("state_property", "No requested state properties were retained.",
                                 "Name the requested properties. Review their probabilities and the state-property threshold.")
             result["state_values"] = [row for name in result["state_properties"] for row in selected_values(members, name)]
+            if self.decisions_only:
+                return
             self._programmatic_answer(result, format_values(result["state_values"], result["language"]))
             return
         facts = {key: value for key, value in result.items()
@@ -697,6 +708,8 @@ class AgentEngine:
             "prompt": result["request"], "area": area, "domain": result["domain"], "entities": candidates,
         }, {"binary_answer": choice_question(options, self.settings["decider"]["binary_answer_prompt"])})
         result["state_answer"] = self._choice(response, "binary_answer", options)
+        if self.decisions_only:
+            return
         if not self.settings["answer"]["enable"]:
             reply = self.settings[f"{result['state_answer']}_reply"].strip()
             self._programmatic_answer(result, reply or yes_no_answer(result["state_answer"], result["language"]))

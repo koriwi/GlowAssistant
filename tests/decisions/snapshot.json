@@ -1,0 +1,1551 @@
+{
+  "entities": [
+    {
+      "entity_id": "light.kuche_decke",
+      "name": "Deckenlampe",
+      "domain": "light",
+      "aliases": [],
+      "area_id": "kitchen",
+      "area_name": "Küche",
+      "area_aliases": [
+        "kueche",
+        "kitchen"
+      ],
+      "state": "on",
+      "attributes": {
+        "brightness": 128,
+        "color_temp_kelvin": 3000,
+        "hs_color": [
+          120,
+          75
+        ],
+        "supported_features": 32,
+        "supported_color_modes": [
+          "hs",
+          "color_temp"
+        ]
+      }
+    },
+    {
+      "entity_id": "light.kuche_spots",
+      "name": "Spots",
+      "domain": "light",
+      "aliases": [],
+      "area_id": "kitchen",
+      "area_name": "Küche",
+      "area_aliases": [
+        "kueche",
+        "kitchen"
+      ],
+      "state": "off",
+      "attributes": {
+        "brightness": 0,
+        "color_temp_kelvin": 3000,
+        "hs_color": [
+          120,
+          75
+        ],
+        "supported_features": 32,
+        "supported_color_modes": [
+          "hs",
+          "color_temp"
+        ]
+      }
+    },
+    {
+      "entity_id": "light.buro_lichtschalter",
+      "name": "Deckenlampe",
+      "domain": "light",
+      "aliases": [],
+      "area_id": "office",
+      "area_name": "Büro",
+      "area_aliases": [
+        "buero",
+        "office"
+      ],
+      "state": "on",
+      "attributes": {
+        "brightness": 191,
+        "color_temp_kelvin": 3000,
+        "hs_color": [
+          120,
+          75
+        ],
+        "supported_features": 32,
+        "supported_color_modes": [
+          "hs",
+          "color_temp"
+        ]
+      }
+    },
+    {
+      "entity_id": "light.buro_schreibtisch",
+      "name": "Schreibtischlampe",
+      "domain": "light",
+      "aliases": [],
+      "area_id": "office",
+      "area_name": "Büro",
+      "area_aliases": [
+        "buero",
+        "office"
+      ],
+      "state": "off",
+      "attributes": {
+        "brightness": 0,
+        "color_temp_kelvin": 3000,
+        "hs_color": [
+          120,
+          75
+        ],
+        "supported_features": 32,
+        "supported_color_modes": [
+          "hs",
+          "color_temp"
+        ]
+      }
+    },
+    {
+      "entity_id": "light.wohnzimmer_stehlampe",
+      "name": "Stehlampe",
+      "domain": "light",
+      "aliases": [],
+      "area_id": "living_room",
+      "area_name": "Wohnzimmer",
+      "area_aliases": [
+        "living room"
+      ],
+      "state": "on",
+      "attributes": {
+        "brightness": 128,
+        "color_temp_kelvin": 3000,
+        "hs_color": [
+          120,
+          75
+        ],
+        "supported_features": 32,
+        "supported_color_modes": [
+          "hs",
+          "color_temp"
+        ]
+      }
+    },
+    {
+      "entity_id": "light.wohnzimmer_decke",
+      "name": "Deckenlampe",
+      "domain": "light",
+      "aliases": [],
+      "area_id": "living_room",
+      "area_name": "Wohnzimmer",
+      "area_aliases": [
+        "living room"
+      ],
+      "state": "off",
+      "attributes": {
+        "brightness": 0,
+        "color_temp_kelvin": 3000,
+        "hs_color": [
+          120,
+          75
+        ],
+        "supported_features": 32,
+        "supported_color_modes": [
+          "hs",
+          "color_temp"
+        ]
+      }
+    },
+    {
+      "entity_id": "light.schlafzimmer_nachttisch_links",
+      "name": "Nachttisch links",
+      "domain": "light",
+      "aliases": [],
+      "area_id": "bedroom",
+      "area_name": "Schlafzimmer",
+      "area_aliases": [
+        "bedroom"
+      ],
+      "state": "on",
+      "attributes": {
+        "brightness": 128,
+        "color_temp_kelvin": 3000,
+        "hs_color": [
+          120,
+          75
+        ],
+        "supported_features": 32,
+        "supported_color_modes": [
+          "hs",
+          "color_temp"
+        ]
+      }
+    },
+    {
+      "entity_id": "light.schlafzimmer_nachttisch_rechts",
+      "name": "Nachttisch rechts",
+      "domain": "light",
+      "aliases": [],
+      "area_id": "bedroom",
+      "area_name": "Schlafzimmer",
+      "area_aliases": [
+        "bedroom"
+      ],
+      "state": "off",
+      "attributes": {
+        "brightness": 0,
+        "color_temp_kelvin": 3000,
+        "hs_color": [
+          120,
+          75
+        ],
+        "supported_features": 32,
+        "supported_color_modes": [
+          "hs",
+          "color_temp"
+        ]
+      }
+    },
+    {
+      "entity_id": "light.flur_decke",
+      "name": "Deckenlampe",
+      "domain": "light",
+      "aliases": [],
+      "area_id": "hall",
+      "area_name": "Flur",
+      "area_aliases": [
+        "hall",
+        "hallway"
+      ],
+      "state": "on",
+      "attributes": {
+        "brightness": 255,
+        "color_temp_kelvin": 3000,
+        "hs_color": [
+          120,
+          75
+        ],
+        "supported_features": 32,
+        "supported_color_modes": [
+          "hs",
+          "color_temp"
+        ]
+      }
+    },
+    {
+      "entity_id": "light.leselampe",
+      "name": "Leselampe",
+      "domain": "light",
+      "aliases": [],
+      "area_id": null,
+      "area_name": null,
+      "area_aliases": [],
+      "state": "off",
+      "attributes": {
+        "brightness": 0,
+        "color_temp_kelvin": 3000,
+        "hs_color": [
+          120,
+          75
+        ],
+        "supported_features": 32,
+        "supported_color_modes": [
+          "hs",
+          "color_temp"
+        ]
+      }
+    },
+    {
+      "entity_id": "cover.kuche_doppelrollo_left",
+      "name": "Balkon",
+      "domain": "cover",
+      "aliases": [],
+      "area_id": "kitchen",
+      "area_name": "Küche",
+      "area_aliases": [
+        "kueche",
+        "kitchen"
+      ],
+      "state": "open",
+      "attributes": {
+        "device_class": "shutter",
+        "current_position": 64,
+        "supported_features": 15
+      }
+    },
+    {
+      "entity_id": "cover.kuche_doppelrollo_right",
+      "name": "Arbeitsplatte",
+      "domain": "cover",
+      "aliases": [],
+      "area_id": "kitchen",
+      "area_name": "Küche",
+      "area_aliases": [
+        "kueche",
+        "kitchen"
+      ],
+      "state": "open",
+      "attributes": {
+        "device_class": "shutter",
+        "current_position": 43,
+        "supported_features": 15
+      }
+    },
+    {
+      "entity_id": "cover.wohnzimmer_terrassentur",
+      "name": "Terrassentür",
+      "domain": "cover",
+      "aliases": [],
+      "area_id": "living_room",
+      "area_name": "Wohnzimmer",
+      "area_aliases": [
+        "living room"
+      ],
+      "state": "open",
+      "attributes": {
+        "device_class": "shutter",
+        "current_position": 75,
+        "supported_features": 15
+      }
+    },
+    {
+      "entity_id": "cover.schlafzimmer_fenster",
+      "name": "Fenster",
+      "domain": "cover",
+      "aliases": [],
+      "area_id": "bedroom",
+      "area_name": "Schlafzimmer",
+      "area_aliases": [
+        "bedroom"
+      ],
+      "state": "closed",
+      "attributes": {
+        "device_class": "shutter",
+        "current_position": 0,
+        "supported_features": 15
+      }
+    },
+    {
+      "entity_id": "climate.office_thermostat",
+      "name": "Thermostat",
+      "domain": "climate",
+      "aliases": [],
+      "area_id": "office",
+      "area_name": "Büro",
+      "area_aliases": [
+        "buero",
+        "office"
+      ],
+      "state": "heat",
+      "attributes": {
+        "temperature": 20,
+        "current_temperature": 22,
+        "min_temp": 16,
+        "max_temp": 26,
+        "target_temp_step": 1,
+        "temperature_unit": "°C",
+        "supported_features": 401,
+        "hvac_modes": [
+          "off",
+          "heat",
+          "cool"
+        ],
+        "preset_modes": [
+          "none",
+          "eco",
+          "comfort"
+        ]
+      }
+    },
+    {
+      "entity_id": "climate.living_room_thermostat",
+      "name": "Thermostat",
+      "domain": "climate",
+      "aliases": [],
+      "area_id": "living_room",
+      "area_name": "Wohnzimmer",
+      "area_aliases": [
+        "living room"
+      ],
+      "state": "heat",
+      "attributes": {
+        "temperature": 21,
+        "current_temperature": 22.6,
+        "min_temp": 16,
+        "max_temp": 26,
+        "target_temp_step": 1,
+        "temperature_unit": "°C",
+        "supported_features": 401,
+        "hvac_modes": [
+          "off",
+          "heat",
+          "cool"
+        ],
+        "preset_modes": [
+          "none",
+          "eco",
+          "comfort"
+        ]
+      }
+    },
+    {
+      "entity_id": "climate.bedroom_thermostat",
+      "name": "Thermostat",
+      "domain": "climate",
+      "aliases": [],
+      "area_id": "bedroom",
+      "area_name": "Schlafzimmer",
+      "area_aliases": [
+        "bedroom"
+      ],
+      "state": "heat",
+      "attributes": {
+        "temperature": 18,
+        "current_temperature": 19,
+        "min_temp": 16,
+        "max_temp": 26,
+        "target_temp_step": 1,
+        "temperature_unit": "°C",
+        "supported_features": 401,
+        "hvac_modes": [
+          "off",
+          "heat",
+          "cool"
+        ],
+        "preset_modes": [
+          "none",
+          "eco",
+          "comfort"
+        ]
+      }
+    },
+    {
+      "entity_id": "sensor.office_temperatur",
+      "name": "Temperatur",
+      "domain": "sensor",
+      "aliases": [],
+      "area_id": "office",
+      "area_name": "Büro",
+      "area_aliases": [
+        "buero",
+        "office"
+      ],
+      "state": "22",
+      "attributes": {
+        "device_class": "temperature",
+        "unit_of_measurement": "°C"
+      }
+    },
+    {
+      "entity_id": "sensor.kitchen_temperatur",
+      "name": "Temperatur",
+      "domain": "sensor",
+      "aliases": [],
+      "area_id": "kitchen",
+      "area_name": "Küche",
+      "area_aliases": [
+        "kueche",
+        "kitchen"
+      ],
+      "state": "21.5",
+      "attributes": {
+        "device_class": "temperature",
+        "unit_of_measurement": "°C"
+      }
+    },
+    {
+      "entity_id": "sensor.living_room_temperatur",
+      "name": "Temperatur",
+      "domain": "sensor",
+      "aliases": [],
+      "area_id": "living_room",
+      "area_name": "Wohnzimmer",
+      "area_aliases": [
+        "living room"
+      ],
+      "state": "22.6",
+      "attributes": {
+        "device_class": "temperature",
+        "unit_of_measurement": "°C"
+      }
+    },
+    {
+      "entity_id": "sensor.bedroom_temperatur",
+      "name": "Temperatur",
+      "domain": "sensor",
+      "aliases": [],
+      "area_id": "bedroom",
+      "area_name": "Schlafzimmer",
+      "area_aliases": [
+        "bedroom"
+      ],
+      "state": "19",
+      "attributes": {
+        "device_class": "temperature",
+        "unit_of_measurement": "°C"
+      }
+    },
+    {
+      "entity_id": "sensor.garden_temperatur",
+      "name": "Temperatur",
+      "domain": "sensor",
+      "aliases": [],
+      "area_id": "garden",
+      "area_name": "Garten",
+      "area_aliases": [
+        "garden"
+      ],
+      "state": "10",
+      "attributes": {
+        "device_class": "temperature",
+        "unit_of_measurement": "°C"
+      }
+    },
+    {
+      "entity_id": "sensor.kitchen_luftfeuchtigkeit",
+      "name": "Luftfeuchtigkeit",
+      "domain": "sensor",
+      "aliases": [],
+      "area_id": "kitchen",
+      "area_name": "Küche",
+      "area_aliases": [
+        "kueche",
+        "kitchen"
+      ],
+      "state": "55",
+      "attributes": {
+        "device_class": "humidity",
+        "unit_of_measurement": "%"
+      }
+    },
+    {
+      "entity_id": "sensor.living_room_luftfeuchtigkeit",
+      "name": "Luftfeuchtigkeit",
+      "domain": "sensor",
+      "aliases": [],
+      "area_id": "living_room",
+      "area_name": "Wohnzimmer",
+      "area_aliases": [
+        "living room"
+      ],
+      "state": "48",
+      "attributes": {
+        "device_class": "humidity",
+        "unit_of_measurement": "%"
+      }
+    },
+    {
+      "entity_id": "sensor.buro_fenster_batterie",
+      "name": "Fenstersensor Batterie",
+      "domain": "sensor",
+      "aliases": [],
+      "area_id": "office",
+      "area_name": "Büro",
+      "area_aliases": [
+        "buero",
+        "office"
+      ],
+      "state": "85",
+      "attributes": {
+        "device_class": "battery",
+        "unit_of_measurement": "%"
+      }
+    },
+    {
+      "entity_id": "sensor.letztes_mal_gemaht",
+      "name": "Letztes mal Rasen gemäht",
+      "domain": "sensor",
+      "aliases": [],
+      "area_id": null,
+      "area_name": null,
+      "area_aliases": [],
+      "state": "2026-10-31T10:00:00+00:00",
+      "attributes": {
+        "device_class": "timestamp"
+      }
+    },
+    {
+      "entity_id": "binary_sensor.buro_fenster_links",
+      "name": "Fenster links",
+      "domain": "binary_sensor",
+      "aliases": [],
+      "area_id": "office",
+      "area_name": "Büro",
+      "area_aliases": [
+        "buero",
+        "office"
+      ],
+      "state": "on",
+      "attributes": {
+        "device_class": "window"
+      }
+    },
+    {
+      "entity_id": "binary_sensor.buro_fenster_rechts",
+      "name": "Fenster rechts",
+      "domain": "binary_sensor",
+      "aliases": [],
+      "area_id": "office",
+      "area_name": "Büro",
+      "area_aliases": [
+        "buero",
+        "office"
+      ],
+      "state": "off",
+      "attributes": {
+        "device_class": "window"
+      }
+    },
+    {
+      "entity_id": "binary_sensor.kuche_fenster",
+      "name": "Fenster",
+      "domain": "binary_sensor",
+      "aliases": [],
+      "area_id": "kitchen",
+      "area_name": "Küche",
+      "area_aliases": [
+        "kueche",
+        "kitchen"
+      ],
+      "state": "off",
+      "attributes": {
+        "device_class": "window"
+      }
+    },
+    {
+      "entity_id": "binary_sensor.wohnzimmer_fenster",
+      "name": "Fenster",
+      "domain": "binary_sensor",
+      "aliases": [],
+      "area_id": "living_room",
+      "area_name": "Wohnzimmer",
+      "area_aliases": [
+        "living room"
+      ],
+      "state": "unavailable",
+      "attributes": {
+        "device_class": "window"
+      }
+    },
+    {
+      "entity_id": "binary_sensor.buro_bewegung",
+      "name": "Bewegungsmelder",
+      "domain": "binary_sensor",
+      "aliases": [],
+      "area_id": "office",
+      "area_name": "Büro",
+      "area_aliases": [
+        "buero",
+        "office"
+      ],
+      "state": "on",
+      "attributes": {
+        "device_class": "motion"
+      }
+    },
+    {
+      "entity_id": "binary_sensor.haustur",
+      "name": "Haustür",
+      "domain": "binary_sensor",
+      "aliases": [],
+      "area_id": "hall",
+      "area_name": "Flur",
+      "area_aliases": [
+        "hall",
+        "hallway"
+      ],
+      "state": "off",
+      "attributes": {
+        "device_class": "door"
+      }
+    },
+    {
+      "entity_id": "lawn_mower.mahroboter",
+      "name": "Mähroboter",
+      "domain": "lawn_mower",
+      "aliases": [],
+      "area_id": "garden",
+      "area_name": "Garten",
+      "area_aliases": [
+        "garden"
+      ],
+      "state": "docked",
+      "attributes": {}
+    },
+    {
+      "entity_id": "vacuum.roborock_s7",
+      "name": "Saugroboter",
+      "domain": "vacuum",
+      "aliases": [],
+      "area_id": "living_room",
+      "area_name": "Wohnzimmer",
+      "area_aliases": [
+        "living room"
+      ],
+      "state": "docked",
+      "attributes": {
+        "fan_speed": "balanced",
+        "fan_speed_list": [
+          "quiet",
+          "balanced",
+          "turbo"
+        ]
+      }
+    },
+    {
+      "entity_id": "vacuum.oben",
+      "name": "Saugroboter oben",
+      "domain": "vacuum",
+      "aliases": [],
+      "area_id": "hall",
+      "area_name": "Flur",
+      "area_aliases": [
+        "hall",
+        "hallway"
+      ],
+      "state": "idle",
+      "attributes": {
+        "fan_speed": "quiet",
+        "fan_speed_list": [
+          "quiet",
+          "balanced",
+          "turbo"
+        ]
+      }
+    },
+    {
+      "entity_id": "todo.einkaufsliste",
+      "name": "Einkaufsliste",
+      "domain": "todo",
+      "aliases": [],
+      "area_id": null,
+      "area_name": null,
+      "area_aliases": [],
+      "state": "3",
+      "attributes": {
+        "supported_features": 127
+      }
+    },
+    {
+      "entity_id": "todo.aufgaben",
+      "name": "Aufgaben",
+      "domain": "todo",
+      "aliases": [],
+      "area_id": "office",
+      "area_name": "Büro",
+      "area_aliases": [
+        "buero",
+        "office"
+      ],
+      "state": "2",
+      "attributes": {
+        "supported_features": 127
+      }
+    },
+    {
+      "entity_id": "todo.kueche",
+      "name": "Küche",
+      "domain": "todo",
+      "aliases": [],
+      "area_id": "kitchen",
+      "area_name": "Küche",
+      "area_aliases": [
+        "kueche",
+        "kitchen"
+      ],
+      "state": "1",
+      "attributes": {
+        "supported_features": 127
+      }
+    },
+    {
+      "entity_id": "notify.anna",
+      "name": "Anna",
+      "domain": "notify",
+      "aliases": [],
+      "area_id": null,
+      "area_name": null,
+      "area_aliases": [],
+      "state": "unknown",
+      "attributes": {}
+    },
+    {
+      "entity_id": "notify.kilian",
+      "name": "Kilian",
+      "domain": "notify",
+      "aliases": [],
+      "area_id": "office",
+      "area_name": "Büro",
+      "area_aliases": [
+        "buero",
+        "office"
+      ],
+      "state": "unknown",
+      "attributes": {}
+    },
+    {
+      "entity_id": "assist_satellite.kuche",
+      "name": "Sprachassistent Küche",
+      "domain": "assist_satellite",
+      "aliases": [],
+      "area_id": "kitchen",
+      "area_name": "Küche",
+      "area_aliases": [
+        "kueche",
+        "kitchen"
+      ],
+      "state": "idle",
+      "attributes": {}
+    },
+    {
+      "entity_id": "assist_satellite.wohnzimmer",
+      "name": "Sprachassistent Wohnzimmer",
+      "domain": "assist_satellite",
+      "aliases": [],
+      "area_id": "living_room",
+      "area_name": "Wohnzimmer",
+      "area_aliases": [
+        "living room"
+      ],
+      "state": "idle",
+      "attributes": {}
+    },
+    {
+      "entity_id": "media_player.kitchen_radio",
+      "name": "Radio",
+      "domain": "media_player",
+      "aliases": [],
+      "area_id": "kitchen",
+      "area_name": "Küche",
+      "area_aliases": [
+        "kueche",
+        "kitchen"
+      ],
+      "state": "playing",
+      "attributes": {
+        "volume_level": 0.4,
+        "media_title": "Test song"
+      }
+    },
+    {
+      "entity_id": "media_player.living_room_radio",
+      "name": "Radio",
+      "domain": "media_player",
+      "aliases": [],
+      "area_id": "living_room",
+      "area_name": "Wohnzimmer",
+      "area_aliases": [
+        "living room"
+      ],
+      "state": "paused",
+      "attributes": {
+        "volume_level": 0.3,
+        "media_title": "Test song"
+      }
+    },
+    {
+      "entity_id": "media_player.office_radio",
+      "name": "Radio",
+      "domain": "media_player",
+      "aliases": [],
+      "area_id": "office",
+      "area_name": "Büro",
+      "area_aliases": [
+        "buero",
+        "office"
+      ],
+      "state": "idle",
+      "attributes": {
+        "volume_level": 0.2,
+        "media_title": "Test song"
+      }
+    },
+    {
+      "entity_id": "scene.filmabend",
+      "name": "Filmabend",
+      "domain": "scene",
+      "aliases": [],
+      "area_id": "living_room",
+      "area_name": "Wohnzimmer",
+      "area_aliases": [
+        "living room"
+      ],
+      "state": "2026-10-30T20:00:00+00:00",
+      "attributes": {}
+    },
+    {
+      "entity_id": "scene.guten_morgen",
+      "name": "Guten Morgen",
+      "domain": "scene",
+      "aliases": [],
+      "area_id": "kitchen",
+      "area_name": "Küche",
+      "area_aliases": [
+        "kueche",
+        "kitchen"
+      ],
+      "state": "2026-10-31T07:00:00+00:00",
+      "attributes": {}
+    },
+    {
+      "entity_id": "script.gute_nacht",
+      "name": "Gute Nacht",
+      "domain": "script",
+      "aliases": [],
+      "area_id": null,
+      "area_name": null,
+      "area_aliases": [],
+      "state": "off",
+      "attributes": {}
+    },
+    {
+      "entity_id": "script.kaffee",
+      "name": "Kaffee",
+      "domain": "script",
+      "aliases": [],
+      "area_id": "kitchen",
+      "area_name": "Küche",
+      "area_aliases": [
+        "kueche",
+        "kitchen"
+      ],
+      "state": "off",
+      "attributes": {}
+    },
+    {
+      "entity_id": "timer.nudeln",
+      "name": "Nudeln",
+      "domain": "timer",
+      "aliases": [],
+      "area_id": "kitchen",
+      "area_name": "Küche",
+      "area_aliases": [
+        "kueche",
+        "kitchen"
+      ],
+      "state": "active",
+      "attributes": {}
+    },
+    {
+      "entity_id": "timer.waesche",
+      "name": "Wäsche",
+      "domain": "timer",
+      "aliases": [],
+      "area_id": "bathroom",
+      "area_name": "Badezimmer",
+      "area_aliases": [
+        "bathroom"
+      ],
+      "state": "paused",
+      "attributes": {}
+    },
+    {
+      "entity_id": "lock.haustur",
+      "name": "Haustür",
+      "domain": "lock",
+      "aliases": [],
+      "area_id": "hall",
+      "area_name": "Flur",
+      "area_aliases": [
+        "hall",
+        "hallway"
+      ],
+      "state": "locked",
+      "attributes": {}
+    },
+    {
+      "entity_id": "lock.gartentor",
+      "name": "Gartentor",
+      "domain": "lock",
+      "aliases": [],
+      "area_id": "garden",
+      "area_name": "Garten",
+      "area_aliases": [
+        "garden"
+      ],
+      "state": "unlocked",
+      "attributes": {}
+    },
+    {
+      "entity_id": "switch.kaffeemaschine",
+      "name": "Kaffeemaschine",
+      "domain": "switch",
+      "aliases": [],
+      "area_id": "kitchen",
+      "area_name": "Küche",
+      "area_aliases": [
+        "kueche",
+        "kitchen"
+      ],
+      "state": "off",
+      "attributes": {}
+    },
+    {
+      "entity_id": "switch.buro_werkbank",
+      "name": "Werkbanksteckdose",
+      "domain": "switch",
+      "aliases": [],
+      "area_id": "office",
+      "area_name": "Büro",
+      "area_aliases": [
+        "buero",
+        "office"
+      ],
+      "state": "on",
+      "attributes": {}
+    },
+    {
+      "entity_id": "fan.badezimmer",
+      "name": "Lüfter",
+      "domain": "fan",
+      "aliases": [],
+      "area_id": "bathroom",
+      "area_name": "Badezimmer",
+      "area_aliases": [
+        "bathroom"
+      ],
+      "state": "on",
+      "attributes": {
+        "percentage": 40,
+        "supported_features": 1
+      }
+    }
+  ],
+  "services": {
+    "light.turn_off": {
+      "description": "light.turn_off",
+      "target": {},
+      "fields": {}
+    },
+    "light.toggle": {
+      "description": "light.toggle",
+      "target": {},
+      "fields": {}
+    },
+    "cover.open_cover": {
+      "description": "cover.open_cover",
+      "target": {},
+      "fields": {}
+    },
+    "cover.close_cover": {
+      "description": "cover.close_cover",
+      "target": {},
+      "fields": {}
+    },
+    "cover.stop_cover": {
+      "description": "cover.stop_cover",
+      "target": {},
+      "fields": {}
+    },
+    "climate.turn_on": {
+      "description": "climate.turn_on",
+      "target": {},
+      "fields": {}
+    },
+    "climate.turn_off": {
+      "description": "climate.turn_off",
+      "target": {},
+      "fields": {}
+    },
+    "vacuum.start": {
+      "description": "vacuum.start",
+      "target": {},
+      "fields": {}
+    },
+    "vacuum.pause": {
+      "description": "vacuum.pause",
+      "target": {},
+      "fields": {}
+    },
+    "vacuum.stop": {
+      "description": "vacuum.stop",
+      "target": {},
+      "fields": {}
+    },
+    "vacuum.return_to_base": {
+      "description": "vacuum.return_to_base",
+      "target": {},
+      "fields": {}
+    },
+    "vacuum.locate": {
+      "description": "vacuum.locate",
+      "target": {},
+      "fields": {}
+    },
+    "media_player.media_play": {
+      "description": "media_player.media_play",
+      "target": {},
+      "fields": {}
+    },
+    "media_player.media_pause": {
+      "description": "media_player.media_pause",
+      "target": {},
+      "fields": {}
+    },
+    "media_player.media_stop": {
+      "description": "media_player.media_stop",
+      "target": {},
+      "fields": {}
+    },
+    "media_player.media_next_track": {
+      "description": "media_player.media_next_track",
+      "target": {},
+      "fields": {}
+    },
+    "scene.turn_on": {
+      "description": "scene.turn_on",
+      "target": {},
+      "fields": {}
+    },
+    "script.turn_on": {
+      "description": "script.turn_on",
+      "target": {},
+      "fields": {}
+    },
+    "script.turn_off": {
+      "description": "script.turn_off",
+      "target": {},
+      "fields": {}
+    },
+    "timer.start": {
+      "description": "timer.start",
+      "target": {},
+      "fields": {}
+    },
+    "timer.pause": {
+      "description": "timer.pause",
+      "target": {},
+      "fields": {}
+    },
+    "timer.cancel": {
+      "description": "timer.cancel",
+      "target": {},
+      "fields": {}
+    },
+    "timer.finish": {
+      "description": "timer.finish",
+      "target": {},
+      "fields": {}
+    },
+    "lock.lock": {
+      "description": "lock.lock",
+      "target": {},
+      "fields": {}
+    },
+    "lock.unlock": {
+      "description": "lock.unlock",
+      "target": {},
+      "fields": {}
+    },
+    "switch.turn_on": {
+      "description": "switch.turn_on",
+      "target": {},
+      "fields": {}
+    },
+    "switch.turn_off": {
+      "description": "switch.turn_off",
+      "target": {},
+      "fields": {}
+    },
+    "fan.turn_on": {
+      "description": "fan.turn_on",
+      "target": {},
+      "fields": {}
+    },
+    "fan.turn_off": {
+      "description": "fan.turn_off",
+      "target": {},
+      "fields": {}
+    },
+    "lawn_mower.start_mowing": {
+      "description": "lawn_mower.start_mowing",
+      "target": {},
+      "fields": {}
+    },
+    "lawn_mower.pause": {
+      "description": "lawn_mower.pause",
+      "target": {},
+      "fields": {}
+    },
+    "lawn_mower.dock": {
+      "description": "lawn_mower.dock",
+      "target": {},
+      "fields": {}
+    },
+    "light.turn_on": {
+      "description": "light.turn_on",
+      "target": {},
+      "fields": {
+        "brightness_pct": {
+          "selector": {
+            "number": {
+              "min": 0,
+              "max": 100,
+              "step": 1,
+              "unit_of_measurement": "%"
+            }
+          },
+          "description": "Final brightness in percent",
+          "required": false,
+          "filter": {
+            "attribute": {
+              "supported_color_modes": [
+                "brightness",
+                "hs",
+                "color_temp"
+              ]
+            }
+          }
+        },
+        "brightness_step_pct": {
+          "selector": {
+            "number": {
+              "min": -100,
+              "max": 100,
+              "step": 1,
+              "unit_of_measurement": "%"
+            }
+          },
+          "description": "Relative brightness change in percentage points",
+          "required": false,
+          "filter": {
+            "attribute": {
+              "supported_color_modes": [
+                "brightness",
+                "hs",
+                "color_temp"
+              ]
+            }
+          }
+        },
+        "color_temp_kelvin": {
+          "selector": {
+            "number": {
+              "min": 2000,
+              "max": 6500,
+              "step": 1,
+              "unit_of_measurement": "K"
+            }
+          },
+          "description": "Light color temperature in Kelvin",
+          "required": false,
+          "filter": {
+            "attribute": {
+              "supported_color_modes": [
+                "color_temp"
+              ]
+            }
+          }
+        },
+        "transition": {
+          "selector": {
+            "number": {
+              "min": 0,
+              "max": 300,
+              "step": 1,
+              "unit_of_measurement": "s"
+            }
+          },
+          "description": "Transition time",
+          "required": false,
+          "filter": {
+            "supported_features": [
+              32
+            ]
+          }
+        }
+      }
+    },
+    "cover.set_cover_position": {
+      "description": "cover.set_cover_position",
+      "target": {},
+      "fields": {
+        "position": {
+          "selector": {
+            "number": {
+              "min": 0,
+              "max": 100,
+              "step": 1,
+              "unit_of_measurement": "%"
+            }
+          },
+          "description": "Opening percentage: 0 closed, 100 open",
+          "required": true
+        }
+      }
+    },
+    "climate.set_temperature": {
+      "description": "climate.set_temperature",
+      "target": {},
+      "fields": {
+        "temperature": {
+          "selector": {
+            "number": {
+              "min": 16,
+              "max": 26,
+              "step": 1,
+              "unit_of_measurement": "°C"
+            }
+          },
+          "description": "Final thermostat target temperature",
+          "required": false,
+          "filter": {
+            "supported_features": [
+              1
+            ]
+          }
+        },
+        "target_temp_low": {
+          "selector": {
+            "number": {
+              "min": 16,
+              "max": 26,
+              "step": 1,
+              "unit_of_measurement": "°C"
+            }
+          },
+          "description": "Lower target",
+          "required": false,
+          "filter": {
+            "supported_features": [
+              2
+            ]
+          }
+        },
+        "target_temp_high": {
+          "selector": {
+            "number": {
+              "min": 16,
+              "max": 26,
+              "step": 1,
+              "unit_of_measurement": "°C"
+            }
+          },
+          "description": "Upper target",
+          "required": false,
+          "filter": {
+            "supported_features": [
+              2
+            ]
+          }
+        }
+      }
+    },
+    "climate.set_hvac_mode": {
+      "description": "climate.set_hvac_mode",
+      "target": {},
+      "fields": {
+        "hvac_mode": {
+          "selector": {
+            "select": {
+              "options": [
+                "off",
+                "heat",
+                "cool"
+              ]
+            }
+          },
+          "description": "Operating mode",
+          "required": true
+        }
+      }
+    },
+    "climate.set_preset_mode": {
+      "description": "climate.set_preset_mode",
+      "target": {},
+      "fields": {
+        "preset_mode": {
+          "selector": {
+            "select": {
+              "options": [
+                "none",
+                "eco",
+                "comfort"
+              ]
+            }
+          },
+          "description": "Thermostat preset",
+          "required": true
+        }
+      }
+    },
+    "vacuum.set_fan_speed": {
+      "description": "vacuum.set_fan_speed",
+      "target": {},
+      "fields": {
+        "fan_speed": {
+          "selector": {
+            "select": {
+              "options": [
+                "quiet",
+                "balanced",
+                "turbo"
+              ]
+            }
+          },
+          "description": "Suction mode",
+          "required": true
+        }
+      }
+    },
+    "media_player.volume_set": {
+      "description": "media_player.volume_set",
+      "target": {},
+      "fields": {
+        "volume_level": {
+          "selector": {
+            "number": {
+              "min": 0,
+              "max": 1,
+              "step": 0.01
+            }
+          },
+          "description": "Volume from 0 to 1",
+          "required": true
+        }
+      }
+    },
+    "todo.add_item": {
+      "description": "todo.add_item",
+      "target": {},
+      "fields": {
+        "item": {
+          "selector": {
+            "text": {}
+          },
+          "description": "Item name",
+          "required": true
+        },
+        "description": {
+          "selector": {
+            "text": {
+              "multiline": true
+            }
+          },
+          "description": "Extra details about the item",
+          "required": false,
+          "filter": {
+            "supported_features": [
+              64
+            ]
+          }
+        },
+        "due_date": {
+          "selector": {
+            "date": {}
+          },
+          "description": "Due date",
+          "required": false,
+          "filter": {
+            "supported_features": [
+              16
+            ]
+          }
+        },
+        "due_datetime": {
+          "selector": {
+            "datetime": {}
+          },
+          "description": "Due date and time",
+          "required": false,
+          "filter": {
+            "supported_features": [
+              32
+            ]
+          }
+        }
+      }
+    },
+    "todo.get_items": {
+      "description": "todo.get_items",
+      "target": {},
+      "fields": {
+        "status": {
+          "selector": {
+            "select": {
+              "multiple": true,
+              "options": [
+                "needs_action",
+                "completed"
+              ]
+            }
+          },
+          "description": "Which item statuses to return",
+          "required": false
+        }
+      },
+      "response": {
+        "optional": false
+      }
+    },
+    "notify.send_message": {
+      "description": "notify.send_message",
+      "target": {},
+      "fields": {
+        "message": {
+          "selector": {
+            "text": {}
+          },
+          "description": "Message text",
+          "required": true
+        },
+        "title": {
+          "selector": {
+            "text": {}
+          },
+          "description": "Message title",
+          "required": false
+        }
+      }
+    },
+    "assist_satellite.announce": {
+      "description": "assist_satellite.announce",
+      "target": {},
+      "fields": {
+        "message": {
+          "selector": {
+            "text": {}
+          },
+          "description": "Text to announce",
+          "required": true
+        },
+        "preannounce": {
+          "selector": {
+            "boolean": {}
+          },
+          "description": "Play a sound before speaking",
+          "required": false
+        }
+      }
+    },
+    "fan.set_percentage": {
+      "description": "fan.set_percentage",
+      "target": {},
+      "fields": {
+        "percentage": {
+          "selector": {
+            "number": {
+              "min": 0,
+              "max": 100,
+              "step": 1,
+              "unit_of_measurement": "%"
+            }
+          },
+          "description": "Fan speed in percent",
+          "required": true
+        }
+      }
+    },
+    "fan.oscillate": {
+      "description": "fan.oscillate",
+      "target": {},
+      "fields": {
+        "oscillating": {
+          "selector": {
+            "boolean": {}
+          },
+          "description": "Enable oscillation",
+          "required": true
+        }
+      }
+    }
+  }
+}
