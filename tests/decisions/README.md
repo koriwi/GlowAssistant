@@ -23,4 +23,6 @@ Only fields in `expect` are checked. Entity, area, parameter and property lists 
 
 Defaults use current code settings. `--settings FILE` loads settings from an export or run log; `.env` overrides model connections. `--confidence 0` disables confidence gates, but keeps relative probability thresholds.
 
+`--query-target-threshold` overrides the state-query entity cutoff. Tune it per model: replaying the stored D-model probabilities at `0.15` fixes its four incomplete query selections; that cutoff introduces false selections in the Jev log. The default stays `0.7`.
+
 Cases describe expected behavior, including known failures. The suite does not change prompts or repair decisions.

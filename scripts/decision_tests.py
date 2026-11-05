@@ -181,6 +181,7 @@ def parser():
     result.add_argument("--case", action="append", dest="case_ids", help="Run only this case ID; repeat for several cases.")
     result.add_argument("--limit", type=int, help="Maximum number of cases to run.")
     result.add_argument("--confidence", type=confidence, help="Override all confidence gates; relative thresholds stay unchanged.")
+    result.add_argument("--query-target-threshold", type=confidence, help="Override the relative threshold for state-query entity selection.")
     result.add_argument("--list", action="store_true", help="List cases without making any API calls.")
     result.add_argument("--output", type=Path, help="JSON report path; default benchmarks/decisions/TIMESTAMP-ID.json.")
     return result
@@ -245,6 +246,7 @@ def main(argv=None):
         exported.setdefault("general", {})["enable"] = False
         config_args = local_parser().parse_args(["-q", "decision tests"])
         config_args.confidence = args.confidence
+        config_args.query_target_threshold = args.query_target_threshold
         settings = model_settings(exported, config_args, os.environ)
         started = datetime.now(UTC)
         results = asyncio.run(run(cases, snapshot, settings))

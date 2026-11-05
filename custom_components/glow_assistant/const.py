@@ -132,7 +132,8 @@ TARGET_SCOPE_PROMPT = (
     "volume and vacuum are generic, even in singular form. Use the selected action to interpret a setting "
     "such as volume or temperature. Device names or qualifiers such as desk/ceiling lamp, left blind, "
     "balcony blind or Balkonrollladen identify specific devices or subsets. Percentages and other values "
-    "do not identify devices.\n"
+    "do not identify devices. Opening, closing, stopping or changing a setting does not change this "
+    "distinction. 'Stop the kitchen blinds' requests the whole generic blind category in that room.\n"
     "3. A named room must come from user text or referenced history. speaker_area is location metadata, "
     "never an explicitly named room, even when it contains a readable room name. Choose by target and room:\n"
     "- Generic category + named room(s) or whole-home scope: areas.\n"
@@ -152,6 +153,8 @@ TARGET_SCOPE_PROMPT = (
     "=> areas, office.\n"
     "- History 'make the office warmer', then 'one more degree warmer' or 'noch ein Grad wärmer' "
     "=> areas, office.\n"
+    "- History 'Mach die Heizung im Büro etwas wärmer', then 'Noch ein Grad wärmer' => areas, Büro. "
+    "Heizung/heating remains a generic category; a relative change does not name a thermostat.\n"
     "- History 'turn on the office desk lamp', then 'turn it off' => entities_explicit_area, office.\n"
     "For announcements, destination rooms are targets; names and rooms inside spoken/message text are "
     "payload. Room words in list names or item text are not room restrictions.\n"
@@ -162,8 +165,8 @@ TARGET_SCOPE_PROMPT = (
 TARGET_SCOPES = {
     "entities": "Room-independent lists, recipients, named timers, scenes or scripts; no explicit room restriction.",
     "entities_implied_area": "Specific named devices or subsets in the supplied speaker room; no named room.",
-    "entities_explicit_area": "Specific named devices or subsets in exactly one named room, including a room resolved from history.",
-    "areas": "Generic device category or announcement in named rooms or throughout the home; no specific device qualifier.",
+    "entities_explicit_area": "A named device or qualified subset, such as desk lamp or balcony blind, AND one user/history-named room. Generic blinds, heating or music do not qualify.",
+    "areas": "Generic lights, blinds, heating/thermostats, music/volume, vacuums or announcements in user/history-named rooms or throughout the home. No named device or qualified subset.",
     "implied_area": "Generic device category or announcement in the supplied speaker room; no named room or specific device qualifier. Includes here/hier.",
 }
 ANSWER_PROMPT = (

@@ -42,6 +42,20 @@ Enable **Smart-home answer → Enable LLM answer generation** to use the answer 
 To answer questions about other topics, enable the **General model**.
 When you disable this model, these questions receive the configured **Unsure reply**.
 
+### Tested deciders
+
+Results from [166 DE/EN cases](tests/decisions/README.md), tested on 2026-11-05. Text and numeric extraction are scored separately and do not affect the pass count. Prompt revisions differ between runs.
+
+All runs use `--confidence 0`. Settings below are flags for `scripts/decision_tests.py`; other thresholds use their defaults.
+
+| Model | Decisions passed | Text extraction score | Numeric extraction score | Mean duration | Settings |
+| --- | --- | --- | --- | --- | --- |
+| d3-mini Q4_K_M | **166/166 (100%)** | 77.4% | 93.9% | 945 ms | `--query-target-threshold 0.15` |
+| Jev 1.14 (OpenRouter) | 165/166 (99.4%) | 80.8% | 98.8% | 825 ms | `--query-target-threshold 0.7` |
+| d3-mini Q8_0 | 163/166 (98.2%) | 75.7% | 94.4% | 926 ms | `--query-target-threshold 0.15` |
+| d3-flash Q4_K_M | 155/166 (93.4%) | 85.7% | 93.4% | 1,575 ms | `--query-target-threshold 0.7` |
+| Clef Flash Q8_0 | 144/166 (86.7%) | 83.7% | 95.7% | 1,781 ms | `--query-target-threshold 0.5` |
+
 ## MCP tools
 
 Add HTTP MCP servers under **General model → MCP servers**.

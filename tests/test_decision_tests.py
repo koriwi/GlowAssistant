@@ -197,7 +197,7 @@ class DecisionRunnerCLITests(unittest.TestCase):
                       patch.dict("os.environ", {"DECIDER_URL": "http://decider:8321/v1/systemone", "DECIDER_MODEL": "test-model",
                                                 "DECIDER_API_KEY": "secret-decider-key"}, clear=True),
                       patch("scripts.decision_tests.run", new=AsyncMock(return_value=[copy.deepcopy(result)]))):
-                    code = runner.main(["--case", "general.knowledge.en", "--output", str(path)])
+                    code = runner.main(["--case", "general.knowledge.en", "--confidence", "0", "--query-target-threshold", "0.15", "--output", str(path)])
                 self.assertEqual(code, 0 if passed else 1)
                 report = json.loads(path.read_text())
                 self.assertEqual(report["model"], "test-model")
@@ -205,3 +205,6 @@ class DecisionRunnerCLITests(unittest.TestCase):
                 self.assertNotIn("secret-decider-key", path.read_text())
                 self.assertEqual(len(report["cases_sha256"]), 64)
                 self.assertFalse(report["settings"]["answer"]["enable"])
+                self.assertEqual(report["settings"]["decider"]["query_target_probability_threshold"], 0.15)
+                self.assertEqual(report["settings"]["decider"]["service_confidence"], 0)
+                self.assertEqual(report["settings"]["decider"]["action_entity_probability_threshold"], 0.8)
