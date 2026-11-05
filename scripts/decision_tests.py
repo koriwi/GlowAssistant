@@ -55,7 +55,8 @@ def value_score(expected, actual, scale=1):
 
 
 def load_cases(path, snapshot):
-    cases = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    cases = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
+             if line.strip() and not line.lstrip().startswith("#")]
     ids = set()
     entity_ids = {entity["entity_id"] for entity in snapshot["entities"]}
     area_ids = {entity["area_id"] for entity in snapshot["entities"] if entity.get("area_id")}

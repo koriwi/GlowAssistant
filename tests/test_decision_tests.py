@@ -1,6 +1,7 @@
 import copy
 import io
 import json
+import re
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -99,6 +100,26 @@ class DecisionScoringTests(unittest.TestCase):
         self.assertEqual(cases["todo.add.en"]["expect"]["score_values"]["item"], "red onions")
         self.assertTrue(any(case.get("speaker_area") for case in self.cases))
         self.assertTrue(any(case.get("history") for case in self.cases))
+
+    def test_disabled_references_are_skipped_but_invalid_active_json_is_rejected(self):
+        case = self.cases[0]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "cases.jsonl"
+            path.write_text('# Disabled reference\n  # ' + json.dumps(case) + '\n\n' + json.dumps(case) + '\n')
+            self.assertEqual(runner.load_cases(path, self.snapshot), [case])
+            path.write_text(path.read_text() + 'invalid active JSON\n')
+            with self.assertRaises(json.JSONDecodeError):
+                runner.load_cases(path, self.snapshot)
+
+    def test_active_queries_are_not_verbatim_default_prompt_examples(self):
+        def normalize(value):
+            return " " + " ".join(re.findall(r"\w+|%", value.casefold())) + " "
+
+        prompts = {key: normalize(value) for key, value in normalize_settings({})["decider"].items() if key.endswith("_prompt")}
+        for case in self.cases:
+            for name, prompt in prompts.items():
+                with self.subTest(case=case["id"], prompt=name):
+                    self.assertNotIn(normalize(case["query"]), prompt)
 
 
 class DecisionOnlyEngineTests(unittest.IsolatedAsyncioTestCase):

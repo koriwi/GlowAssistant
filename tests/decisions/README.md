@@ -4,7 +4,7 @@ Run with `python scripts/decision_tests.py`. Uses the shared HA engine and the d
 No HA connection, device actions, answer text or answer-model calls.
 
 - `snapshot.json`: fixed rooms, exposed entities, states, capabilities and action metadata.
-- `cases.jsonl`: one case per line. Add regressions here; extend the snapshot when needed.
+- `cases.jsonl`: one case per line. Lines starting with `#` are disabled references. Add regressions here; extend the snapshot when needed.
 - Reports: `benchmarks/decisions/`. Includes settings, prompts, inputs, responses, timings and scores. Credentials are removed.
 
 ```json
@@ -26,3 +26,5 @@ Defaults use current code settings. `--settings FILE` loads settings from an exp
 `--query-target-threshold` overrides the state-query entity cutoff. Tune it per model: replaying the stored D-model probabilities at `0.15` fixes its four incomplete query selections; that cutoff introduces false selections in the Jev log. The default stays `0.7`.
 
 Cases describe expected behavior, including known failures. The suite does not change prompts or repair decisions.
+
+Cases copied from prompt examples, close variants and their DE/EN partners are commented out. Fresh replacements follow each reference. IDs retain their behavior categories; queries, contexts and expected values can change. Compare the case hashes before comparing benchmark scores. Keep evaluation queries out of prompt examples.
