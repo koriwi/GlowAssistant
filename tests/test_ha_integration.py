@@ -65,9 +65,18 @@ class HomeAssistantContractTests(unittest.IsolatedAsyncioTestCase):
             api_key_selector = next(selector for field, selector in block.schema.schema.items() if field.schema == "api_key")
             self.assertEqual(api_key_selector.config["type"], "password")
             if key.schema == "decider":
+                decision_numbers = {field.schema for field in block.schema.schema
+                                    if field.schema == "confidence" or field.schema.endswith("probability_threshold")}
+                self.assertEqual(decision_numbers, {"confidence", "probability_threshold",
+                                                    "query_target_probability_threshold", "text_probability_threshold"})
                 prompt = next(selector for field, selector in block.schema.schema.items() if field.schema == "text_prompt")
                 confidence = next(selector for field, selector in block.schema.schema.items() if field.schema == "text_probability_threshold")
                 attributes = next(selector for field, selector in block.schema.schema.items() if field.schema == "max_attribute_chars")
+                noul = next(selector for field, selector in block.schema.schema.items() if field.schema == "use_noul")
+                noul_confidence = next(selector for field, selector in block.schema.schema.items() if field.schema == "confidence")
+                self.assertEqual(noul.selector_type, "boolean")
+                self.assertEqual(noul_confidence.config["min"], 0)
+                self.assertEqual(noul_confidence.config["max"], 1)
                 self.assertTrue(prompt.config["multiline"])
                 self.assertEqual(confidence.config["min"], 0)
                 self.assertEqual(confidence.config["max"], 1)

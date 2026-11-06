@@ -58,9 +58,9 @@ def text_request(prompt, service, instructions, parameter=None, field=None, fiel
     }
 
 
-def decode_text(response, words, threshold):
+def decode_text(response, words, threshold, *, noul_confidence=None):
     try:
-        selection = decode_selection(response, "text_words", words, threshold)
+        selection = decode_selection(response, "text_words", words, threshold, noul_confidence=noul_confidence)
     except ModelError as error:
         raise ModelError("Malformed text extraction response: invalid Choice probabilities.") from error
     selection["value"] = " ".join(words[key]["word"] for key in selection["selected_choices"])

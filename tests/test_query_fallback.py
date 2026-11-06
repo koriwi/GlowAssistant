@@ -59,7 +59,7 @@ class QueryFallbackTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(recovery["status"], "completed")
                 self.assertEqual(recovery["trigger"]["stage"], "target")
                 self.assertEqual(recovery["entities_before"], 3)
-                self.assertAlmostEqual(recovery["effective_probability_threshold"], 0.8 / 3)
+                self.assertAlmostEqual(recovery["effective_probability_threshold"], 0.5 / 3)
                 self.assertTrue(successful(result))
                 request = models.requests[5]
                 self.assertEqual(set(request[2]["query_fallback"]["criteria"]), {
@@ -85,7 +85,7 @@ class QueryFallbackTests(unittest.IsolatedAsyncioTestCase):
                 output = next(output for stage, _, output in events if stage == "query_fallback" and output)
                 self.assertEqual(output["trigger"]["stage"], "target")
                 decision = output["decisions"]["query_fallback"]
-                self.assertEqual(decision["minimum_confidence"], 0.8)
+                self.assertEqual(decision["minimum_confidence"], 0.5)
                 self.assertTrue(decision["confidence_gate_passed"])
                 self.assertIn("probability_threshold", decision)
                 report = {"result": result, "context": {"entities": 3, "actions": 0},
@@ -108,7 +108,7 @@ class QueryFallbackTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(response=response):
                 models = ScriptedModels(WRONG_DOMAIN + [response])
                 execute = AsyncMock()
-                result = await AgentEngine(normalize_settings({}), models, execute=execute).process("Last mowed?", "en", SNAPSHOT)
+                result = await AgentEngine(normalize_settings({"decider": {"confidence": 0.8}}), models, execute=execute).process("Last mowed?", "en", SNAPSHOT)
                 self.assertEqual(result["route"], "unsure")
                 self.assertEqual(result["query_fallback"]["selected_entity_ids"], [])
                 self.assertEqual(result["failures"][0]["stage"], "query_fallback")
@@ -216,15 +216,15 @@ class QueryFallbackTests(unittest.IsolatedAsyncioTestCase):
 class QueryFallbackSettingsTests(unittest.TestCase):
     def test_defaults_cli_overrides_validation_and_prompt_reset(self):
         defaults = normalize_settings({})
-        self.assertEqual(defaults["decider"]["query_fallback_confidence"], 0.8)
-        self.assertEqual(defaults["decider"]["query_fallback_probability_threshold"], 0.8)
-        args = local.parser().parse_args(["-q", "test", "--confidence", "0.2", "--query-fallback-confidence", "0.9",
-                                         "--query-fallback-threshold", "0.6"])
+        self.assertEqual(defaults["decider"]["confidence"], 0.5)
+        self.assertEqual(defaults["decider"]["probability_threshold"], 0.5)
+        args = local.parser().parse_args(["-q", "test", "--confidence", "0.9",
+                                         "--threshold", "0.6"])
         defaults["decider"].update(url="http://local/v1/systemone", model="test")
         settings = local.model_settings(defaults, args, {})
-        self.assertEqual(settings["decider"]["query_fallback_confidence"], 0.9)
-        self.assertEqual(settings["decider"]["query_fallback_probability_threshold"], 0.6)
-        for field in ("query_fallback_confidence", "query_fallback_probability_threshold"):
+        self.assertEqual(settings["decider"]["confidence"], 0.9)
+        self.assertEqual(settings["decider"]["probability_threshold"], 0.6)
+        for field in ("confidence", "probability_threshold"):
             invalid = copy.deepcopy(defaults)
             invalid["decider"][field] = 1.1
             with self.subTest(field=field), self.assertRaises(ValueError):

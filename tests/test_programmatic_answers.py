@@ -244,23 +244,23 @@ class ProgrammaticAnswerTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AnswerConfigurationTests(unittest.TestCase):
-    def test_property_threshold_reuses_settings_and_legacy_flag_without_global_confidence_override(self):
+    def test_property_selection_uses_the_general_threshold_independently_of_confidence(self):
         from custom_components.glow_assistant.state_properties import (
             INSTRUCTIONS,
         )
 
         settings = local_settings()
-        settings["decider"].update(state_property_confidence=0.25, state_property_prompt=" ")
+        settings["decider"].update(probability_threshold=0.25, state_property_prompt=" ")
         args = benchmark.parser().parse_args(["-q", "test", "--confidence", "0.9"])
         configured = benchmark.model_settings(settings, args, {})["decider"]
-        self.assertEqual(configured["state_property_confidence"], 0.25)
+        self.assertEqual(configured["probability_threshold"], 0.25)
         self.assertEqual(configured["state_property_prompt"], INSTRUCTIONS)
-        self.assertEqual(configured["service_confidence"], 0.9)
-        self.assertEqual(normalize_settings({"decider": {"state_property_confidence": 0}})["decider"]["state_property_confidence"], 0)
-        for flag in ("--state-property-threshold", "--state-property-confidence"):
+        self.assertEqual(configured["confidence"], 0.9)
+        self.assertEqual(normalize_settings({"decider": {"probability_threshold": 0}})["decider"]["probability_threshold"], 0)
+        for flag in ("--threshold",):
             with self.subTest(flag=flag):
                 args = benchmark.parser().parse_args(["-q", "test", "--confidence", "0.9", flag, "0.6"])
-                self.assertEqual(benchmark.model_settings(settings, args, {})["decider"]["state_property_confidence"], 0.6)
+                self.assertEqual(benchmark.model_settings(settings, args, {})["decider"]["probability_threshold"], 0.6)
         custom = normalize_settings({"decider": {"state_property_prompt": "My property instructions"}})
         self.assertEqual(custom["decider"]["state_property_prompt"], "My property instructions")
 

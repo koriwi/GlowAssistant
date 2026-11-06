@@ -121,18 +121,30 @@ def decision_details(questions, answers, config):
         answer = answers.get(name, {}) if isinstance(answers, dict) else {}
         if not isinstance(answer, dict):
             answer = {}
+        if question["type"] == "noul":
+            minimum = config["confidence"]
+            probability = answer.get("noul")
+            valid = finite_number(probability) and 0 <= probability <= 1
+            kept = valid and probability >= minimum
+            details[name] = {
+                "type": "noul", "candidate": name.split(":", 1)[1],
+                "probability": probability if valid else None, "minimum_confidence": minimum,
+                "effective_choice": "keep" if kept else "drop", "kept": kept,
+                "selection_basis": "noul_probability_at_or_above_minimum_confidence",
+            }
+            continue
         confidence = answer.get("confidence")
         confidence = confidence if finite_number(confidence) else None
         probability_fields = {
-            "area": "area_confidence",
-            "state_property": "state_property_confidence",
-            "optional_parameters": "parameter_probability_threshold",
-            "action_areas": "action_area_probability_threshold",
-            "action_entities": "action_entity_probability_threshold",
+            "area": "probability_threshold",
+            "state_property": "probability_threshold",
+            "optional_parameters": "probability_threshold",
+            "action_areas": "probability_threshold",
+            "action_entities": "probability_threshold",
             "query_targets": "query_target_probability_threshold",
-            "query_fallback": "query_fallback_probability_threshold",
+            "query_fallback": "probability_threshold",
             "text_words": "text_probability_threshold",
-            "select_values": "select_probability_threshold",
+            "select_values": "probability_threshold",
         }
         if name in probability_fields:
             threshold = config[probability_fields[name]]
@@ -146,7 +158,7 @@ def decision_details(questions, answers, config):
                 "selection_basis": "relative_probability_cutoff; overall confidence is not a filter",
             }
             if name == "query_fallback":
-                minimum = config["query_fallback_confidence"]
+                minimum = config["confidence"]
                 details[name].update(
                     minimum_confidence=minimum,
                     confidence_gate_passed=confidence is not None and confidence >= minimum,
@@ -154,7 +166,7 @@ def decision_details(questions, answers, config):
                     selection_basis="relative_probability_cutoff_and_minimum_confidence; none rejects fallback",
                 )
             continue
-        threshold = config["numeric_confidence"] if name in ("numeric_mode", "numeric_score") else config[f"{name}_confidence"]
+        threshold = config["confidence"]
         if question["type"] == "score":
             details[name] = {"type": "score", "score": answer.get("score"), "confidence": confidence,
                              "minimum_confidence": threshold, "probabilities": answer.get("probabilities", {})}

@@ -1,5 +1,6 @@
 import json
 
+from .action_targets import decode_selection
 from .client import ModelError
 from .validation import finite_number, probability_cutoff
 
@@ -79,7 +80,10 @@ def parameter_request(prompt, service, fields, instructions):
     }
 
 
-def decode_parameters(response, optional, threshold):
+def decode_parameters(response, optional, threshold, *, noul_confidence=None):
+    if noul_confidence is not None:
+        selection = decode_selection(response, "optional_parameters", optional, threshold, noul_confidence=noul_confidence)
+        return {**selection, "selected_parameters": selection["selected_choices"]}
     try:
         answer = response["answers"]["optional_parameters"]
         labels = set(optional) | {"none"}

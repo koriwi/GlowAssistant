@@ -113,8 +113,8 @@ class ProbabilitySelectionTests(unittest.TestCase):
 
 
 class ActionRoutingTests(unittest.IsolatedAsyncioTestCase):
-    async def run_route(self, scope, later=(), speaker_area=None, service="light.turn_off", data=None, settings=None, history=None, selected_parameters=(), prompt="test request"):
-        client = ScriptedModels([{"service": service}, {"target_scope": scope}, *later])
+    async def run_route(self, scope, later=(), speaker_area=None, service="light.turn_off", data=None, settings=None, history=None, selected_parameters=(), prompt="test request", confidences=None):
+        client = ScriptedModels([{"service": service}, {"target_scope": scope}, *later], confidences=confidences)
 
         events = []
         with patch.object(AgentEngine, "_extract_parameters", new_callable=AsyncMock), \
@@ -135,7 +135,7 @@ class ActionRoutingTests(unittest.IsolatedAsyncioTestCase):
     async def test_explicit_areas_are_final_targets_without_entity_decision(self):
         result, client, _ = await self.run_route("areas", [{"action_areas": answer({
             "area:office": 0.45, "area:kitchen": 0.4, "none": 0.15,
-        })}], settings=normalize_settings({"decider": {"action_area_confidence": 1}}))
+        })}], settings=normalize_settings({"decider": {"confidence": 1}}), confidences={"service": 1, "target_scope": 1})
         self.assertEqual(result["target"]["type"], "areas")
         self.assertEqual(result["target"]["area_ids"], ["office", "kitchen"])
         self.assertEqual(len(client.requests), 3)
@@ -155,7 +155,7 @@ class ActionRoutingTests(unittest.IsolatedAsyncioTestCase):
         result, client, events = await self.run_route("entities_explicit_area", [
             {"action_areas": answer({"area:office": 0.45, "area:kitchen": 0.4, "none": 0.15}, confidence=0.9)},
             {"action_entities": answer({"entity:light.desk": 0.45, "entity:light.ceiling": 0.4, "none": 0.15})},
-        ], settings=normalize_settings({"decider": {"action_area_probability_threshold": 0.99}}))
+        ], settings=normalize_settings({"decider": {"probability_threshold": 0.8}}))
         self.assertEqual([area["area_id"] for area in result["selected_areas"]], ["office"])
         self.assertEqual(result["target"]["entity_ids"], ["light.desk", "light.ceiling"])
         self.assertEqual(set(next(request for request in client.requests if "action_entities" in request[2])[2]["action_entities"]["criteria"]),
@@ -175,7 +175,7 @@ class ActionRoutingTests(unittest.IsolatedAsyncioTestCase):
                 ])
                 execute = AsyncMock(return_value=None)
                 events = []
-                result = await AgentEngine(normalize_settings({}), client, execute=execute,
+                result = await AgentEngine(normalize_settings({"decider": {"confidence": 0.8}}), client, execute=execute,
                                            trace=lambda *event: events.append(event)).process(
                     "Turn off the desk lamp in the office", "en", snapshot())
                 output = next(output for stage, _, output in events if stage == "action_areas" and output)

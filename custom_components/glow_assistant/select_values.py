@@ -43,10 +43,11 @@ def select_request(prompt, service, parameter, field, fields, instructions):
     }
 
 
-def decode_select(response, options, multiple, threshold, confidence):
+def decode_select(response, options, multiple, threshold, confidence, *, noul_confidence=None):
     question = "select_values" if multiple else "select"
     try:
-        selection = decode_selection(response, question, options, threshold if multiple else None)
+        selection = decode_selection(response, question, options, threshold if multiple else None,
+                                     noul_confidence=noul_confidence if multiple else None)
     except ModelError as error:
         raise ModelError("Malformed select extraction response.") from error
     if not multiple and response["answers"][question]["confidence"] < confidence:

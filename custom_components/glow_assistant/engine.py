@@ -2,7 +2,7 @@ import json
 from copy import deepcopy
 from time import perf_counter
 
-from .action_targets import decode_selection, selection_question
+from .action_targets import decode_selection, noul_request, selection_question
 from .actions import ActionError, action_calls, device_outcome, format_action_response
 from .client import ModelError
 from .const import (
@@ -139,6 +139,8 @@ class AgentEngine:
         self.decisions_only = decisions_only
         self.dry_run = dry_run or decisions_only
         self.execute = execute
+        config = settings["decider"]
+        self.noul_confidence = config["confidence"] if config["use_noul"] else None
 
     def _trace(self, stage, arguments, result=None):
         if result is None and stage != "failure":
@@ -152,16 +154,21 @@ class AgentEngine:
         self._trace("failure", details)
         self._trace("failure", {}, details)
 
-    async def _decide(self, result, stage, state, questions, summarize=None):
+    async def _decide(self, result, stage, state, questions, summarize=None, *, multi_select=False):
         config = self.settings["decider"]
+        noul = multi_select and self.noul_confidence is not None
+        if noul:
+            name, question = next(iter(questions.items()))
+            state, questions = noul_request(state, name, question)
         state = {**state, "language": result["language"]}
         if self.history:
             state = {**state, "history": self.history}
             questions = {name: {**question, "instructions": f"{question['instructions']} {HISTORY_INSTRUCTIONS}"}
                          for name, question in questions.items()}
         self._trace(stage, {
-            "model": config["model"], **state,
-            "candidate_counts": {name: len(question["criteria"]) for name, question in questions.items()},
+            "model": config["model"], **{key: value for key, value in state.items() if key != "selection_rules"},
+            "candidate_counts": {name: len(question.get("criteria", {})) if question["type"] != "noul" else 1
+                                 for name, question in questions.items()},
         })
         started = perf_counter()
         details = {"status": "incomplete"}
@@ -195,7 +202,7 @@ class AgentEngine:
 
     def _choice(self, response, question, options):
         self.stage = question
-        threshold = self.settings["decider"][f"{question}_confidence"]
+        threshold = self.settings["decider"]["confidence"]
         choice = read_choice(response, question, options, threshold, allow_unsure=question != "service")
         if choice == UNSURE:
             confidence = response["answers"][question]["confidence"]
@@ -247,7 +254,7 @@ class AgentEngine:
             GENERAL: "General knowledge or conversation unrelated to the home.",
         }
         def summarize_action(response):
-            selected = read_choice(response, "service", services, config["service_confidence"], allow_unsure=False)
+            selected = read_choice(response, "service", services, config["confidence"], allow_unsure=False)
             if selected not in actions:
                 return {}
             service = actions[selected]["service"]
@@ -370,7 +377,8 @@ class AgentEngine:
             options = property_options(members)
 
             def summarize_properties(response):
-                selection = decode_selection(response, "state_property", options, config["state_property_confidence"])
+                selection = decode_selection(response, "state_property", options, config["probability_threshold"],
+                                             noul_confidence=self.noul_confidence)
                 result["property_selection"] = {**selection, "selected_properties": selection["selected_choices"]}
                 result["state_properties"] = selection["selected_choices"]
                 return result["property_selection"]
@@ -385,7 +393,7 @@ class AgentEngine:
                 "prompt": prompt, "service": QUERY, "domain": result["domain"], "entities": selected_entities,
             }, {
                 "state_property": question,
-            }, summarize=summarize_properties)
+            }, summarize=summarize_properties, multi_select=True)
             if not result["state_properties"]:
                 raise Uncertain("state_property", "No requested state properties were retained.",
                                 "Name the requested properties. Review their probabilities and the state-property threshold.")
@@ -415,18 +423,26 @@ class AgentEngine:
             options[f"entity:{entity['entity_id']}"]["state"] = entity["state"]
 
         def summarize(response):
-            selection = decode_selection(response, "query_fallback", options, config["query_fallback_probability_threshold"])
-            answer = response["answers"]["query_fallback"]
-            confidence_passed = answer["confidence"] >= config["query_fallback_confidence"]
-            accepted = confidence_passed and answer["choice"] in options
+            selection = decode_selection(response, "query_fallback", options, config["probability_threshold"],
+                                         noul_confidence=self.noul_confidence)
+            if self.noul_confidence is None:
+                answer = response["answers"]["query_fallback"]
+                confidence = answer["confidence"]
+                minimum = config["confidence"]
+                confidence_passed = confidence >= minimum
+                matching_choice = answer["choice"] in options
+            else:
+                confidence, minimum = None, self.noul_confidence
+                confidence_passed = matching_choice = bool(selection["selected_choices"])
+            accepted = confidence_passed and matching_choice
             selected = selection["selected_choices"] if accepted else []
             threshold_choices = selection["selected_choices"]
-            selection["selected_choices"] = selected
+            selection.update(selected_choices=selected, confidence=confidence, minimum_confidence=minimum)
             result["query_fallback"].update(
-                **selection, confidence=answer["confidence"], minimum_confidence=config["query_fallback_confidence"],
+                **selection,
                 status="selected" if selected else "rejected", threshold_choices=threshold_choices,
                 selected_names=[options[key]["name"] for key in selected],
-                confidence_gate_passed=confidence_passed, matching_choice=answer["choice"] in options,
+                confidence_gate_passed=confidence_passed, matching_choice=matching_choice,
                 selected_entity_ids=[options[key]["entity_id"] for key in selected],
                 entities_before=len(entities), entities_after=len(selected),
             )
@@ -436,7 +452,7 @@ class AgentEngine:
                            "speaker_area": result.get("speaker_area"),
                            "trigger": result["query_fallback"]["trigger"]}, {
             "query_fallback": selection_question(options, config["query_fallback_prompt"]),
-        }, summarize=summarize)
+        }, summarize=summarize, multi_select=True)
         selection = result["query_fallback"]
         if not selection["selected_entity_ids"]:
             raise Uncertain("query_fallback", "The unfiltered entity fallback did not retain a confident matching target.",
@@ -461,7 +477,8 @@ class AgentEngine:
         options = {**areas, "all_areas": "The whole home, or no room resolved from the request, history or speaker_area; include exposed entities without a room."}
 
         def summarize(response):
-            selection = decode_selection(response, "area", options, config["area_confidence"])
+            selection = decode_selection(response, "area", options, config["probability_threshold"],
+                                         noul_confidence=self.noul_confidence)
             selected = [key for key in selection["selected_choices"] if key in areas]
             whole_home = not selected and "all_areas" in selection["selected_choices"]
             area_ids = {areas[key]["area_id"] for key in selected}
@@ -479,7 +496,7 @@ class AgentEngine:
 
         await self._decide(result, "area", {"prompt": result["request"], "speaker_area": result.get("speaker_area")}, {
             "area": selection_question(options, config["area_prompt"]),
-        }, summarize=summarize)
+        }, summarize=summarize, multi_select=True)
         selection = result["area_selection"]
         if not selection["effective_choices"]:
             raise Uncertain("area", "No matching areas were retained for this state query.",
@@ -583,13 +600,14 @@ class AgentEngine:
     async def _action_selection(self, result, stage, options, single=False):
         config = self.settings["decider"]
         kind = "area" if stage == "action_areas" else "entity"
-        threshold = None if single else config[f"action_{kind}_probability_threshold"]
+        threshold = None if single else config["probability_threshold"]
 
         def summarize(response):
-            selection = decode_selection(response, stage, options, threshold)
+            selection = decode_selection(response, stage, options, threshold,
+                                         noul_confidence=self.noul_confidence if not single else None)
             if single:
                 confidence = response["answers"][stage]["confidence"]
-                minimum = config["action_area_confidence"]
+                minimum = config["confidence"]
                 selection.update(confidence=confidence, minimum_confidence=minimum)
                 if confidence < minimum:
                     selection.update(selected_choices=[], reason=(
@@ -602,7 +620,7 @@ class AgentEngine:
             "prompt": result["request"], "service": result["service"], "target_scope": result["target_scope"],
             "selected_areas": result.get("selected_areas", []),
             **({"entity_counts": result["action_target_filter"]} if stage == "action_entities" else {}),
-        }, {stage: selection_question(options, config[f"action_{kind}_prompt"])}, summarize=summarize)
+        }, {stage: selection_question(options, config[f"action_{kind}_prompt"])}, summarize=summarize, multi_select=not single)
         selected = result[stage]["selected_choices"]
         if not selected:
             raise Uncertain(stage, result[stage].get("reason", "No unambiguous action targets were retained."),
@@ -628,17 +646,21 @@ class AgentEngine:
         result["required_parameters"] = [name for name, field in fields.items() if field.get("required", False)]
         if not optional:
             result["parameter_selection"] = {"selected_parameters": [], "probabilities": {},
-                                             "probability_threshold": config["parameter_probability_threshold"],
-                                             "effective_probability_threshold": probability_cutoff(config["parameter_probability_threshold"], 0),
+                                             "probability_threshold": config["probability_threshold"],
+                                             "effective_probability_threshold": probability_cutoff(config["probability_threshold"], 0),
                                              "real_option_count": 0}
+            if self.noul_confidence is not None:
+                result["parameter_selection"].update(selection_mode="independent_noul", minimum_confidence=self.noul_confidence,
+                                                     probability_threshold=None, effective_probability_threshold=None)
             return
 
         def summarize(response):
-            selection = decode_parameters(response, optional, config["parameter_probability_threshold"])
+            selection = decode_parameters(response, optional, config["probability_threshold"],
+                                          noul_confidence=self.noul_confidence)
             result["parameter_selection"] = selection
             return {**selection, "required_parameters": result["required_parameters"], "capability_filter": capabilities}
 
-        await self._decide(result, "optional_parameters", payload["state"], payload["questions"], summarize=summarize)
+        await self._decide(result, "optional_parameters", payload["state"], payload["questions"], summarize=summarize, multi_select=True)
 
     async def _extract_parameters(self, result, members):
         selected = result["required_parameters"] + result["parameter_selection"]["selected_parameters"]
@@ -675,19 +697,21 @@ class AgentEngine:
 
             def summarize(response):
                 if kind == "text":
-                    value = decode_text(response, options, config["text_probability_threshold"])
+                    value = decode_text(response, options, config["text_probability_threshold"], noul_confidence=self.noul_confidence)
                 elif kind == "select":
                     value = decode_select(response, options, payload["state"]["multiple"],
-                                          config["select_probability_threshold"], config["select_confidence"])
+                                          config["probability_threshold"], config["confidence"],
+                                          noul_confidence=self.noul_confidence)
                 else:
-                    value = decode_number(response, payload["state"], config["numeric_confidence"])
+                    value = decode_number(response, payload["state"], config["confidence"])
                 if kind == "text" and value["value"] == "" and name not in result["required_parameters"]:
                     value.update(status="skipped", reason="No words were retained for this optional text parameter.")
                 result.setdefault("parameter_extractions", {})[name] = {**value, "parameter": name, "type": kind,
                                                                          "supported_entity_ids": payload["state"]["supported_entity_ids"]}
                 return result["parameter_extractions"][name]
 
-            await self._decide(result, stage, payload["state"], payload["questions"], summarize=summarize)
+            multiple = kind == "text" or kind == "select" and payload["state"]["multiple"]
+            await self._decide(result, stage, payload["state"], payload["questions"], summarize=summarize, multi_select=multiple)
             extraction = result["parameter_extractions"][name]
             if extraction.get("status") == "skipped":
                 continue
@@ -769,7 +793,8 @@ class AgentEngine:
         options = {f"entity:{target['entity_id']}": {**target, "state": current_states[target["entity_id"]]} for target in targets}
 
         def summarize(response):
-            selected = decode_selection(response, "query_targets", options, config["query_target_probability_threshold"])
+            selected = decode_selection(response, "query_targets", options, config["query_target_probability_threshold"],
+                                        noul_confidence=self.noul_confidence)
             selected_ids = [options[key]["entity_id"] for key in selected["selected_choices"]]
             result["target_selection"] = {**selected, "selected_entity_ids": selected_ids,
                                            "entities_before": len(targets), "entities_after": len(selected_ids)}
@@ -777,7 +802,7 @@ class AgentEngine:
 
         await self._decide(result, "target", state, {
             "query_targets": selection_question(options, config["query_target_prompt"]),
-        }, summarize=summarize)
+        }, summarize=summarize, multi_select=True)
         selected = result["target_selection"]["selected_entity_ids"]
         if not selected:
             raise Uncertain("target", "No matching entities were retained by target selection.",
@@ -794,7 +819,7 @@ class AgentEngine:
         domains = {domain: domain for domain in sorted({entity["domain"] for entity in entities})}
 
         def summarize(response):
-            domain = read_choice(response, "domain", domains, config["domain_confidence"])
+            domain = read_choice(response, "domain", domains, config["confidence"])
             selected = {"selected_domain": None if domain == UNSURE else domain,
                         "kept_domains": [domain] if domain != UNSURE else [],
                         "entities_before": len(entities),

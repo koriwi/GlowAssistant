@@ -23,7 +23,14 @@ Only fields in `expect` are checked. Entity, area, parameter and property lists 
 
 Defaults use current code settings. `--settings FILE` loads settings from an export or run log; `.env` overrides model connections. `--confidence 0` disables confidence gates, but keeps relative probability thresholds.
 
-`--query-target-threshold` overrides the state-query entity cutoff. Tune it per model: replaying the stored D-model probabilities at `0.15` fixes its four incomplete query selections; that cutoff introduces false selections in the Jev log. The default stays `0.7`.
+`--confidence` sets one shared value for all confidence gates, including Noul. Default: `0.5`.
+`--noul` replaces multi-select Choice calls with batched independent Noul questions. Keep each candidate with `p(yes) >= confidence`; Choice relative thresholds are ignored. With Noul, confidence `0` retains every candidate.
+
+```bash
+python scripts/decision_tests.py --noul --confidence 0.5
+```
+
+`--threshold` sets the general relative cutoff (default `0.5`). `--text-threshold` sets text extraction (default `0.4`). `--query-target-threshold` overrides the state-query entity cutoff. Tune it per model: replaying the stored D-model probabilities at `0.15` fixes its four incomplete query selections; that cutoff introduces false selections in the Jev log. The default is `0.15`.
 
 Cases describe expected behavior, including known failures. The suite does not change prompts or repair decisions.
 

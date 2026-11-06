@@ -41,7 +41,7 @@ def settings_schema(values):
                         "tools": {"label": "Allowed tools (empty = all)", "selector": {"text": {"multiple": True}}},
                     },
                 })
-            elif field == "enable":
+            elif field in ("enable", "use_noul"):
                 selector = BooleanSelector()
             elif field.endswith("_prompt") or field == "prompt":
                 selector = TextSelector({"multiline": True})
@@ -61,7 +61,7 @@ def settings_schema(values):
                 selector = _number(100, 1000000)
             elif field == "temperature":
                 selector = _number(0, 2, 0.1)
-            elif field.endswith(("_confidence", "_probability_threshold")):
+            elif field == "confidence" or field.endswith("probability_threshold"):
                 selector = _number(0, 1, 0.01)
             fields[vol.Optional(field, default=value)] = selector
             if field == "api_key":

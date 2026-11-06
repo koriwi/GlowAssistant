@@ -98,7 +98,7 @@ class QueryAreaTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(selection["entities_before"], 7)
                 self.assertEqual(selection["entities_after"], 4)
                 self.assertEqual(selection["real_option_count"], 5)
-                self.assertEqual(selection["effective_probability_threshold"], 0.16)
+                self.assertEqual(selection["effective_probability_threshold"], 0.1)
                 self.assertEqual(result["domain_filter"]["entities_before"], 4)
                 self.assertEqual(result["domain_filter"]["entities_after"], 3)
                 candidates = client.requests[4][2]["query_targets"]["criteria"]
@@ -110,7 +110,7 @@ class QueryAreaTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(client.requests[1][1]["language"], language)
                 self.assertNotIn("entities", client.requests[1][1])
                 output = next(output for stage, _, output in events if stage == "area" and output)
-                self.assertEqual(output["decisions"]["area"]["probability_threshold"], 0.8)
+                self.assertEqual(output["decisions"]["area"]["probability_threshold"], 0.5)
                 self.assertNotIn("minimum_confidence", output["decisions"]["area"])
                 self.assertEqual(len(client.requests), 6)
                 self.assertFalse(client.chat_requests)

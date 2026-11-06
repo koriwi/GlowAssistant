@@ -22,16 +22,12 @@ from custom_components.glow_assistant.client import ModelClient, ModelError
 from custom_components.glow_assistant.engine import AgentEngine
 from custom_components.glow_assistant.run_logs import RunRecord
 from custom_components.glow_assistant.settings import (
-    DEFAULTS,
     normalize_settings,
     validate_settings,
 )
 from scripts import ROOT
 
 LOG_DIRECTORY = ROOT / "runs"
-
-CONFIDENCE_FIELDS = tuple(key for key in DEFAULTS["decider"] if key.endswith("_confidence")
-                          and key not in ("area_confidence", "state_property_confidence"))
 
 
 def confidence(value):
@@ -47,30 +43,16 @@ def parser():
     result.add_argument("--execute", action="store_true", help="Execute selected HA actions and allow general-model MCP calls; default is dry-run.")
     result.add_argument("--log-runs", action="store_true", help="Save each run to runs/successful or runs/unsuccessful; disabled by default.")
     result.add_argument("--llm-answer", action="store_true", help="Generate smart-home replies with the answer LLM; disabled by default.")
+    result.add_argument("--noul", action=argparse.BooleanOptionalAction, default=None,
+                        help="Use batched independent Noul decisions for multi-selection; default from HA settings, otherwise Choice.")
     result.add_argument("--max-attribute-chars", type=int,
                         help="Omit entity attributes larger than this many characters from query model context; default 1024 or saved HA setting.")
-    result.add_argument("--confidence", type=confidence, help="Override every decider confidence threshold.")
-    result.add_argument("--parameter-threshold", type=confidence,
-                        help="Relative probability threshold for optional parameters; independent of --confidence.")
-    result.add_argument("--action-area-threshold", type=confidence, help="Relative probability threshold for multiple action areas.")
-    result.add_argument("--action-entity-threshold", type=confidence, help="Relative probability threshold for action entities.")
+    result.add_argument("--confidence", type=confidence, help="Shared confidence cutoff for all single-choice, numeric and Noul decisions; default 0.5 or saved HA value.")
+    result.add_argument("--threshold", type=confidence,
+                        help="Shared relative threshold for areas, action entities, optional parameters, properties, fallback and multiple enum values; default 0.5.")
     result.add_argument("--query-target-threshold", type=confidence,
-                        help="Relative probability threshold for state-query entities; independent of --confidence.")
-    result.add_argument("--query-fallback-threshold", type=confidence,
-                        help="Relative entity threshold for the unfiltered state-query fallback; default 0.8. Requires its confidence gate too.")
-    result.add_argument("--query-area-threshold", "--area-confidence", type=confidence,
-                        help="Relative probability threshold for state-query areas; --area-confidence is a legacy alias. Default 0.8.")
-    result.add_argument("--state-property-threshold", "--state-property-confidence", type=confidence,
-                        help="Relative probability threshold for requested state properties; old confidence flag is an alias. Default 0.5.")
-    result.add_argument("--text-threshold", type=confidence, help="Relative probability threshold for item/message words.")
-    result.add_argument("--select-threshold", type=confidence, help="Relative probability threshold for multi-value select extraction; default 0.3.")
-    for field in CONFIDENCE_FIELDS:
-        flags = ["--" + field.replace("_", "-")]
-        if field == "domain_confidence":
-            flags.append("--domain-filter-confidence")
-        help_text = ("Minimum area confidence for specific entities in one explicit room; independent of --action-area-threshold."
-                     if field == "action_area_confidence" else None)
-        result.add_argument(*flags, type=confidence, help=help_text)
+                        help="Relative threshold for state-query entities; default 0.15.")
+    result.add_argument("--text-threshold", type=confidence, help="Relative threshold for text words; default 0.4.")
     result.add_argument("--language", help="Assist pipeline language to simulate; defaults to BENCHMARK_LANGUAGE or de.")
     result.add_argument("--speaker-area", help="Optional speaker room, e.g. Küche; omitted means location unknown.")
     result.add_argument("--json", action="store_true", help="Print complete decisions, trace and timings.")
@@ -88,34 +70,20 @@ def model_settings(exported, args, env, record=None):
     settings["answer"]["enable"] = args.llm_answer
     settings["log_runs"] = args.log_runs
     decider = settings["decider"]
+    if args.noul is not None:
+        decider["use_noul"] = args.noul
     if args.max_attribute_chars is not None:
         decider["max_attribute_chars"] = args.max_attribute_chars
     if not decider["api_key"] and urlsplit(decider["url"]).hostname == "openrouter.ai":
         decider["api_key"] = env.get("OPENROUTER_API_KEY", "").strip()
-    for field in CONFIDENCE_FIELDS:
-        if args.confidence is not None:
-            decider[field] = args.confidence
-        specific = getattr(args, field)
-        if specific is not None:
-            decider[field] = specific
-    if args.parameter_threshold is not None:
-        decider["parameter_probability_threshold"] = args.parameter_threshold
+    if args.confidence is not None:
+        decider["confidence"] = args.confidence
+    if args.threshold is not None:
+        decider["probability_threshold"] = args.threshold
     if args.query_target_threshold is not None:
         decider["query_target_probability_threshold"] = args.query_target_threshold
-    if args.query_fallback_threshold is not None:
-        decider["query_fallback_probability_threshold"] = args.query_fallback_threshold
-    if args.query_area_threshold is not None:
-        decider["area_confidence"] = args.query_area_threshold
-    if args.state_property_threshold is not None:
-        decider["state_property_confidence"] = args.state_property_threshold
     if args.text_threshold is not None:
         decider["text_probability_threshold"] = args.text_threshold
-    if args.select_threshold is not None:
-        decider["select_probability_threshold"] = args.select_threshold
-    for kind in ("area", "entity"):
-        value = getattr(args, f"action_{kind}_threshold")
-        if value is not None:
-            decider[f"action_{kind}_probability_threshold"] = value
     if record is not None:
         record.settings(settings)
     return validate_settings(settings)
@@ -337,7 +305,12 @@ def print_report(report, show_answer_input=False):
         threshold = selection["probability_threshold"]
         cutoff = selection["effective_probability_threshold"]
         option_count = selection["real_option_count"]
-        print(f"Probability cutoff: {threshold:g} / max(1, {option_count}) = {cutoff:.6g}; keep p >= cutoff")
+        noul = selection.get("selection_mode") == "independent_noul"
+        if noul:
+            cutoff = selection["minimum_confidence"]
+            print(f"Noul confidence: keep p(yes) >= {cutoff:g}; no division by option count")
+        else:
+            print(f"Probability cutoff: {threshold:g} / max(1, {option_count}) = {cutoff:.6g}; keep p >= cutoff")
         capabilities = result.get("parameter_capabilities", {})
         support = capabilities.get("field_support", {})
         total_targets = len(capabilities.get("target_entity_ids", []))
@@ -371,7 +344,8 @@ def print_report(report, show_answer_input=False):
             detail = ("all_areas" if output.get("all_areas") else
                       "selected: " + (", ".join(names[:5]) or "none") + (f" (+{len(names) - 5} more)" if len(names) > 5 else ""))
         if event["stage"] in ("target", "query_fallback") and "selected_entity_ids" in output:
-            detail = f"selected {output['entities_after']}/{output['entities_before']} (one Choice)"
+            mode = "batched Noul" if output.get("selection_mode") == "independent_noul" else "one Choice"
+            detail = f"selected {output['entities_after']}/{output['entities_before']} ({mode})"
             if event["stage"] == "query_fallback" and not output["confidence_gate_passed"]:
                 detail += f"; confidence < {output['minimum_confidence']:g}"
         if event["stage"].split(":", 1)[0] == "state_property" and "selected_properties" in output:

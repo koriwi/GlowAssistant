@@ -37,7 +37,56 @@ def selection_question(options, instructions):
                          "none": "No unambiguous requested target matches these candidates."}}
 
 
-def decode_selection(response, question, options, threshold=None):
+def noul_request(state, name, question):
+    candidates = {}
+    for key, value in question["criteria"].items():
+        if key in ("none", "unsure"):
+            continue
+        try:
+            candidates[key] = json.loads(value)
+        except (ValueError, TypeError):
+            candidates[key] = value
+    questions = {
+        f"{name}:{key}": {
+            "type": "noul",
+            "instructions": (
+                f"Does candidate {key!r} in state.candidates match the user's request under state.selection_rules? "
+                "Judge this candidate independently. Several candidates can match, or none. "
+                "Rules about choosing one option or distributing probability do not apply."
+            ),
+        }
+        for key in candidates
+    }
+    return {**state, "selection_rules": question["instructions"], "candidates": candidates}, questions
+
+
+def decode_noul_selection(response, question, options, minimum):
+    # Noul returns p(yes), without a separate Choice-style confidence score.
+    try:
+        answers = response["answers"]
+        if set(answers) != {f"{question}:{key}" for key in options}:
+            raise ModelError("Malformed target selection response: missing or unexpected Noul answers.")
+        probabilities = {}
+        for key in options:
+            answer = answers[f"{question}:{key}"]
+            value = answer["noul"]
+            if answer["type"] != "noul" or not finite_number(value) or not 0 <= value <= 1:
+                raise ModelError("Malformed target selection response: invalid Noul probability.")
+            probabilities[key] = value
+    except (KeyError, TypeError, AttributeError) as error:
+        raise ModelError("Malformed target selection response: invalid Noul answers.") from error
+    return {
+        "selected_choices": [key for key, value in probabilities.items() if value >= minimum],
+        "probabilities": probabilities, "selection_mode": "independent_noul",
+        "minimum_confidence": minimum, "probability_threshold": None,
+        "effective_probability_threshold": None, "real_option_count": len(options),
+        "selection_basis": "noul_probability_at_or_above_minimum_confidence",
+    }
+
+
+def decode_selection(response, question, options, threshold=None, *, noul_confidence=None):
+    if noul_confidence is not None:
+        return decode_noul_selection(response, question, options, noul_confidence)
     try:
         answer = response["answers"][question]
         labels = set(options) | {"none"}

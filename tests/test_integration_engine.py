@@ -42,12 +42,13 @@ def query_candidates(request):
 
 
 class ScriptedModels:
-    def __init__(self, choices, answers=None, confidence=0.9):
+    def __init__(self, choices, answers=None, confidence=0.9, confidences=None):
         self.choices = list(choices)
         self.requests = []
         self.answers = list(answers or ["Erledigt."])
         self.chat_requests = []
         self.confidence = confidence
+        self.confidences = confidences or {}
 
     async def decide(self, config, state, questions):
         self.requests.append(copy.deepcopy((config, state, questions)))
@@ -67,14 +68,14 @@ class ScriptedModels:
                         and (selected == "all" or key.removeprefix("entity:") in selected)] or ["none"]
                 probabilities = dict.fromkeys(question["criteria"], 0)
                 probabilities.update({key: 1 / len(keys) for key in keys})
-                answers[name] = {"type": "choice", "choice": keys[0], "confidence": self.confidence,
+                answers[name] = {"type": "choice", "choice": keys[0], "confidence": self.confidences.get(name, self.confidence),
                                  "probabilities": probabilities}
                 continue
             choice = choices.get(name, "unsure")
             probabilities = dict.fromkeys(question["criteria"], 0)
             if choice in probabilities:
                 probabilities[choice] = 1
-            answers[name] = {"type": "choice", "choice": choice, "confidence": self.confidence, "probabilities": probabilities}
+            answers[name] = {"type": "choice", "choice": choice, "confidence": self.confidences.get(name, self.confidence), "probabilities": probabilities}
         return {"answers": answers, "usage": {"input_tokens": 5}}
 
     async def chat(self, config, messages):
@@ -86,8 +87,8 @@ class ScriptedModels:
 
 
 class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
-    async def run_agent(self, choices, snapshot=SNAPSHOT, settings=None, answers=None, trace=None, history=None, language="de", prompt="test request", dry_run=None, speaker_area=None):
-        models = ScriptedModels(choices, answers)
+    async def run_agent(self, choices, snapshot=SNAPSHOT, settings=None, answers=None, trace=None, history=None, language="de", prompt="test request", dry_run=None, speaker_area=None, confidences=None):
+        models = ScriptedModels(choices, answers, confidences=confidences)
         config = copy.deepcopy(settings) if settings else normalize_settings({})
         # Existing query tests exercise LLM answer generation.
         config["answer"]["enable"] = bool(choices and choices[0].get("service") == "query_state")
@@ -154,7 +155,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
                    {"role": "assistant", "content": "Yes."}]
         settings = normalize_settings({"history_enabled": True, "decider": {
             "query_type_prompt": "Custom type rules", "binary_answer_prompt": "Custom binary rules",
-            "query_type_confidence": 0.2, "binary_answer_confidence": 0.3,
+            "confidence": 0.3,
         }})
         result, models = await self.run_agent([
             {"service": "query_state"}, {"area": "all_areas"}, {"domain": "binary_sensor"},
@@ -188,10 +189,11 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
                         choices.append({"query_type": "yes_no"})
                     choices.append({stage: choice})
                     choices.append({"query_fallback": "none"})
-                    settings = normalize_settings({"decider": {f"{stage}_confidence": threshold}})
+                    settings = normalize_settings({"decider": {"confidence": threshold}})
                     events = []
                     result, models = await self.run_agent(
                         choices, settings=settings, trace=lambda *event: events.append(event),
+                        confidences={"service": 1, "domain": 1, **({"query_type": 1} if stage == "binary_answer" else {})},
                     )
                     self.assertEqual(result["route"], "unsure")
                     self.assertEqual(result["answer"], settings["unsure_reply"])
@@ -292,11 +294,11 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
     async def test_scope_unsure_or_low_confidence_stops_after_scope_decision(self):
         for choice, threshold in (("unsure", 0), ("areas", 0.95)):
             with self.subTest(choice=choice):
-                settings = normalize_settings({"decider": {"target_scope_confidence": threshold}})
+                settings = normalize_settings({"decider": {"confidence": threshold}})
                 events = []
                 result, models = await self.run_agent([
                     {"service": "light.turn_off"}, {"target_scope": choice},
-                ], settings=settings, trace=lambda *event: events.append(event))
+                ], settings=settings, trace=lambda *event: events.append(event), confidences={"service": 1})
                 self.assertEqual(result["route"], "unsure")
                 self.assertEqual(result["failures"][0]["stage"], "target_scope")
                 self.assertEqual(len(models.requests), 2)
@@ -353,7 +355,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         }
         probabilities = {"brightness_pct": 0.29, "hue": 0.2, "child_lock": 0.01, "none": 0.5}
         events = []
-        settings = normalize_settings({"decider": {"parameter_prompt": "Custom parameter task", "parameter_probability_threshold": 0.15}})
+        settings = normalize_settings({"decider": {"parameter_prompt": "Custom parameter task", "probability_threshold": 0.15}})
         result, models = await self.run_parameter_stage([
             {"service": "light.turn_on"}, {"optional_parameters": {
                 "type": "choice", "choice": "none", "confidence": 0, "probabilities": probabilities,
@@ -505,7 +507,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_trace_explains_confidence_rejection(self):
         events = []
-        settings = normalize_settings({"decider": {"service_confidence": 0.95}})
+        settings = normalize_settings({"decider": {"confidence": 0.95}})
         result, _ = await self.run_agent(
             [{"service": "light.turn_off"}], settings=settings, trace=lambda *event: events.append(event),
         )
@@ -703,7 +705,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
 
 
     async def test_confidence_threshold_stops_action(self):
-        settings = normalize_settings({"decider": {"service_confidence": 0.95}})
+        settings = normalize_settings({"decider": {"confidence": 0.95}})
         result, models = await self.run_agent([{"service": "light.turn_off"}], settings=settings)
         self.assertEqual(result["route"], "unsure")
         self.assertEqual(len(models.requests), 1)
@@ -945,7 +947,7 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
         output = next(output for stage, _, output in events if stage == "target" and output)
         self.assertEqual(output["entities_before"], 54)
         self.assertEqual(output["entities_after"], 18)
-        self.assertEqual(output["decisions"]["query_targets"]["probability_threshold"], 0.7)
+        self.assertEqual(output["decisions"]["query_targets"]["probability_threshold"], 0.15)
 
 
     async def test_malformed_query_choice_stops_before_answer(self):
@@ -991,11 +993,11 @@ class IntegrationEngineTests(unittest.IsolatedAsyncioTestCase):
     async def test_uncertain_domain_selection_uses_separate_fallback_without_restoring_domain_candidates(self):
         for choice, threshold in (("unsure", 0.5), ("light", 0.95)):
             with self.subTest(choice=choice, threshold=threshold):
-                settings = normalize_settings({"decider": {"domain_confidence": threshold}})
+                settings = normalize_settings({"decider": {"confidence": threshold}})
                 events = []
                 result, models = await self.run_agent([
                     {"service": "query_state"}, {"area": "all_areas"}, {"domain": choice}, {"query_fallback": "none"},
-                ], settings=settings, trace=lambda *event: events.append(event))
+                ], settings=settings, trace=lambda *event: events.append(event), confidences={"service": 1})
                 self.assertEqual(result["route"], "unsure")
                 self.assertEqual(result["domain_filter"]["kept_domains"], [])
                 self.assertEqual(result["domain_filter"]["entities_after"], 0)
@@ -1054,10 +1056,10 @@ class IntegrationSettingsTests(unittest.TestCase):
         self.assertEqual(settings["decider"]["api_key"], "")
 
     def test_parameter_probability_setting_is_validated_independently_of_confidence(self):
-        self.assertEqual(self.local_settings()["decider"]["parameter_probability_threshold"], 0.5)
+        self.assertEqual(self.local_settings()["decider"]["probability_threshold"], 0.5)
         for value in (-0.1, 1.1, True, float("nan")):
             settings = self.local_settings()
-            settings["decider"]["parameter_probability_threshold"] = value
+            settings["decider"]["probability_threshold"] = value
             with self.subTest(value=value), self.assertRaises(ValueError):
                 validate_settings(settings)
         reset = normalize_settings({"decider": {"parameter_prompt": " "}})
@@ -1075,15 +1077,15 @@ class IntegrationSettingsTests(unittest.TestCase):
         self.assertEqual(normalize_settings({"decider": {"text_probability_threshold": 0.05}})["decider"]["text_probability_threshold"], 0.05)
 
     def test_saved_thresholds_are_preserved(self):
-        saved = normalize_settings({"decider": {"text_probability_threshold": 0.02, "parameter_probability_threshold": 0.3}})["decider"]
+        saved = normalize_settings({"decider": {"text_probability_threshold": 0.02, "probability_threshold": 0.3}})["decider"]
         self.assertEqual(saved["text_probability_threshold"], 0.02)
-        self.assertEqual(saved["parameter_probability_threshold"], 0.3)
+        self.assertEqual(saved["probability_threshold"], 0.3)
 
 
     def test_domain_selection_settings_are_preserved_and_blank_prompt_restores_default(self):
-        settings = normalize_settings({"decider": {"domain_prompt": "Custom rules", "domain_confidence": 0.2}})
+        settings = normalize_settings({"decider": {"domain_prompt": "Custom rules", "confidence": 0.2}})
         self.assertEqual(settings["decider"]["domain_prompt"], "Custom rules")
-        self.assertEqual(settings["decider"]["domain_confidence"], 0.2)
+        self.assertEqual(settings["decider"]["confidence"], 0.2)
         reset = normalize_settings({"decider": {"domain_prompt": " "}})
         self.assertEqual(reset["decider"]["domain_prompt"], DEFAULTS["decider"]["domain_prompt"])
 
@@ -1092,7 +1094,7 @@ class IntegrationSettingsTests(unittest.TestCase):
         old = {"domain_filter_prompt": "Old rules", "domain_filter_confidence": 0.3, "domain_filter_keep_uncertain": True}
         settings = normalize_settings({"decider": old})
         self.assertFalse(set(old) & set(settings["decider"]))
-        self.assertEqual(settings["decider"]["domain_confidence"], DEFAULTS["decider"]["domain_confidence"])
+        self.assertEqual(settings["decider"]["confidence"], DEFAULTS["decider"]["confidence"])
 
     def test_http_mcp_settings_are_normalized_without_changing_model_keys(self):
         settings = self.local_settings()
@@ -1156,14 +1158,11 @@ class IntegrationSettingsTests(unittest.TestCase):
 
     def test_invalid_ranges_and_models_are_rejected(self):
         for group, field, value in (
-            ("decider", "service_confidence", 1.1), ("decider", "url", "localhost:8321"),
+            ("decider", "confidence", 1.1), ("decider", "url", "localhost:8321"),
             ("decider", "text_probability_threshold", -0.1), ("decider", "text_probability_threshold", 1.1),
-            ("decider", "domain_confidence", -0.1), ("decider", "domain_confidence", 1.1),
-            ("decider", "query_type_confidence", -0.1), ("decider", "query_type_confidence", 1.1),
-            ("decider", "binary_answer_confidence", -0.1), ("decider", "binary_answer_confidence", 1.1),
-            ("decider", "target_scope_confidence", -0.1), ("decider", "target_scope_confidence", 1.1),
-            ("decider", "action_area_probability_threshold", -0.1), ("decider", "action_area_probability_threshold", 1.1),
-            ("decider", "action_entity_probability_threshold", -0.1), ("decider", "action_entity_probability_threshold", 1.1),
+            ("decider", "confidence", -0.1),
+            ("decider", "probability_threshold", -0.1), ("decider", "probability_threshold", 1.1),
+            ("decider", "probability_threshold", -0.1), ("decider", "probability_threshold", 1.1),
             ("answer", "model", ""), ("answer", "max_tokens", 0),
             ("answer", "max_input_chars", float("inf")), ("answer", "temperature", True),
         ):

@@ -199,6 +199,42 @@ class DecisionOnlyEngineTests(unittest.IsolatedAsyncioTestCase):
 
 
 class DecisionRunnerCLITests(unittest.TestCase):
+    def test_all_threshold_flags_override_settings_and_are_saved(self):
+        thresholds = {
+            "": ("probability_threshold", 0.11),
+            "query-target": ("query_target_probability_threshold", 0.12),
+            "text": ("text_probability_threshold", 0.13),
+        }
+        result = {"id": "test", "passed": True, "error": None, "scores": {}, "duration_ms": 12}
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "thresholds.json"
+            flags = [value for flag, (_, threshold) in thresholds.items() for value in ((f"--{flag}-threshold" if flag else "--threshold"), str(threshold))]
+            with (redirect_stdout(io.StringIO()), patch("scripts.decision_tests.load_dotenv"),
+                  patch.dict("os.environ", {"DECIDER_URL": "http://decider:8321/v1/systemone"}, clear=True),
+                  patch("scripts.decision_tests.run", new=AsyncMock(return_value=[result]))):
+                code = runner.main(["--case", "general.knowledge.en", "--confidence", "0", *flags, "--output", str(output)])
+            self.assertEqual(code, 0)
+            config = json.loads(output.read_text())["settings"]["decider"]
+            self.assertEqual(config["confidence"], 0)
+            for field, value in thresholds.values():
+                self.assertEqual(config[field], value)
+
+    def test_noul_flag_and_confidence_are_applied_and_saved_in_report(self):
+        result = {"id": "test", "passed": True, "error": None, "scores": {}, "duration_ms": 12}
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "noul.json"
+            with (redirect_stdout(io.StringIO()), patch("scripts.decision_tests.load_dotenv"),
+                  patch.dict("os.environ", {"DECIDER_URL": "http://decider:8321/v1/systemone"}, clear=True),
+                  patch("scripts.decision_tests.run", new=AsyncMock(return_value=[result])) as run):
+                code = runner.main(["--case", "general.knowledge.en", "--noul", "--confidence", "0.8", "--output", str(output)])
+            self.assertEqual(code, 0)
+            config = run.call_args.args[2]["decider"]
+            self.assertTrue(config["use_noul"])
+            self.assertEqual(config["confidence"], 0.8)
+            saved = json.loads(output.read_text())["settings"]["decider"]
+            self.assertTrue(saved["use_noul"])
+            self.assertEqual(saved["confidence"], 0.8)
+
     def test_list_needs_no_connection_or_credentials(self):
         output = io.StringIO()
         with (redirect_stdout(output), patch("scripts.decision_tests.ModelClient", side_effect=AssertionError("model call")),
@@ -227,5 +263,5 @@ class DecisionRunnerCLITests(unittest.TestCase):
                 self.assertEqual(len(report["cases_sha256"]), 64)
                 self.assertFalse(report["settings"]["answer"]["enable"])
                 self.assertEqual(report["settings"]["decider"]["query_target_probability_threshold"], 0.15)
-                self.assertEqual(report["settings"]["decider"]["service_confidence"], 0)
-                self.assertEqual(report["settings"]["decider"]["action_entity_probability_threshold"], 0.8)
+                self.assertEqual(report["settings"]["decider"]["confidence"], 0)
+                self.assertEqual(report["settings"]["decider"]["probability_threshold"], 0.5)

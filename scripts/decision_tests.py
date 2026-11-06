@@ -181,8 +181,12 @@ def parser():
     result.add_argument("--category", action="append", help="Run only this category; repeat for several categories.")
     result.add_argument("--case", action="append", dest="case_ids", help="Run only this case ID; repeat for several cases.")
     result.add_argument("--limit", type=int, help="Maximum number of cases to run.")
-    result.add_argument("--confidence", type=confidence, help="Override all confidence gates; relative thresholds stay unchanged.")
-    result.add_argument("--query-target-threshold", type=confidence, help="Override the relative threshold for state-query entity selection.")
+    result.add_argument("--confidence", type=confidence, help="Shared confidence cutoff for single-choice, numeric and Noul decisions; relative thresholds stay unchanged.")
+    result.add_argument("--noul", action=argparse.BooleanOptionalAction, default=None,
+                        help="Use batched independent Noul decisions for multi-selection instead of Choice.")
+    result.add_argument("--threshold", type=confidence, help="Shared relative threshold; default 0.5.")
+    result.add_argument("--query-target-threshold", type=confidence, help="Relative threshold for state-query entities; default 0.15.")
+    result.add_argument("--text-threshold", type=confidence, help="Relative threshold for text words; default 0.4.")
     result.add_argument("--list", action="store_true", help="List cases without making any API calls.")
     result.add_argument("--output", type=Path, help="JSON report path; default benchmarks/decisions/TIMESTAMP-ID.json.")
     return result
@@ -195,7 +199,8 @@ def percent(value):
 async def run(cases, snapshot, settings):
     results = []
     width = max(20, shutil.get_terminal_size((140, 24)).columns - 76)
-    print(f"model: {settings['decider']['model']}; {len(cases)} cases; decisions only", flush=True)
+    selection = f"Noul >= {settings['decider']['confidence']:g}" if settings['decider']['use_noul'] else "Choice with relative thresholds"
+    print(f"model: {settings['decider']['model']}; {len(cases)} cases; decisions only; multi-select: {selection}", flush=True)
     print(f"{'Result':<6}  {'Case':<28}  {'Checks':>6}  {'Text %':>6}  {'Num %':>6}  {'ms':>6}  Query", flush=True)
     async with aiohttp.ClientSession() as session:
         for case in cases:
@@ -246,8 +251,8 @@ def main(argv=None):
         exported = copy.deepcopy(saved.get("settings", saved))
         exported.setdefault("general", {})["enable"] = False
         config_args = local_parser().parse_args(["-q", "decision tests"])
-        config_args.confidence = args.confidence
-        config_args.query_target_threshold = args.query_target_threshold
+        for field in ("confidence", "threshold", "query_target_threshold", "text_threshold", "noul"):
+            setattr(config_args, field, getattr(args, field))
         settings = model_settings(exported, config_args, os.environ)
         started = datetime.now(UTC)
         results = asyncio.run(run(cases, snapshot, settings))

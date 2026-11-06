@@ -142,7 +142,7 @@ class ParameterEngineTests(unittest.IsolatedAsyncioTestCase):
                     "services": {"todo.add_item": {"fields": fields}}}
         events = []
         history = [{"role": "user", "content": "Use the shopping list"}]
-        settings = normalize_settings({"history_enabled": True, "decider": {"parameter_probability_threshold": 0.15}})
+        settings = normalize_settings({"history_enabled": True, "decider": {"probability_threshold": 0.15}})
         result = await AgentEngine(settings, client, trace=lambda *event: events.append(event), history=history, dry_run=True).process(prompt, "de", snapshot)
         self.assertEqual(result["parameters"], {"item": "nudeln", "description": "(weizen, fussilli, barilla)"})
         self.assertEqual(set(result["parameter_extractions"]), {"item", "description"})
@@ -384,9 +384,9 @@ class SelectValueTests(unittest.TestCase):
     def test_settings_reject_invalid_thresholds_and_preserve_custom_prompt(self):
         saved = normalize_settings({"decider": {"select_prompt": "Custom choices"}})
         self.assertEqual(saved["decider"]["select_prompt"], "Custom choices")
-        self.assertEqual(saved["decider"]["select_probability_threshold"], 0.3)
+        self.assertEqual(saved["decider"]["probability_threshold"], 0.5)
         self.assertEqual(normalize_settings({"decider": {"select_prompt": ""}})["decider"]["select_prompt"], SELECT_INSTRUCTIONS)
-        for field in ("select_confidence", "select_probability_threshold"):
+        for field in ("confidence", "probability_threshold"):
             with self.subTest(field=field), self.assertRaises(ValueError):
                 validate_settings({"decider": {"url": "http://local/v1/systemone", field: 1.1}})
 
@@ -421,7 +421,7 @@ class SelectParameterEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state["supported_entity_ids"], ["todo.shopping"])
         output = next(output for stage, _, output in events if stage == "select:status" and output)
         self.assertEqual(output["value"], ["needs_action"])
-        self.assertEqual(output["decisions"]["select_values"]["effective_probability_threshold"], 0.15)
+        self.assertEqual(output["decisions"]["select_values"]["effective_probability_threshold"], 0.25)
         self.assertNotIn(SELECT_INSTRUCTIONS, json.dumps(events))
 
     async def test_no_retained_status_stops_without_broadening_or_executing(self):

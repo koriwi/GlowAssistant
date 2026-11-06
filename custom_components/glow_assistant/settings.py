@@ -30,24 +30,11 @@ DEFAULTS = {
         "model": "typesafe/jev-1.14", "api_key": "",
         "timeout": 60, "max_input_chars": 100000,
         "max_attribute_chars": 1024,
-        "service_confidence": 0.8,
-        "area_confidence": 0.8,  # Legacy key; query areas now use a relative threshold.
-        "domain_confidence": 0.5,
-        "query_type_confidence": 0.7,
-        "binary_answer_confidence": 0.5,
-        "query_target_probability_threshold": 0.7,
-        "state_property_confidence": 0.5,  # Legacy key; state properties now use a relative threshold.
-        "query_fallback_confidence": 0.8,
-        "query_fallback_probability_threshold": 0.8,
-        "target_scope_confidence": 0,
-        "action_area_confidence": 0.8,
-        "action_area_probability_threshold": 0.8,
-        "action_entity_probability_threshold": 0.8,
-        "parameter_probability_threshold": 0.5,
+        "use_noul": False,
+        "confidence": 0.5,
+        "probability_threshold": 0.5,
+        "query_target_probability_threshold": 0.15,
         "text_probability_threshold": 0.4,
-        "numeric_confidence": 0,
-        "select_confidence": 0,
-        "select_probability_threshold": 0.3,
         "service_prompt": SERVICE_PROMPT,
         "area_prompt": AREA_PROMPT,
         "domain_prompt": DOMAIN_PROMPT,
@@ -130,13 +117,12 @@ def validate_settings(data):
             _range(config, "max_tokens", 1, 100000, group, integer=True)
             _range(config, "temperature", 0, 2, group)
     decider = settings["decider"]
+    if not isinstance(decider["use_noul"], bool):
+        raise TypeError("decider: use_noul must be a boolean.")
     _range(decider, "max_attribute_chars", 1, 2000000, "decider", integer=True)
-    for field in ("area_confidence", "parameter_probability_threshold", "action_area_probability_threshold", "action_entity_probability_threshold",
-                  "query_target_probability_threshold", "text_probability_threshold", "select_probability_threshold", "state_property_confidence",
-                  "query_fallback_probability_threshold"):
+    for field in ("probability_threshold", "query_target_probability_threshold", "text_probability_threshold"):
         _range(decider, field, 0, 1, "decider")
-    for stage in ("service", "domain", "query_type", "binary_answer", "query_fallback", "target_scope", "action_area", "numeric", "select"):
-        _range(decider, f"{stage}_confidence", 0, 1, "decider")
+    _range(decider, "confidence", 0, 1, "decider")
     if not isinstance(settings["log_runs"], bool):
         raise TypeError("log_runs must be a boolean.")
     if not isinstance(settings["history_enabled"], bool):

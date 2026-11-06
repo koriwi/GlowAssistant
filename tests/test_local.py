@@ -23,28 +23,43 @@ def settings():
 
 
 class BenchmarkSettingsTests(unittest.TestCase):
-    def test_query_area_threshold_reuses_the_saved_setting_and_ignores_global_confidence(self):
+    def test_noul_toggle_and_shared_confidence_overrides(self):
+        args = benchmark.parser().parse_args(["-q", "test", "--noul", "--confidence", "0.2"])
+        config = benchmark.model_settings(settings(), args, {})["decider"]
+        self.assertTrue(config["use_noul"])
+        self.assertEqual(config["confidence"], 0.2)
+        self.assertEqual(config["query_target_probability_threshold"], 0.15)
+        args = benchmark.parser().parse_args(["-q", "test", "--confidence", "0.3"])
         exported = settings()
-        exported["decider"]["area_confidence"] = 0.25
+        exported["decider"]["use_noul"] = True
+        self.assertEqual(benchmark.model_settings(exported, args, {})["decider"]["confidence"], 0.3)
+        self.assertTrue(benchmark.model_settings(exported, args, {})["decider"]["use_noul"])
+        args = benchmark.parser().parse_args(["-q", "test", "--no-noul"])
+        self.assertFalse(benchmark.model_settings(exported, args, {})["decider"]["use_noul"])
+
+    def test_general_threshold_preserves_saved_values_and_is_independent_of_confidence(self):
+        exported = settings()
+        exported["decider"]["probability_threshold"] = 0.25
         args = benchmark.parser().parse_args(["-q", "test", "--confidence", "0.95"])
         config = benchmark.model_settings(exported, args, {})["decider"]
-        self.assertEqual(config["area_confidence"], 0.25)
-        self.assertEqual(config["service_confidence"], 0.95)
-        for flag in ("--query-area-threshold", "--area-confidence"):
+        self.assertEqual(config["probability_threshold"], 0.25)
+        self.assertEqual(config["confidence"], 0.95)
+        for flag in ("--threshold",):
             with self.subTest(flag=flag):
                 args = benchmark.parser().parse_args(["-q", "test", "--confidence", "0.95", flag, "0.6"])
-                self.assertEqual(benchmark.model_settings(exported, args, {})["decider"]["area_confidence"], 0.6)
+                self.assertEqual(benchmark.model_settings(exported, args, {})["decider"]["probability_threshold"], 0.6)
 
-    def test_select_extraction_settings_are_independent_of_parameter_detection(self):
-        args = benchmark.parser().parse_args(["-q", "test", "--parameter-threshold", "0.5", "--select-threshold", "0.6",
-                                             "--confidence", "0.1", "--select-confidence", "0.8"])
+    def test_general_threshold_leaves_text_and_query_thresholds_separate(self):
+        args = benchmark.parser().parse_args(["-q", "test", "--threshold", "0.6",
+                                             "--confidence", "0.1"])
         config = benchmark.model_settings(settings(), args, {})["decider"]
-        self.assertEqual(config["parameter_probability_threshold"], 0.5)
-        self.assertEqual(config["select_probability_threshold"], 0.6)
-        self.assertEqual(config["select_confidence"], 0.8)
+        self.assertEqual(config["probability_threshold"], 0.6)
+        self.assertEqual(config["text_probability_threshold"], 0.4)
+        self.assertEqual(config["query_target_probability_threshold"], 0.15)
+        self.assertEqual(config["confidence"], 0.1)
 
     def test_environment_connections_and_specific_thresholds_override_exported_settings(self):
-        args = benchmark.parser().parse_args(["--query", "test", "--confidence", "0.3", "--area-confidence", "0.7"])
+        args = benchmark.parser().parse_args(["--query", "test", "--confidence", "0.3", "--threshold", "0.7"])
         exported = settings()
         exported["decider"]["query_target_prompt"] = "Custom rules from HA"
         result = benchmark.model_settings(exported, args, {
@@ -56,10 +71,9 @@ class BenchmarkSettingsTests(unittest.TestCase):
         self.assertEqual(result["decider"]["api_key"], "local-key")
         self.assertEqual(result["answer"]["api_key"], "answer-key")
         self.assertEqual(result["decider"]["query_target_prompt"], "Custom rules from HA")
-        for field in benchmark.CONFIDENCE_FIELDS:
-            self.assertEqual(result["decider"][field], 0.7 if field == "area_confidence" else 0.3)
-        self.assertEqual(result["decider"]["area_confidence"], 0.7)
-        self.assertEqual(exported["decider"]["area_confidence"], 0.8)
+        self.assertEqual(result["decider"]["confidence"], 0.3)
+        self.assertEqual(result["decider"]["probability_threshold"], 0.7)
+        self.assertEqual(exported["decider"]["probability_threshold"], 0.5)
 
     def test_legacy_openrouter_key_is_only_used_for_openrouter_decider(self):
         args = benchmark.parser().parse_args(["--query", "test"])
@@ -71,39 +85,42 @@ class BenchmarkSettingsTests(unittest.TestCase):
         self.assertEqual(cloud["decider"]["api_key"], "cloud-key")
         self.assertEqual(cloud["answer"]["api_key"], "")
 
-    def test_previous_domain_filter_confidence_flag_sets_the_new_single_choice_threshold(self):
-        args = benchmark.parser().parse_args([
-            "--query", "test", "--domain-filter-confidence", "0.2",
-            "--query-type-confidence", "0.3", "--binary-answer-confidence", "0.4",
-        ])
-        result = benchmark.model_settings(settings(), args, {})
-        self.assertEqual(result["decider"]["domain_confidence"], 0.2)
-        self.assertEqual(result["decider"]["query_type_confidence"], 0.3)
-        self.assertEqual(result["decider"]["binary_answer_confidence"], 0.4)
+    def test_stage_specific_confidence_flags_are_removed(self):
+        for flag in ("--service-confidence", "--domain-confidence", "--domain-filter-confidence", "--query-type-confidence",
+                     "--binary-answer-confidence", "--query-fallback-confidence", "--target-scope-confidence",
+                     "--action-area-confidence", "--numeric-confidence", "--select-confidence", "--noul-confidence"):
+            with self.subTest(flag=flag), redirect_stdout(io.StringIO()), \
+                    patch("sys.stderr", new_callable=io.StringIO), self.assertRaises(SystemExit):
+                benchmark.parser().parse_args(["-q", "test", flag, "0.2"])
+
+    def test_grouped_threshold_flags_and_legacy_aliases_are_removed(self):
+        for flag in ("--query-area-threshold", "--query-fallback-threshold", "--state-property-threshold",
+                     "--action-area-threshold", "--action-entity-threshold", "--parameter-threshold", "--select-threshold",
+                     "--area-confidence", "--state-property-confidence"):
+            with self.subTest(flag=flag), patch("sys.stderr", new_callable=io.StringIO), self.assertRaises(SystemExit):
+                benchmark.parser().parse_args(["-q", "test", flag, "0.2"])
 
     def test_invalid_confidence_values_are_rejected(self):
         for value in ("-0.1", "1.1", "nan", "inf"):
             with self.subTest(value=value), self.assertRaises(argparse.ArgumentTypeError):
                 benchmark.confidence(value)
 
-    def test_parameter_threshold_is_separate_from_global_confidence(self):
-        args = benchmark.parser().parse_args(["--query", "test", "--confidence", "0.9", "--parameter-threshold", "0.2"])
+    def test_general_threshold_is_separate_from_confidence(self):
+        args = benchmark.parser().parse_args(["--query", "test", "--confidence", "0.9", "--threshold", "0.2"])
         configured = benchmark.model_settings(settings(), args, {})
-        self.assertEqual(configured["decider"]["service_confidence"], 0.9)
-        self.assertEqual(configured["decider"]["parameter_probability_threshold"], 0.2)
+        self.assertEqual(configured["decider"]["confidence"], 0.9)
+        self.assertEqual(configured["decider"]["probability_threshold"], 0.2)
         args = benchmark.parser().parse_args(["--query", "test", "--confidence", "0"])
-        self.assertEqual(benchmark.model_settings(settings(), args, {})["decider"]["parameter_probability_threshold"], 0.5)
+        self.assertEqual(benchmark.model_settings(settings(), args, {})["decider"]["probability_threshold"], 0.5)
 
-    def test_action_selection_thresholds_are_independent_of_global_confidence(self):
+    def test_general_threshold_overrides_saved_action_selection_cutoff(self):
         args = benchmark.parser().parse_args([
-            "--query", "test", "--confidence", "0.9", "--action-area-confidence", "0.85",
-            "--action-area-threshold", "0.1", "--action-entity-threshold", "0.2",
+            "--query", "test", "--confidence", "0.9",
+            "--threshold", "0.2",
         ])
         configured = benchmark.model_settings(settings(), args, {})["decider"]
-        self.assertEqual(configured["service_confidence"], 0.9)
-        self.assertEqual(configured["action_area_confidence"], 0.85)
-        self.assertEqual(configured["action_area_probability_threshold"], 0.1)
-        self.assertEqual(configured["action_entity_probability_threshold"], 0.2)
+        self.assertEqual(configured["confidence"], 0.9)
+        self.assertEqual(configured["probability_threshold"], 0.2)
 
     def test_text_threshold_is_independent_of_global_confidence_and_old_values(self):
         args = benchmark.parser().parse_args(["-q", "Add milk", "--confidence", "0.9", "--text-threshold", "0.04"])
@@ -111,15 +128,15 @@ class BenchmarkSettingsTests(unittest.TestCase):
         exported["decider"].update(text_confidence=1, text_keep_uncertain=True)
         decider = benchmark.model_settings(exported, args, {})["decider"]
         self.assertEqual(decider["text_probability_threshold"], 0.04)
-        self.assertEqual(decider["service_confidence"], 0.9)
+        self.assertEqual(decider["confidence"], 0.9)
         self.assertNotIn("text_confidence", decider)
 
-    def test_query_target_probability_threshold_is_separate_from_confidence_and_parameter_threshold(self):
+    def test_query_target_threshold_is_separate_from_confidence_and_general_threshold(self):
         args = benchmark.parser().parse_args(["-q", "test", "--confidence", "0.9", "--query-target-threshold", "0.04"])
         configured = benchmark.model_settings(settings(), args, {})["decider"]
         self.assertEqual(configured["query_target_probability_threshold"], 0.04)
-        self.assertEqual(configured["service_confidence"], 0.9)
-        self.assertEqual(configured["parameter_probability_threshold"], 0.5)
+        self.assertEqual(configured["confidence"], 0.9)
+        self.assertEqual(configured["probability_threshold"], 0.5)
 
 
 class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
@@ -132,7 +149,7 @@ class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
         fixture = SelectParameterEngineTests()
         exported = self.exported()
         exported["snapshot"] = fixture.snapshot()
-        args = benchmark.parser().parse_args(["-q", "Was muss noch eingekauft werden?", "--select-threshold", "0.6"])
+        args = benchmark.parser().parse_args(["-q", "Was muss noch eingekauft werden?", "--threshold", "0.6"])
         client = ScriptedModels(fixture.choices({"value:needs_action": 0.85, "value:completed": 0.1, "none": 0.05}))
         with (patch("scripts.local.fetch_snapshot", new=AsyncMock(return_value=exported)),
               patch("scripts.local.aiohttp.ClientSession", return_value=AsyncMock()), patch("scripts.local.ModelClient", return_value=client)):
