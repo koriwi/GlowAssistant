@@ -8,6 +8,9 @@
 
 # Repository
 
+- Decision parameter cleanup: [commit `07ac787`](https://github.com/koriwi/GlowAssistant/commit/07ac7870d7f9e057a6d2511a20880c3ff0426a63) (`reduce parameter count`), released in [v0.17.0](https://github.com/koriwi/GlowAssistant/releases/tag/v0.17.0). Removed per-stage confidence and threshold settings/flags. Older parameter references below are historical; do not restore them.
+- Only four decision settings remain: `confidence` / `--confidence` (0.5), `probability_threshold` / `--threshold` (0.5), `query_target_probability_threshold` / `--query-target-threshold` (0.15), and `text_probability_threshold` / `--text-threshold` (0.4). Noul uses shared confidence; Choice multi-selection uses the applicable relative threshold. See `architecture.md`.
+
 - No settings or prompt migrations. Keep each prompt as a direct default string. The sole user resets fields manually in HA.
 
 - State-query recovery: only after `query_state` was selected, an unsure or empty decision triggers one Choice over all exposed snapshot entities without area/domain filtering. Separate `query_fallback_confidence` and `query_fallback_probability_threshold` both default to 0.8; require the confidence gate, a real entity as top choice and the usual relative probability cutoff. A failed fallback or downstream unsure stops without retrying. Never recover service routing, actions or ModelError responses. Continue with recovered entities and their actual domains; recheck yes/no when needed. Keep the original stop and fallback gates/selections/usage/timing in native debug and logs. Prompt and thresholds live under Decider; CLI uses `--query-fallback-confidence` and `--query-fallback-threshold`.
